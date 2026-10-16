@@ -26,6 +26,6 @@ const packaged = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, pa
 console.log(JSON.stringify({ version: info.version, machine: info.machine, rows, ...packaged }));
 await win.screenshot({ path: path.join(shots, "packaged.png") });
 await app.close();
-const ok = packaged.packaged && packaged.shell === "1.0.0" && rows > 0;
+const ok = packaged.packaged && packaged.shell === "2.0.0" && rows > 0;
 console.log(ok ? "PASS packaged app starts through the shell and lists conversations" : "FAIL");
 process.exit(ok ? 0 : 1);
