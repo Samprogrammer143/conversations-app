@@ -130,13 +130,22 @@ if ($workspace -and -not (Test-Path $registry) -and -not $Check) {
 
 # ---------------------------------------------------------------- 4. the app
 Step 4 "The Conversations app"
-$installed = Test-Path (Join-Path $env:LOCALAPPDATA "Programs\Conversations\Conversations.exe")
+$exe = Join-Path $env:LOCALAPPDATA "Programs\Conversations\Conversations.exe"
 $setup = Get-ChildItem $Here -Filter "Conversations Setup *.exe" | Sort-Object { [version]($_.BaseName -replace '^Conversations Setup ', '') } | Select-Object -Last 1
-if ($installed) { Done "Already installed (it updates itself)" }
+# The version the installed copy came from (its installer's): an older one is upgraded,
+# since installs before 0.5 can't take their updates from the app's own repository.
+$have = $null
+if (Test-Path $exe) { try { $have = [version]((Get-Item $exe).VersionInfo.ProductVersion) } catch { $have = [version]"0.0.0" } }
+$want = if ($setup) { [version](($setup.BaseName -replace '^Conversations Setup ', '') + ".0") } else { $null }
+if ($have -and (-not $want -or $have -ge $want)) { Done "Already installed (it updates itself)" }
 elseif (-not $setup) { Stop-Setup "The app's installer isn't next to this file. Copy `"Conversations Setup x.y.z.exe`" here and run this again." }
-elseif ($Check) { Todo "$($setup.Name) would be installed" }
+elseif ($Check) { if ($have) { Todo "The installed app ($have) would be upgraded to $($setup.Name)" } else { Todo "$($setup.Name) would be installed" } }
 else {
-  Say "      Installing $($setup.Name) ..."
+  if ($have) {
+    Say "      Upgrading the installed app to $($setup.Name) (it closes for a moment) ..."
+    Get-Process Conversations -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+  } else { Say "      Installing $($setup.Name) ..." }
   Say "      Windows may warn that it's from an unknown publisher: choose More info, then Run anyway."
   Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
   Done "Installed"
