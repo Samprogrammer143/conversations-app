@@ -114,6 +114,8 @@ export interface ConversationsApi {
     add(input: { id?: string; name: string; remote: string }): Promise<{ ok: boolean; id?: string; err?: string }>;
     /** Opens a terminal where Claude Code asks to sign in to the workspace's account. */
     signIn(id: string): Promise<{ ok: boolean; err?: string }>;
+    disconnect(id: string, force?: boolean): Promise<{ ok: boolean; err?: string; running?: number; switchedTo?: string }>;
+    reconnect(id: string): Promise<{ ok: boolean; err?: string; synced?: boolean }>;
     rename(id: string, name: string): Promise<void>;
   };
   /** Unsent messages and per-chat model, effort and mode, kept by the app. */
@@ -185,6 +187,8 @@ export const CHANNELS = [
   "workspace:add",
   "workspace:signIn",
   "workspace:rename",
+  "workspace:disconnect",
+  "workspace:reconnect",
   "composer:load",
   "composer:save",
 ] as const;

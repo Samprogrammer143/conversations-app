@@ -4,7 +4,7 @@
 // and a window that is a view over the local index (so it opens instantly).
 
 // First: the workspace this app runs in decides every folder the rest of it reads.
-import { baseEngine, baseEnv, baseRepoDir, currentWorkspace, engineOverridden, isWorkspaceId, listWorkspaces, markRelaunch, prepareSwitch, renameWorkspace } from "./workspace";
+import { baseEngine, baseEnv, baseRepoDir, currentWorkspace, engineOverridden, isWorkspaceId, listWorkspaces, markRelaunch, prepareSwitch, renameWorkspace, setDisconnected } from "./workspace";
 import { shareWorkspace, isRemote, launcherPath, setUpWorkspace, workspacesForWindow, writeLauncher } from "./workspace-actions";
 import fs from "node:fs";
 import { execFile, spawn } from "node:child_process";
@@ -517,6 +517,7 @@ function registerIpc() {
   handle("workspace:list", () => workspacesForWindow());
   handle("workspace:switch", (id: unknown, force: unknown) => {
     if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: "That workspace isn't set up on this PC" };
+    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: "That workspace is disconnected on this PC: reconnect it first" };
     if (id === currentWorkspace().id) return { ok: true };
     const running = chat.runningIds().size;
     if (running && force !== true) return { ok: false, running };
@@ -539,6 +540,43 @@ function registerIpc() {
     // Claude Code asks to sign in the first time it starts in a new folder.
     launchInTerminal(app.getPath("home"), launcher, []);
     return { ok: true };
+  });
+  // Leaves a workspace out of Conversations on this PC (its Claude Code chats stay as they
+  // are). The one the app is in can go only when another one is there to switch to.
+  handle("workspace:disconnect", (id: unknown, force: unknown) => {
+    const all = listWorkspaces().workspaces;
+    const target = all.find((w) => w.id === id);
+    if (!isWorkspaceId(id) || !target) return { ok: false, err: "There's no such workspace" };
+    if (target.disconnected) return { ok: true };
+    const forWindow = workspacesForWindow().workspaces;
+    const next = all.find((w) => w.id !== id && !w.disconnected && forWindow.some((f) => f.id === w.id && f.setUp));
+    if (!next) return { ok: false, err: "Add another workspace first: Conversations needs one to show" };
+    // On a PC still on the old layout the app's updates come through the first workspace's
+    // repository, which only its sync brings: it stays until this PC has the app's own.
+    if (id === "main" && !fs.existsSync(path.join(appRepoDir(), ".git"))) return { ok: false, err: "This PC still gets the app's updates through this workspace: it can be disconnected after its next update" };
+    if (id !== currentWorkspace().id) {
+      setDisconnected(id, true);
+      log("app", `disconnected workspace ${id}`);
+      broadcast("workspaces-changed", null);
+      return { ok: true };
+    }
+    const running = chat.runningIds().size;
+    if (running && force !== true) return { ok: false, running };
+    setDisconnected(id, true);
+    log("app", `disconnected workspace ${id}; switching to ${next.id}`);
+    prepareSwitch(next.id);
+    restartForUpdate();
+    return { ok: true, switchedTo: next.name };
+  });
+  handle("workspace:reconnect", (id: unknown) => {
+    if (!isWorkspaceId(id) || !listWorkspaces().workspaces.some((w) => w.id === id)) return { ok: false, err: "There's no such workspace" };
+    setDisconnected(id, false);
+    log("app", `reconnected workspace ${id}`);
+    broadcast("workspaces-changed", null);
+    // A first workspace that never synced here (a PC set up keeping its earlier chats out):
+    // the window says so before going to it.
+    const w = listWorkspaces().workspaces.find((x) => x.id === id);
+    return { ok: true, synced: !!w && fs.existsSync(path.join(w.syncHome, "config.json")) };
   });
   handle("workspace:rename", (id: unknown, name: unknown) => {
     if (!isWorkspaceId(id) || typeof name !== "string" || !name.trim()) return;
@@ -905,7 +943,9 @@ void app.whenReady().then(async () => {
   setInterval(checkForUpdate, 2 * 60_000).unref();
   // In another workspace, the first one still syncs now and then: it brings the
   // app's updates and keeps its own conversations current for /resume.
-  if (currentWorkspace().id !== "main") {
+  // (Not when the first workspace is disconnected on this PC, or was never set up here.)
+  const mainHere = listWorkspaces().workspaces[0];
+  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs.existsSync(path.join(mainHere.syncHome, "config.json"))) {
     const keepMainCurrent = () => {
       const child = spawn(process.execPath, [baseEngine(), "pull-all", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
       child.on("error", (e) => log("sync", `main workspace sync could not start: ${e.message}`));

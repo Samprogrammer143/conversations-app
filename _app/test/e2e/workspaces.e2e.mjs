@@ -188,6 +188,57 @@ try {
   await win.press(".ws-rename input", "Enter");
   const renamed = await waitFor(win, () => (document.querySelector(".ws-name")?.textContent === "Acme & Co" ? true : null), null, 5000);
   check("the first workspace can be renamed", !!renamed);
+
+  // Disconnect it: Conversations leaves it out on this PC and goes to the other one.
+  await win.click(".ws-button");
+  await win.click('.ws-menu .menu-item:has-text("Disconnect")');
+  const sheet = await waitFor(win, () => document.querySelector("#ws-off-title")?.textContent ?? null, null, 5000);
+  check("Disconnect asks first, in a sheet", sheet === "Disconnect Acme & Co?", sheet ?? "");
+  await win.waitForTimeout(500);
+  await win.screenshot({ path: path.join(out, "ws-disconnect-sheet.png") });
+  const gone = closed(app);
+  await win.click('.ws-sheet button:has-text("Disconnect")');
+  check("disconnecting the workspace the app is in switches to the other one (restart)", await Promise.race([gone, new Promise((r) => setTimeout(() => r(false), 15_000))]));
+} catch (e) {
+  check("no error in the third part", false, e.message);
+  await app.close().catch(() => {});
+}
+
+({ app, win } = await launch());
+try {
+  const name = await win.evaluate(() => document.querySelector(".ws-name")?.textContent);
+  check("after disconnecting, the app is in the other workspace", name === "Test WS", name ?? "");
+  check("the disconnected workspace's conversations are not shown", !(await win.evaluate((id) => !!document.querySelector(`[data-id="${id}"]`), MAIN_ID)));
+  const reg = JSON.parse(fs.readFileSync(path.join(dataDir, "workspaces.json"), "utf8"));
+  check("it is recorded as disconnected on this PC", JSON.stringify(reg.disconnected) === '["main"]', JSON.stringify(reg));
+  check("its Claude Code chats are untouched", fs.readdirSync(path.join(claudeDir, "projects")).some((d) => fs.readdirSync(path.join(claudeDir, "projects", d)).includes(`${MAIN_ID}.jsonl`)));
+  await win.evaluate(() => document.body.classList.add("solid"));
+  await win.click(".ws-button");
+  await win.waitForTimeout(300);
+  const menu = await win.evaluate(() => ({
+    items: [...document.querySelectorAll(".ws-menu .menu-item")].map((b) => b.textContent.trim()),
+    label: document.querySelector(".ws-menu .menu-label")?.textContent ?? null,
+  }));
+  await win.screenshot({ path: path.join(out, "ws-disconnected-menu.png") });
+  check("the menu lists it apart, to reconnect", menu.label === "Not in Conversations on this PC" && menu.items.some((t) => t.includes("Acme & Co") && t.includes("Disconnected · reconnect")), JSON.stringify(menu));
+  check("the last connected workspace can't be disconnected (nothing else to show)", !menu.items.some((t) => t.startsWith("Disconnect")), JSON.stringify(menu.items));
+  const keys = await win.evaluate(() => [...document.querySelectorAll(".ws-menu .shortcut")].map((s) => s.textContent));
+  check("Ctrl+Shift numbers count only connected workspaces", keys.length === 0, JSON.stringify(keys));
+  // Reconnect: it comes back, and the app goes to it.
+  const gone = closed(app);
+  await win.click('.ws-menu .menu-item:has-text("reconnect")');
+  check("reconnecting goes back to it (restart)", await Promise.race([gone, new Promise((r) => setTimeout(() => r(false), 15_000))]));
+} catch (e) {
+  check("no error in the fourth part", false, e.message);
+  await app.close().catch(() => {});
+}
+
+({ app, win } = await launch());
+try {
+  const name = await win.evaluate(() => document.querySelector(".ws-name")?.textContent);
+  check("reconnected: back in it, with its conversation", name === "Acme & Co" && !!(await waitFor(win, (id) => !!document.querySelector(`[data-id="${id}"]`), MAIN_ID, 15_000)), name ?? "");
+  const reg = JSON.parse(fs.readFileSync(path.join(dataDir, "workspaces.json"), "utf8"));
+  check("nothing is recorded as disconnected any more", !reg.disconnected, JSON.stringify(reg));
 } finally {
   await app.close().catch(() => {});
   try {

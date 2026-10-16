@@ -51,6 +51,31 @@ describe("workspace registry", () => {
     ws.removeWorkspace("work");
     expect(ws.listWorkspaces().workspaces).toHaveLength(1);
   });
+  it("leaves a workspace out of Conversations, and never starts in one that is", () => {
+    const file = path.join(process.env.CONVERSATIONS_DATA_DIR!, "workspaces.json");
+    ws.addWorkspace({ id: "work", name: "Work", remote: "https://github.com/me/work" });
+    ws.prepareSwitch("main");
+    ws.setDisconnected("main", true);
+    // The current one is disconnected: a start goes to a connected one instead.
+    expect(ws.listWorkspaces().current).toBe("work");
+    expect(ws.listWorkspaces().workspaces.map((w) => [w.id, w.disconnected])).toEqual([
+      ["main", true],
+      ["work", false],
+    ]);
+    // Written as setup.ps1 writes it, read back the same.
+    fs.writeFileSync(file, JSON.stringify({ current: "work", extra: [{ id: "work", name: "Work", remote: "https://github.com/me/work" }], disconnected: ["main", "gone"] }));
+    expect(ws.listWorkspaces().workspaces.filter((w) => w.disconnected).map((w) => w.id)).toEqual(["main"]);
+    ws.setDisconnected("main", false);
+    expect(ws.listWorkspaces().workspaces.every((w) => !w.disconnected)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).disconnected).toBeUndefined();
+    // With every workspace disconnected there is nothing better to start in: the recorded one stays.
+    ws.setDisconnected("main", true);
+    ws.setDisconnected("work", true);
+    expect(ws.listWorkspaces().current).toBe("work");
+    ws.setDisconnected("work", false);
+    ws.setDisconnected("main", false);
+    ws.removeWorkspace("work");
+  });
   it("refuses ids that are not plain names", () => {
     for (const bad of ["../x", "Main", "", "a b", "x".repeat(41)]) expect(ws.isWorkspaceId(bad)).toBe(false);
     expect(ws.isWorkspaceId("work-2")).toBe(true);

@@ -27,6 +27,22 @@ export async function switchWorkspace(w: WorkspaceInfo, force = false) {
 
 const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";
 
+/** Brings a disconnected workspace back into Conversations, and goes to it. */
+async function reconnectWorkspace(w: WorkspaceInfo) {
+  const r = await api.workspace.reconnect(w.id);
+  if (!r.ok) {
+    useStore.getState().toast({ text: r.err ?? "Couldn't reconnect it", icon: "alert" });
+    return;
+  }
+  await useStore.getState().loadWorkspaces();
+  if (!r.synced) {
+    // Never synced on this PC: its chats show only when you go to it, and stay on this PC.
+    useStore.getState().toast({ text: `${w.name} is back in this menu. Its chats aren't synced on this PC.`, icon: "check", actionLabel: `Switch to ${w.name}`, onAction: () => void switchWorkspace({ ...w, disconnected: false }), durationMs: 10_000 });
+    return;
+  }
+  void switchWorkspace({ ...w, disconnected: false });
+}
+
 export function WorkspaceSwitcher() {
   const ws = useStore((s) => s.workspaces);
   const [open, setOpen] = useState(false);
@@ -39,16 +55,25 @@ export function WorkspaceSwitcher() {
     return () => window.removeEventListener("mousedown", close);
   }, [open]);
   const current = ws?.workspaces.find((w) => w.id === ws.current);
-  const list = ws?.workspaces ?? [];
+  const all = ws?.workspaces ?? [];
+  // Disconnected ones (left out of Conversations on this PC) only offer to come back.
+  const list = all.filter((w) => !w.disconnected);
+  const off = all.filter((w) => w.disconnected);
   const setUp = list.filter((w) => w.setUp);
-  const items = [...list.map((w) => ({ w })), { rename: true as const }, { add: true as const }];
+  // Conversations always shows one: the current one can go only when another is set up here.
+  const canDisconnect = !!current && setUp.some((w) => w.id !== current.id);
+  type Item = { w: WorkspaceInfo } | { rename: true } | { disconnect: true } | { add: true } | { reconnect: WorkspaceInfo };
+  const items: Item[] = [...list.map((w) => ({ w })), { rename: true as const }, ...(canDisconnect ? [{ disconnect: true as const }] : []), { add: true as const }, ...off.map((w) => ({ reconnect: w }))];
   const run = (i: number) => {
     const it = items[i];
     setOpen(false);
     if ("add" in it) useStore.getState().openAddWorkspace(null);
     else if ("rename" in it) useStore.setState({ renamingWorkspace: true });
+    else if ("disconnect" in it) useStore.setState({ disconnectingWorkspace: current ?? null });
+    else if ("reconnect" in it) void reconnectWorkspace(it.reconnect);
     else if (it.w.id !== ws?.current) void switchWorkspace(it.w);
   };
+  const at = (pred: (it: Item) => boolean) => items.findIndex(pred);
   return (
     <div className="ws-switcher" ref={ref}>
       <button
@@ -63,7 +88,7 @@ export function WorkspaceSwitcher() {
         }}
       >
         <span className="app-icon ws-badge" aria-hidden>
-          {list.length > 1 && current ? initial(current.name) : <Icon name="message-square" size={13} strokeWidth={2} />}
+          {all.length > 1 && current ? initial(current.name) : <Icon name="message-square" size={13} strokeWidth={2} />}
         </span>
         <span className="ws-name ellipsis">{current?.name ?? "Conversations"}</span>
         <Icon name="chevrons-up-down" size={13} className="ws-chev" />
@@ -94,14 +119,39 @@ export function WorkspaceSwitcher() {
             </button>
           ))}
           <div className="menu-sep" role="separator" />
-          <button type="button" role="menuitem" className="menu-item" data-active={active === list.length} onMouseEnter={() => setActive(list.length)} onClick={() => run(list.length)}>
-            <Icon name="pencil" />
-            Rename {current?.name ?? "this workspace"}…
-          </button>
-          <button type="button" role="menuitem" className="menu-item" data-active={active === list.length + 1} onMouseEnter={() => setActive(list.length + 1)} onClick={() => run(list.length + 1)}>
-            <Icon name="plus" />
-            Add workspace…
-          </button>
+          {([
+            ["rename", "pencil", `Rename ${current?.name ?? "this workspace"}…`],
+            ["disconnect", "unlink", `Disconnect ${current?.name ?? "this workspace"}…`],
+            ["add", "plus", "Add workspace…"],
+          ] as const).map(([key, icon, label]) => {
+            const i = at((it) => key in it);
+            return i < 0 ? null : (
+              <button key={key} type="button" role="menuitem" className="menu-item" data-active={active === i} onMouseEnter={() => setActive(i)} onClick={() => run(i)}>
+                <Icon name={icon} />
+                {label}
+              </button>
+            );
+          })}
+          {off.length > 0 && (
+            <>
+              <div className="menu-sep" role="separator" />
+              <div className="menu-label">Not in Conversations on this PC</div>
+              {off.map((w) => {
+                const i = at((it) => "reconnect" in it && it.reconnect.id === w.id);
+                return (
+                  <button key={w.id} type="button" role="menuitem" className="menu-item ws-item" data-active={active === i} onMouseEnter={() => setActive(i)} onClick={() => run(i)}>
+                    <span className="app-icon ws-badge small off" aria-hidden>
+                      {initial(w.name)}
+                    </span>
+                    <span className="ws-item-text">
+                      <span className="ellipsis">{w.name}</span>
+                      <span className="ws-sub">Disconnected · reconnect</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -283,6 +333,72 @@ export function RenameWorkspaceSheet() {
         <div className="row-actions">
           <Button kind="primary" disabled={!name.trim()} onClick={() => void save()}>
             Save
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Leaves the workspace the app is in out of Conversations on this PC, and switches to
+ * another one. Its Claude Code folder and chats stay exactly as they are.
+ */
+export function DisconnectWorkspaceSheet() {
+  const w = useStore((s) => s.disconnectingWorkspace);
+  const ws = useStore((s) => s.workspaces);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setBusy(false);
+    setError(null);
+  }, [w]);
+  if (!w) return null;
+  const next = ws?.workspaces.find((x) => x.id !== w.id && x.setUp && !x.disconnected);
+  const close = () => useStore.setState({ disconnectingWorkspace: null });
+  const go = async (force = false) => {
+    setBusy(true);
+    setError(null);
+    const r = await api.workspace.disconnect(w.id, force);
+    if (r.ok) {
+      close();
+      if (r.switchedTo) useStore.setState({ switchingTo: r.switchedTo });
+      else void useStore.getState().loadWorkspaces();
+      return;
+    }
+    setBusy(false);
+    if (r.running) {
+      close();
+      useStore.getState().toast({ text: `${r.running} chat${r.running === 1 ? " is" : "s are"} running here; disconnecting stops ${r.running === 1 ? "it" : "them"}.`, icon: "alert", actionLabel: "Disconnect anyway", onAction: () =>
+          void api.workspace.disconnect(w.id, true).then((x) => {
+            if (x.ok && x.switchedTo) useStore.setState({ switchingTo: x.switchedTo });
+            else if (!x.ok) useStore.getState().toast({ text: x.err ?? "Couldn't disconnect it", icon: "alert" });
+          }),
+        durationMs: 10_000,
+      });
+    } else setError(r.err ?? "Couldn't disconnect it");
+  };
+  return (
+    <div className="scrim">
+      <div className="sheet ws-sheet ws-rename" role="dialog" aria-modal="true" aria-labelledby="ws-off-title">
+        <IconButton icon="x" label="Close" className="close" onClick={close} />
+        <h1 id="ws-off-title">Disconnect {w.name}?</h1>
+        <p className="lede">
+          Conversations stops showing and syncing {w.name}'s chats on this PC{next ? `, and switches to ${next.name}` : ""}. Nothing is deleted: Claude Code keeps them as they are, and you can reconnect {w.name} from this menu any time.
+        </p>
+        {error && <p className="ws-error" role="alert">{error}</p>}
+        <div className="row-actions">
+          <Button kind="primary" disabled={busy} onClick={() => void go()}>
+            {busy ? (
+              <>
+                <Spinner size={14} /> Disconnecting…
+              </>
+            ) : (
+              "Disconnect"
+            )}
+          </Button>
+          <Button kind="plain" disabled={busy} onClick={close}>
+            Cancel
           </Button>
         </div>
       </div>

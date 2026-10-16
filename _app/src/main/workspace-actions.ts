@@ -29,8 +29,8 @@ export function signedIn(w: Workspace): boolean {
 /** The workspaces the window shows: this PC's, then those other PCs have that are not set up here. */
 export function workspacesForWindow(): { current: string; workspaces: WorkspaceInfo[] } {
   const { current, workspaces } = listWorkspaces();
-  const here: WorkspaceInfo[] = workspaces.map((w) => ({ id: w.id, name: w.name, remote: w.remote, setUp: w.id === "main" || fs.existsSync(path.join(w.syncHome, "repo", ".git")), signedIn: signedIn(w) }));
-  const elsewhere = readShared().filter((s) => !here.some((h) => h.id === s.id)).map((s) => ({ ...s, setUp: false, signedIn: false }));
+  const here: WorkspaceInfo[] = workspaces.map((w) => ({ id: w.id, name: w.name, remote: w.remote, setUp: w.id === "main" || fs.existsSync(path.join(w.syncHome, "repo", ".git")), signedIn: signedIn(w), disconnected: w.disconnected }));
+  const elsewhere = readShared().filter((s) => !here.some((h) => h.id === s.id)).map((s) => ({ ...s, setUp: false, signedIn: false, disconnected: false }));
   return { current, workspaces: [...here, ...elsewhere] };
 }
 
@@ -140,7 +140,7 @@ export async function setUpWorkspace(input: { id?: string; name: string; remote:
   const id = retry ?? newWorkspaceId(name);
   const isNew = !known.some((w) => w.id === id);
   // Registered only once it works, so a failed setup leaves nothing behind but its folders.
-  const w = { id, name, remote, ...folderOf(id) };
+  const w: Workspace = { id, name, remote, ...folderOf(id), disconnected: false };
   // Folders this attempt makes are cleared again if it fails, so a corrected retry starts clean.
   const made = [w.syncHome, w.claudeDir].filter((d) => !fs.existsSync(d));
   fs.mkdirSync(w.claudeDir, { recursive: true });

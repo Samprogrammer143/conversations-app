@@ -627,6 +627,16 @@ body.solid .sidebar,
   color: inherit;
   opacity: 0.85;
 }
+/* Workspaces left out of Conversations on this PC: a heading, and a dimmed badge. */
+.ws-menu .menu-label {
+  padding: 4px 10px 2px;
+  font: 500 11px/14px var(--font-ui);
+  color: var(--label-tertiary, var(--label-secondary));
+}
+.ws-badge.off {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
 
 /* The Add workspace sheet. */
 .ws-form {

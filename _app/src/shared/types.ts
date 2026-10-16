@@ -326,6 +326,8 @@ export interface WorkspaceInfo {
   /** Set up on this PC; otherwise only another PC has it (it can be set up here). */
   setUp: boolean;
   signedIn: boolean;
+  /** Left out of Conversations on this PC (its Claude Code chats stay as they are). */
+  disconnected: boolean;
 }
 
 /** One MCP server as Claude Code reports it, for the /mcp panel. */

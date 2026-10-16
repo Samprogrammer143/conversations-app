@@ -77,7 +77,9 @@ var api = {
     switch: (id, force) => invoke("workspace:switch", id, force === true),
     add: (input) => invoke("workspace:add", input),
     signIn: (id) => invoke("workspace:signIn", id),
-    rename: (id, name) => invoke("workspace:rename", id, name)
+    rename: (id, name) => invoke("workspace:rename", id, name),
+    disconnect: (id, force) => invoke("workspace:disconnect", id, force === true),
+    reconnect: (id) => invoke("workspace:reconnect", id)
   },
   composer: {
     load: () => invoke("composer:load"),

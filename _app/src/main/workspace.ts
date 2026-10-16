@@ -29,13 +29,20 @@ export interface Workspace {
   claudeDir: string;
   syncHome: string;
   dataDir: string;
+  /**
+   * Left out of Conversations on this PC: not shown, not synced by the app, never
+   * started in. Its Claude Code folder and chats stay as they are (a PC that already had
+   * Claude Code, with another account's chats, keeps them out of Conversations this way).
+   */
+  disconnected: boolean;
 }
 
 interface Registry {
   current: string;
   /** The name shown for the first workspace. */
   mainName?: string;
-  extra: Omit<Workspace, "claudeDir" | "syncHome" | "dataDir">[];
+  extra: Omit<Workspace, "claudeDir" | "syncHome" | "dataDir" | "disconnected">[];
+  disconnected?: string[];
 }
 
 const ENV_KEYS = ["CLAUDE_CONFIG_DIR", "CLAUDE_SYNC_HOME", "CONVERSATIONS_DATA_DIR", "CONVERSATIONS_ENGINE"] as const;
@@ -102,8 +109,13 @@ function readRegistry(): Registry {
   try {
     const r = JSON.parse(text) as Partial<Registry>;
     const extra = (Array.isArray(r.extra) ? r.extra : []).filter((w) => w && isWorkspaceId(w.id) && w.id !== "main" && typeof w.name === "string" && typeof w.remote === "string");
-    const current = typeof r.current === "string" && (r.current === "main" || extra.some((w) => w.id === r.current)) ? r.current : "main";
-    return { current, mainName: typeof r.mainName === "string" && r.mainName.trim() ? r.mainName : undefined, extra };
+    const ids = ["main", ...extra.map((w) => w.id)];
+    const disconnected = [...new Set((Array.isArray(r.disconnected) ? r.disconnected : []).filter((d) => ids.includes(d)))];
+    // Never started in a disconnected workspace while a connected one exists.
+    const connected = ids.filter((d) => !disconnected.includes(d));
+    let current = typeof r.current === "string" && ids.includes(r.current) ? r.current : "main";
+    if (disconnected.includes(current) && connected.length) current = connected[0];
+    return { current, mainName: typeof r.mainName === "string" && r.mainName.trim() ? r.mainName : undefined, extra, ...(disconnected.length ? { disconnected } : {}) };
   } catch {
     // Unreadable: kept aside, so the next write never overwrites the only copy.
     try {
@@ -123,8 +135,20 @@ function writeRegistry(r: Registry) {
 
 export function listWorkspaces(): { current: string; workspaces: Workspace[] } {
   const r = readRegistry();
-  const main: Workspace = { id: "main", name: r.mainName ?? "Main", remote: null, ...folders("main") };
-  return { current: r.current, workspaces: [main, ...r.extra.map((w) => ({ ...w, ...folders(w.id) }))] };
+  const off = new Set(r.disconnected ?? []);
+  const main: Workspace = { id: "main", name: r.mainName ?? "Main", remote: null, ...folders("main"), disconnected: off.has("main") };
+  return { current: r.current, workspaces: [main, ...r.extra.map((w) => ({ ...w, ...folders(w.id), disconnected: off.has(w.id) }))] };
+}
+
+/** Leaves a workspace out of Conversations on this PC, or brings it back. */
+export function setDisconnected(id: string, on: boolean) {
+  const r = readRegistry();
+  const set = new Set(r.disconnected ?? []);
+  if (on) set.add(id);
+  else set.delete(id);
+  r.disconnected = [...set];
+  if (!r.disconnected.length) delete r.disconnected;
+  writeRegistry(r);
 }
 
 export const currentWorkspace = (): Workspace => {
@@ -145,7 +169,7 @@ export function addWorkspace(w: { id: string; name: string; remote: string }): W
   const r = readRegistry();
   r.extra = [...r.extra.filter((x) => x.id !== w.id), { id: w.id, name: w.name, remote: w.remote }];
   writeRegistry(r);
-  return { ...w, ...folders(w.id) };
+  return { ...w, ...folders(w.id), disconnected: (r.disconnected ?? []).includes(w.id) };
 }
 
 export function renameWorkspace(id: string, name: string) {
@@ -159,6 +183,7 @@ export function removeWorkspace(id: string) {
   if (id === "main") return;
   const r = readRegistry();
   r.extra = r.extra.filter((w) => w.id !== id);
+  if (r.disconnected) r.disconnected = r.disconnected.filter((d) => d !== id);
   if (r.current === id) r.current = "main";
   writeRegistry(r);
 }

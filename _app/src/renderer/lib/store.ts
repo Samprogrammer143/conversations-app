@@ -39,6 +39,8 @@ interface State {
   /** Set while the app restarts into another workspace. */
   switchingTo: string | null;
   renamingWorkspace: boolean;
+  /** The workspace the Disconnect sheet asks about. */
+  disconnectingWorkspace: WorkspaceInfo | null;
   /** Unsent messages and per-chat model, effort and mode (kept by the app across restarts). */
   composer: ComposerState;
   setDraft(key: string, text: string): void;
@@ -119,6 +121,7 @@ export const useStore = create<State>((set, get) => ({
   addWorkspace: null,
   switchingTo: null,
   renamingWorkspace: false,
+  disconnectingWorkspace: null,
   async loadWorkspaces() {
     try {
       set({ workspaces: await api.workspace.list() });

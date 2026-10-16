@@ -109,8 +109,12 @@ function readRegistry() {
   try {
     const r = JSON.parse(text);
     const extra = (Array.isArray(r.extra) ? r.extra : []).filter((w) => w && isWorkspaceId(w.id) && w.id !== "main" && typeof w.name === "string" && typeof w.remote === "string");
-    const current = typeof r.current === "string" && (r.current === "main" || extra.some((w) => w.id === r.current)) ? r.current : "main";
-    return { current, mainName: typeof r.mainName === "string" && r.mainName.trim() ? r.mainName : void 0, extra };
+    const ids = ["main", ...extra.map((w) => w.id)];
+    const disconnected = [...new Set((Array.isArray(r.disconnected) ? r.disconnected : []).filter((d) => ids.includes(d)))];
+    const connected = ids.filter((d) => !disconnected.includes(d));
+    let current = typeof r.current === "string" && ids.includes(r.current) ? r.current : "main";
+    if (disconnected.includes(current) && connected.length) current = connected[0];
+    return { current, mainName: typeof r.mainName === "string" && r.mainName.trim() ? r.mainName : void 0, extra, ...disconnected.length ? { disconnected } : {} };
   } catch {
     try {
       fs2.renameSync(registryFile(), `${registryFile()}.unreadable-${Date.now()}`);
@@ -128,8 +132,18 @@ function writeRegistry(r) {
 }
 function listWorkspaces() {
   const r = readRegistry();
-  const main = { id: "main", name: r.mainName ?? "Main", remote: null, ...folders("main") };
-  return { current: r.current, workspaces: [main, ...r.extra.map((w) => ({ ...w, ...folders(w.id) }))] };
+  const off = new Set(r.disconnected ?? []);
+  const main = { id: "main", name: r.mainName ?? "Main", remote: null, ...folders("main"), disconnected: off.has("main") };
+  return { current: r.current, workspaces: [main, ...r.extra.map((w) => ({ ...w, ...folders(w.id), disconnected: off.has(w.id) }))] };
+}
+function setDisconnected(id, on) {
+  const r = readRegistry();
+  const set = new Set(r.disconnected ?? []);
+  if (on) set.add(id);
+  else set.delete(id);
+  r.disconnected = [...set];
+  if (!r.disconnected.length) delete r.disconnected;
+  writeRegistry(r);
 }
 var currentWorkspace = () => {
   const { current, workspaces } = listWorkspaces();
@@ -146,7 +160,7 @@ function addWorkspace(w) {
   const r = readRegistry();
   r.extra = [...r.extra.filter((x) => x.id !== w.id), { id: w.id, name: w.name, remote: w.remote }];
   writeRegistry(r);
-  return { ...w, ...folders(w.id) };
+  return { ...w, ...folders(w.id), disconnected: (r.disconnected ?? []).includes(w.id) };
 }
 function renameWorkspace(id, name) {
   const r = readRegistry();
@@ -158,6 +172,7 @@ function removeWorkspace(id) {
   if (id === "main") return;
   const r = readRegistry();
   r.extra = r.extra.filter((w) => w.id !== id);
+  if (r.disconnected) r.disconnected = r.disconnected.filter((d) => d !== id);
   if (r.current === id) r.current = "main";
   writeRegistry(r);
 }
@@ -234,8 +249,8 @@ function signedIn(w) {
 }
 function workspacesForWindow() {
   const { current, workspaces } = listWorkspaces();
-  const here = workspaces.map((w) => ({ id: w.id, name: w.name, remote: w.remote, setUp: w.id === "main" || fs4.existsSync(path4.join(w.syncHome, "repo", ".git")), signedIn: signedIn(w) }));
-  const elsewhere = readShared().filter((s) => !here.some((h) => h.id === s.id)).map((s) => ({ ...s, setUp: false, signedIn: false }));
+  const here = workspaces.map((w) => ({ id: w.id, name: w.name, remote: w.remote, setUp: w.id === "main" || fs4.existsSync(path4.join(w.syncHome, "repo", ".git")), signedIn: signedIn(w), disconnected: w.disconnected }));
+  const elsewhere = readShared().filter((s) => !here.some((h) => h.id === s.id)).map((s) => ({ ...s, setUp: false, signedIn: false, disconnected: false }));
   return { current, workspaces: [...here, ...elsewhere] };
 }
 var sharedDir = () => path4.join(baseRepoDir(), "_shared", "workspaces");
@@ -308,7 +323,7 @@ async function setUpWorkspace(input) {
   if (clash) return { ok: false, err: `That repository is already the ${clash.name} workspace's.` };
   const id = retry ?? newWorkspaceId(name);
   const isNew = !known.some((w2) => w2.id === id);
-  const w = { id, name, remote, ...folders(id) };
+  const w = { id, name, remote, ...folders(id), disconnected: false };
   const made = [w.syncHome, w.claudeDir].filter((d) => !fs4.existsSync(d));
   fs4.mkdirSync(w.claudeDir, { recursive: true });
   const installer = path4.join(path4.dirname(baseEngine()), "install.mjs");
@@ -5022,6 +5037,7 @@ function registerIpc() {
   handle("workspace:list", () => workspacesForWindow());
   handle("workspace:switch", (id, force) => {
     if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: "That workspace isn't set up on this PC" };
+    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: "That workspace is disconnected on this PC: reconnect it first" };
     if (id === currentWorkspace().id) return { ok: true };
     const running = chat.runningIds().size;
     if (running && force !== true) return { ok: false, running };
@@ -5043,6 +5059,37 @@ function registerIpc() {
     if (!launcher) return { ok: false, err: "Signing in from the app works on Windows only" };
     launchInTerminal(app2.getPath("home"), launcher, []);
     return { ok: true };
+  });
+  handle("workspace:disconnect", (id, force) => {
+    const all = listWorkspaces().workspaces;
+    const target = all.find((w) => w.id === id);
+    if (!isWorkspaceId(id) || !target) return { ok: false, err: "There's no such workspace" };
+    if (target.disconnected) return { ok: true };
+    const forWindow = workspacesForWindow().workspaces;
+    const next = all.find((w) => w.id !== id && !w.disconnected && forWindow.some((f) => f.id === w.id && f.setUp));
+    if (!next) return { ok: false, err: "Add another workspace first: Conversations needs one to show" };
+    if (id === "main" && !fs24.existsSync(path22.join(appRepoDir(), ".git"))) return { ok: false, err: "This PC still gets the app's updates through this workspace: it can be disconnected after its next update" };
+    if (id !== currentWorkspace().id) {
+      setDisconnected(id, true);
+      log("app", `disconnected workspace ${id}`);
+      broadcast("workspaces-changed", null);
+      return { ok: true };
+    }
+    const running = chat.runningIds().size;
+    if (running && force !== true) return { ok: false, running };
+    setDisconnected(id, true);
+    log("app", `disconnected workspace ${id}; switching to ${next.id}`);
+    prepareSwitch(next.id);
+    restartForUpdate();
+    return { ok: true, switchedTo: next.name };
+  });
+  handle("workspace:reconnect", (id) => {
+    if (!isWorkspaceId(id) || !listWorkspaces().workspaces.some((w2) => w2.id === id)) return { ok: false, err: "There's no such workspace" };
+    setDisconnected(id, false);
+    log("app", `reconnected workspace ${id}`);
+    broadcast("workspaces-changed", null);
+    const w = listWorkspaces().workspaces.find((x) => x.id === id);
+    return { ok: true, synced: !!w && fs24.existsSync(path22.join(w.syncHome, "config.json")) };
   });
   handle("workspace:rename", (id, name) => {
     if (!isWorkspaceId(id) || typeof name !== "string" || !name.trim()) return;
@@ -5364,7 +5411,8 @@ void app2.whenReady().then(async () => {
   setTimeout(() => knownModels(claudeInstall().path), 2e4).unref();
   setTimeout(checkForUpdate, 15e3).unref();
   setInterval(checkForUpdate, 2 * 6e4).unref();
-  if (currentWorkspace().id !== "main") {
+  const mainHere = listWorkspaces().workspaces[0];
+  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs24.existsSync(path22.join(mainHere.syncHome, "config.json"))) {
     const keepMainCurrent = () => {
       const child = spawn8(process.execPath, [baseEngine(), "pull-all", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
       child.on("error", (e) => log("sync", `main workspace sync could not start: ${e.message}`));

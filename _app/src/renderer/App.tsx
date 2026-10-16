@@ -3,7 +3,7 @@ import { Sidebar } from "./features/Sidebar";
 import { ConversationList } from "./features/ConversationList";
 import { Detail } from "./features/Detail";
 import { ContextMenu, SearchResults, ShortcutOverlay, SyncPopover, Toasts, Welcome, copyResumeCommand } from "./features/Overlays";
-import { AddWorkspaceSheet, RenameWorkspaceSheet, SwitchingOverlay, switchWorkspace } from "./features/Workspaces";
+import { AddWorkspaceSheet, DisconnectWorkspaceSheet, RenameWorkspaceSheet, SwitchingOverlay, switchWorkspace } from "./features/Workspaces";
 import { useStore } from "./lib/store";
 import { api } from "./lib/api";
 
@@ -76,7 +76,7 @@ export function App() {
         // Ctrl+Shift+1, 2, …: the workspaces set up on this PC, in the switcher's order.
         e.preventDefault();
         const ws = s().workspaces;
-        const w = ws?.workspaces.filter((x) => x.setUp)[Number(e.code.slice(5)) - 1];
+        const w = ws?.workspaces.filter((x) => x.setUp && !x.disconnected)[Number(e.code.slice(5)) - 1];
         if (w && w.id !== ws?.current) void switchWorkspace(w);
       } else if (e.ctrlKey && ["1", "2", "3"].includes(e.key)) {
         e.preventDefault();
@@ -167,6 +167,7 @@ export function App() {
       <Toasts />
       <AddWorkspaceSheet />
       <RenameWorkspaceSheet />
+      <DisconnectWorkspaceSheet />
       <SwitchingOverlay />
       <ShortcutOverlay />
       <Welcome />
