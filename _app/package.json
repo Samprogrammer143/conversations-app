@@ -1,0 +1,110 @@
+{
+  "name": "conversations",
+  "productName": "Conversations",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Every Claude Code conversation from all your PCs, in one place and always in sync.",
+  "author": "Samprogrammer143",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "dist/main/main.mjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --dev",
+    "start": "node scripts/build.mjs && electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "dist": "node scripts/build.mjs && electron-builder --win nsis --publish never"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/markdown-it": "^14.2.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.296",
+    "@tanstack/react-virtual": "^3.14.14",
+    "highlight.js": "^11.12.0",
+    "markdown-it": "^15.0.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zustand": "^5.0.15"
+  },
+  "build": {
+    "appId": "com.samcan.conversations",
+    "productName": "Conversations",
+    "copyright": "Samprogrammer143",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-shell/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "extraMetadata": {
+      "main": "dist-shell/shell.mjs"
+    },
+    "extraResources": [
+      {
+        "from": "node_modules/@anthropic-ai/claude-agent-sdk",
+        "to": "sdk/node_modules/@anthropic-ai/claude-agent-sdk",
+        "filter": [
+          "*.mjs",
+          "*.js",
+          "*.json",
+          "LICENSE.md"
+        ]
+      },
+      {
+        "from": "resources",
+        "to": ".",
+        "filter": [
+          "*.ico",
+          "*.png"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.ico",
+      "executableName": "Conversations"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Conversations",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "protocols": [
+      {
+        "name": "Conversations",
+        "schemes": [
+          "conversations"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,235 @@
+/* Design tokens, transcribed from the app's Figma design: the Color, Layout and Primitives collections, the 16
+   text styles and the effect styles. Light is the default; dark follows the
+   system, or Settings > Appearance. */
+
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/InterVariable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("../fonts/GeistMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("../fonts/GeistMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-display: block;
+}
+
+:root {
+  color-scheme: light;
+
+  /* Color / Light */
+  --bg-window: #f3f3f6;
+  --bg-content: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-elevated-glass: rgba(255, 255, 255, 0.92);
+  --bg-sunken: #f5f5f7;
+  --bg-bubble: #ededf0;
+  --bg-accent: #0071e3;
+  --bg-accent-tint: #e6f1fc;
+  --bg-scrim: rgba(0, 0, 0, 0.16);
+  --fill-primary: rgba(0, 0, 0, 0.1);
+  --fill-secondary: rgba(0, 0, 0, 0.08);
+  --fill-tertiary: rgba(0, 0, 0, 0.05);
+  --fill-quaternary: rgba(0, 0, 0, 0.03);
+  --fill-selected: rgba(0, 0, 0, 0.08);
+  --label-primary: #1d1d1f;
+  --label-secondary: #616166;
+  --label-tertiary: #8e8e93;
+  --label-quaternary: #d1d1d6;
+  --label-on-accent: #ffffff;
+  --label-link: #0066cc;
+  --label-placeholder: #707075;
+  --icon-primary: #1d1d1f;
+  --icon-secondary: #6a6a6f;
+  --icon-tertiary: #8e8e93;
+  --icon-accent: #0071e3;
+  --icon-on-accent: #ffffff;
+  --separator-default: rgba(0, 0, 0, 0.1);
+  --separator-opaque: #e5e5ea;
+  --border-glass: rgba(0, 0, 0, 0.06);
+  --focus-ring: #0071e3;
+  --accent-glyph: #0071e3;
+  --toggle-off-stroke: #808086;
+  --status-danger-on-fill: #c4000f;
+  --dot-edge: rgba(0, 0, 0, 0.22);
+  --status-success: #1e7e34;
+  --status-success-dot: #34c759;
+  --status-warning: #c93400;
+  --status-warning-dot: #ff9500;
+  --status-danger: #d70015;
+  --status-danger-dot: #ff3b30;
+  --status-warning-tint: #fff4e5;
+  --status-danger-tint: #ffebe9;
+  --status-success-tint: #e8f6ec;
+  --tile-blue: #007aff;
+  --tile-indigo: #5856d6;
+  --tile-purple: #9f4bd0;
+  --tile-pink: #d63064;
+  --tile-orange: #de6a0b;
+  --tile-teal: #178fa6;
+  --tile-green: #239a47;
+  --tile-graphite: #7d7d82;
+  --tile-brown: #8e6e4a;
+  --brand-assistant: #d97757;
+  --diff-add-bg: #e8f6ec;
+  --diff-add-fg: #1a7f37;
+  --diff-del-bg: #ffebe9;
+  --diff-del-fg: #cf222e;
+  --shadow-soft: rgba(0, 0, 0, 0.06);
+  --shadow-medium: rgba(0, 0, 0, 0.1);
+  --shadow-strong: rgba(0, 0, 0, 0.22);
+  --shadow-hairline: rgba(0, 0, 0, 0.12);
+  --shadow-float: rgba(0, 0, 0, 0.16);
+  --code-keyword: #ad3da4;
+  --code-string: #c41a16;
+  --code-comment: #646e78;
+  --code-number: #1c00cf;
+  --code-type: #0b4f79;
+  --code-function: #326d74;
+
+  /* Layout */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --space-48: 48px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 999px;
+  --control-sm: 24px;
+  --control-md: 28px;
+  --control-lg: 32px;
+  --control-xl: 36px;
+  --toolbar: 52px;
+  --sidebar: 256px;
+  --list: 340px;
+  --reading: 720px;
+  --measure: 560px;
+  --caption-buttons: 138px;
+
+  /* Effect styles */
+  --elevation-raised: 0 1px 2px var(--shadow-soft), 0 4px 14px var(--shadow-soft);
+  --elevation-popover: 0 2px 6px var(--shadow-soft), 0 18px 46px var(--shadow-float);
+  --elevation-sheet: 0 4px 12px var(--shadow-soft), 0 28px 72px var(--shadow-strong);
+  --elevation-menu: 0 4px 24px var(--shadow-float);
+  --glass-control: 0 1px 2px var(--shadow-soft), 0 4px 12px var(--shadow-soft);
+
+  /* Type */
+  --font-ui: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+
+  /* Motion: quick and quiet. Turned off with Windows' Animation effects. */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 120ms;
+  --dur-medium: 200ms;
+  --dur-slow: 280ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg-window: #18181a;
+    --bg-content: #1e1e1e;
+    --bg-elevated: #2c2c2e;
+    --bg-elevated-glass: rgba(44, 44, 46, 0.97);
+    --bg-sunken: #262628;
+    --bg-bubble: #2c2c2e;
+    --bg-accent: #0071e3;
+    --bg-accent-tint: #173049;
+    --bg-scrim: rgba(0, 0, 0, 0.4);
+    --fill-primary: rgba(255, 255, 255, 0.1);
+    --fill-secondary: rgba(255, 255, 255, 0.08);
+    --fill-tertiary: rgba(255, 255, 255, 0.05);
+    --fill-quaternary: rgba(255, 255, 255, 0.03);
+    --fill-selected: rgba(255, 255, 255, 0.1);
+    --label-primary: #f5f5f7;
+    --label-secondary: #a1a1a6;
+    --label-tertiary: #7c7c80;
+    --label-quaternary: #48484a;
+    --label-link: #2997ff;
+    --label-placeholder: #9a9aa0;
+    --icon-primary: #f5f5f7;
+    --icon-secondary: #a1a1a6;
+    --icon-tertiary: #7c7c80;
+    --icon-accent: #2997ff;
+    --separator-default: rgba(255, 255, 255, 0.1);
+    --separator-opaque: #3a3a3c;
+    --border-glass: rgba(255, 255, 255, 0.14);
+    --focus-ring: #2997ff;
+    --accent-glyph: #2997ff;
+    --toggle-off-stroke: #9a9aa0;
+    --status-danger-on-fill: var(--status-danger);
+    --dot-edge: rgba(0, 0, 0, 0);
+    --status-success: #30d158;
+    --status-success-dot: #30d158;
+    --status-warning: #ff9f0a;
+    --status-warning-dot: #ff9f0a;
+    --status-danger: #ff6961;
+    --status-danger-dot: #ff453a;
+    --status-warning-tint: #3a2a12;
+    --status-danger-tint: #3f2624;
+    --status-success-tint: #203124;
+    --diff-add-bg: #203124;
+    --diff-add-fg: #3fb950;
+    --diff-del-bg: #3f2624;
+    --diff-del-fg: #ff7b72;
+    --shadow-soft: rgba(0, 0, 0, 0.3);
+    --shadow-medium: rgba(0, 0, 0, 0.4);
+    --shadow-strong: rgba(0, 0, 0, 0.55);
+    --shadow-hairline: rgba(0, 0, 0, 0.55);
+    --shadow-float: rgba(0, 0, 0, 0.55);
+    --code-keyword: #ff7ab2;
+    --code-string: #ff8170;
+    --code-comment: #8a96a1;
+    --code-number: #d9c97c;
+    --code-type: #5dd8ff;
+    --code-function: #67b7a4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-medium: 0ms;
+    --dur-slow: 0ms;
+  }
+}
+
+/* Text styles (Figma letter-spacing percentages as em). */
+.t-large-title { font: 700 26px/32px var(--font-ui); letter-spacing: -0.02em; }
+.t-title1 { font: 700 22px/28px var(--font-ui); letter-spacing: -0.018em; }
+.t-title2 { font: 600 17px/22px var(--font-ui); letter-spacing: -0.013em; }
+.t-title3 { font: 600 15px/20px var(--font-ui); letter-spacing: -0.009em; }
+.t-headline { font: 600 13px/18px var(--font-ui); letter-spacing: -0.003em; }
+.t-body { font: 400 13px/18px var(--font-ui); letter-spacing: -0.003em; }
+.t-body-em { font: 500 13px/18px var(--font-ui); letter-spacing: -0.003em; }
+.t-subheadline { font: 600 12px/16px var(--font-ui); }
+.t-footnote { font: 400 12px/16px var(--font-ui); }
+.t-footnote-em { font: 500 12px/16px var(--font-ui); }
+.t-reading { font: 400 15px/24px var(--font-ui); letter-spacing: -0.009em; }
+.t-reading-em { font: 600 15px/24px var(--font-ui); letter-spacing: -0.009em; }
+.t-reading-heading { font: 600 17px/24px var(--font-ui); letter-spacing: -0.013em; }
+.t-code { font: 400 12px/18px var(--font-mono); }
+.t-code-compact { font: 400 12px/16px var(--font-mono); }
+.t-code-em { font: 500 12px/18px var(--font-mono); }

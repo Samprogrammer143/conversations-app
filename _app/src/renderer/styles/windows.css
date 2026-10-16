@@ -1,0 +1,296 @@
+/* Settings window (S5) and the tray flyout (S7). */
+
+.settings {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 100vh;
+  background: var(--bg-content);
+}
+.s-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 10px;
+  background: var(--bg-window);
+  box-shadow: inset -1px 0 0 var(--separator-default);
+}
+.s-nav-title {
+  display: flex;
+  align-items: center;
+  height: var(--toolbar);
+  padding: 0 8px;
+  font: 600 13px/18px var(--font-ui);
+}
+.s-main {
+  min-width: 0;
+}
+.s-head {
+  display: flex;
+  align-items: center;
+  height: var(--toolbar);
+  padding: 0 calc(var(--caption-buttons) + 12px) 0 28px;
+  font: 600 15px/20px var(--font-ui);
+  letter-spacing: -0.009em;
+  position: sticky;
+  top: 0;
+  background: var(--bg-content);
+  z-index: 2;
+}
+.s-body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 640px;
+  padding: 8px 28px 32px;
+}
+.s-group-title {
+  padding: 0 12px 8px;
+  font: 600 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.s-card {
+  border-radius: var(--radius-lg);
+  background: var(--fill-quaternary);
+}
+.s-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 11.5px 12px;
+  text-align: left;
+}
+.s-row + .s-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 0;
+  height: 1px;
+  background: var(--fill-tertiary);
+}
+.s-link:hover {
+  background: var(--fill-quaternary);
+}
+.s-link:first-child {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.s-link:last-child {
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+.s-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* A label never wraps or shrinks under its value; long values end in "…". */
+.s-label {
+  font: 400 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+  white-space: nowrap;
+}
+.s-link .s-text {
+  flex: none;
+  max-width: 60%;
+}
+.s-link .s-value {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  max-width: none;
+}
+.s-more {
+  padding-top: 0;
+}
+.s-more::before {
+  display: none;
+}
+.s-cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 2px 2px 2px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-content);
+  font: 400 12px/16px var(--font-mono);
+}
+.s-detail {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  overflow-wrap: anywhere;
+}
+.s-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 55%;
+  flex: 0 1 auto;
+  font: 400 13px/18px var(--font-ui);
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+.s-value .icon {
+  flex: none;
+  color: var(--icon-secondary);
+}
+.s-value > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A native drop-down list (Windows draws the list) that looks like a value. */
+.s-select {
+  position: relative;
+}
+.s-select select {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0 16px 0 0;
+  margin-right: -16px;
+  font: inherit;
+  color: inherit;
+  text-align: right;
+  text-align-last: right;
+  cursor: default;
+}
+.s-select select:focus-visible {
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--bg-sunken), 0 0 0 3px var(--focus-ring);
+}
+.s-select .icon {
+  pointer-events: none;
+}
+.s-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Tray flyout: Windows 11 flyout shape over Acrylic. The window is sized to
+   this element (FlyoutApp measures it), so it never shows empty space. */
+html:has(body[data-window="flyout"]),
+body[data-window="flyout"],
+body[data-window="flyout"] #root {
+  height: auto;
+  min-height: 0;
+}
+/* The tint covers the whole window, so a window kept slightly taller than its
+   content (Windows' minimum) shows no seam. */
+body[data-window="flyout"] {
+  min-height: 100vh;
+  background: color-mix(in srgb, var(--bg-window) 55%, transparent);
+}
+.flyout {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  overflow: hidden;
+}
+.flyout .app-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+.fly-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 4px 0;
+  padding: 10px;
+  border-radius: 4px;
+  font: 400 13px/18px var(--font-ui);
+  color: var(--label-secondary);
+}
+.fly-empty .icon {
+  color: var(--icon-secondary);
+}
+.fly-content {
+  display: flex;
+  flex-direction: column;
+}
+.fly-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 6px 6px 7px;
+}
+.fly-title {
+  flex: 1;
+  min-width: 0;
+}
+.fly-title .t1 {
+  font: 600 13px/18px var(--font-ui);
+}
+.fly-title .t2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.fly-need {
+  display: flex;
+  gap: 10px;
+  margin: 0 4px;
+  padding: 10px;
+  border-radius: 4px;
+  background: var(--fill-tertiary);
+}
+.fly-need .icon.warn {
+  color: var(--status-warning-dot);
+}
+.fly-need .t1 {
+  font: 500 13px/18px var(--font-ui);
+}
+.fly-need .t2 {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.fly-need-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.fly-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 4px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  text-align: left;
+}
+.fly-row:hover {
+  background: var(--fill-tertiary);
+}
+.fly-row .text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.fly-row .t1 {
+  font: 400 13px/18px var(--font-ui);
+}
+.fly-row .t2,
+.fly-row .when {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.fly-foot {
+  display: flex;
+  gap: 10px;
+  padding: 12px 8px 8px;
+}
+.fly-foot .btn:not(.wide) {
+  padding: 0 15px;
+}
+.fly-foot .btn {
+  height: 32px;
+  border-radius: 16px;
+}
+.fly-foot .wide {
+  flex: 1;
+}

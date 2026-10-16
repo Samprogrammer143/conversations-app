@@ -1,0 +1,11 @@
+node_modules/
+release/
+.vite/
+*.log
+test-results/
+playwright-report/
+dist-shell/
+dist-forwarder/
+dist/**/*.map
+runtime/node_modules/
+*.tmp

@@ -1,0 +1,8 @@
+{
+  "name": "conversations-runtime",
+  "private": true,
+  "description": "What the Conversations app loads at run time that is not its own code. Installed on each PC from npm (see _sync/engine.mjs ensureRuntime), never committed.",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.296"
+  }
+}

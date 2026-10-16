@@ -1,0 +1,468 @@
+/* Page frame, layout and the shared controls (Figma: Components > Controls). */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font: 400 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+  color: var(--label-primary);
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Figma sets Inter at its text cut at every size; so does the app. */
+  font-optical-sizing: none;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+body.solid {
+  background: var(--bg-window);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+button {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: default;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--bg-accent) 26%, transparent);
+}
+
+.selectable,
+.selectable * {
+  user-select: text;
+  cursor: auto;
+}
+
+.drag {
+  -webkit-app-region: drag;
+}
+
+.drag button,
+.drag input,
+.drag a,
+.drag [role="button"],
+.drag [role="tab"],
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Scrollbars. Chromium on Windows draws classic bars that take 10–15 px out of
+   every panel and push content off the grid, so native bars are hidden and
+   lib/scrollbars.ts draws an overlay thumb, as Windows 11 does. Wheel, keyboard
+   and touch scrolling are untouched. */
+* {
+  scrollbar-width: none;
+}
+.scroll {
+  overflow: auto;
+}
+.overlay-thumb {
+  position: fixed;
+  z-index: 2147483000;
+  top: 0;
+  left: 0;
+  width: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--label-primary) 34%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-medium) linear, width var(--dur-fast) var(--ease-out);
+}
+.overlay-thumb.on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.overlay-thumb.wide {
+  width: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--label-primary) 48%, transparent);
+}
+
+/* Focus ring: a 1 px gap in the background colour, then 2 px of accent. */
+:focus {
+  outline: none;
+}
+
+.focusable:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[role="option"]:focus-visible,
+[role="tab"]:focus-visible,
+a:focus-visible {
+  box-shadow: 0 0 0 1px var(--bg-content), 0 0 0 3px var(--focus-ring);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ icons */
+
+.icon {
+  display: block;
+  flex: none;
+}
+
+/* ------------------------------------------------------------------ buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-full);
+  font: 500 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.btn-primary {
+  background: var(--bg-accent);
+  color: var(--label-on-accent);
+}
+.btn-primary:hover {
+  background: linear-gradient(rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.12)), var(--bg-accent);
+}
+.btn-primary:active {
+  background: linear-gradient(rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.14)), var(--bg-accent);
+}
+
+.btn-secondary {
+  background: var(--fill-secondary);
+  color: var(--label-primary);
+}
+.btn-secondary:hover {
+  background: var(--fill-primary);
+}
+.btn-secondary:active {
+  background: linear-gradient(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.06)), var(--fill-primary);
+}
+
+.btn-plain {
+  color: var(--label-link);
+}
+.btn-plain:hover {
+  background: var(--fill-tertiary);
+}
+.btn-plain:active {
+  background: var(--fill-secondary);
+}
+
+.btn-danger-plain {
+  background: var(--fill-secondary);
+  color: var(--status-danger-on-fill);
+}
+.btn-danger-plain:hover {
+  background: var(--fill-primary);
+}
+
+.btn-lg {
+  height: 40px;
+  padding: 0 24px;
+}
+
+/* Icon-only buttons: 28 px, 16 px glyph. */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  color: var(--icon-secondary);
+  flex: none;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.icon-btn:hover {
+  background: var(--fill-tertiary);
+  color: var(--icon-primary);
+}
+.icon-btn:active,
+.icon-btn[aria-pressed="true"] {
+  background: var(--fill-secondary);
+}
+
+/* Glass controls float over content: toolbar buttons and the New Chat circle. */
+.glass {
+  background: var(--bg-elevated-glass);
+  border: 0.5px solid var(--border-glass);
+  box-shadow: var(--glass-control);
+  backdrop-filter: blur(20px);
+  color: var(--label-primary);
+}
+.glass:hover {
+  background: var(--bg-elevated);
+}
+.glass:active {
+  background: linear-gradient(var(--fill-tertiary), var(--fill-tertiary)), var(--bg-elevated-glass);
+}
+.glass:focus-visible {
+  box-shadow: 0 0 0 1px var(--bg-content), 0 0 0 3px var(--focus-ring), var(--glass-control);
+}
+
+.glass-circle {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  flex: none;
+  color: var(--icon-primary);
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border-radius: 18px;
+  font: 500 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+  white-space: nowrap;
+  flex: none;
+}
+
+/* ------------------------------------------------------------------ small parts */
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--fill-tertiary);
+  border: 0.5px solid var(--fill-secondary);
+  font: 500 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 12px;
+  background: var(--fill-tertiary);
+  font: 500 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+.chip:hover {
+  background: var(--fill-secondary);
+}
+.chip .icon {
+  color: var(--icon-secondary);
+}
+.chip.accent {
+  background: var(--bg-accent-tint);
+  color: var(--label-link);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  flex: none;
+}
+/* The dots are light colours; a hairline edge keeps them visible on light
+   backgrounds, and every dot also has a text label nearby or as its name. */
+.status-dot.success {
+  background: var(--status-success-dot);
+  box-shadow: inset 0 0 0 1px var(--dot-edge);
+}
+.status-dot.warning {
+  background: var(--status-warning-dot);
+  box-shadow: inset 0 0 0 1px var(--dot-edge);
+}
+.status-dot.danger {
+  background: var(--status-danger-dot);
+}
+.status-dot.neutral {
+  background: var(--label-tertiary);
+}
+.status-dot.accent {
+  background: var(--accent-glyph);
+}
+
+.tile {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  color: var(--icon-on-accent);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0)), var(--tile-graphite);
+  flex: none;
+}
+.tile.s16 {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 500 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  flex: none;
+}
+.live::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--status-success-dot);
+}
+
+/* Segmented control: the list filters and form choices. */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 14px;
+  background: var(--fill-tertiary);
+}
+.segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font: 500 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.segment .count {
+  font-weight: 400;
+}
+.segment[aria-selected="true"] {
+  background: var(--bg-elevated);
+  color: var(--label-primary);
+  box-shadow: 0 1px 1px var(--shadow-soft), 0 4px 7px var(--shadow-soft);
+}
+.segment[aria-selected="true"] .count {
+  color: var(--label-secondary);
+}
+
+/* Toggle: 36 x 20. Off is an outlined track with a dark knob (Windows 11), so
+   the control stays visible on the grey settings cards (3:1); on is accent
+   with a white knob. */
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--toggle-off-stroke);
+  flex: none;
+  transition: background-color var(--dur-medium) var(--ease-out), box-shadow var(--dur-medium) var(--ease-out);
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--toggle-off-stroke);
+  transition: transform var(--dur-medium) var(--ease-spring), width var(--dur-fast) var(--ease-out), height var(--dur-fast) var(--ease-out), top var(--dur-fast) var(--ease-out), left var(--dur-fast) var(--ease-out);
+}
+.toggle:hover::after {
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 7px;
+}
+.toggle[aria-checked="true"] {
+  background: var(--bg-accent);
+  box-shadow: none;
+}
+.toggle[aria-checked="true"]::after {
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--label-on-accent);
+  box-shadow: 0 1px 2px var(--shadow-soft);
+  transform: translateX(16px);
+}
+.toggle:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--toggle-off-stroke), 0 0 0 1px var(--bg-content), 0 0 0 3px var(--focus-ring);
+}
+.toggle[aria-checked="true"]:focus-visible {
+  box-shadow: 0 0 0 1px var(--bg-content), 0 0 0 3px var(--focus-ring);
+}
+
+/* Spinner (Progress Ring, Spinner variant). */
+.spinner {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}

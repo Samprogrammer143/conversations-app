@@ -1,0 +1,11 @@
+[
+  { "wait": 500 },
+  { "eval": "(() => { const rows = [...document.querySelectorAll('.row')]; const r = rows[0]; if (r) r.click(); })()", "wait": 1500 },
+  { "shot": "s1-first-b" },
+  { "down": "Control", "wait": 1000 },
+  { "shot": "s8-ctrl-b", "settle": 100 },
+  { "up": "Control", "wait": 300 },
+  { "eval": "(() => { const r = [...document.querySelectorAll('.row')][1]; r && r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 520, clientY: 700 })); })()", "wait": 500 },
+  { "shot": "menu" },
+  { "press": "Escape", "wait": 300 }
+]

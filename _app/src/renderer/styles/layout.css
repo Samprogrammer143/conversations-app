@@ -1,0 +1,692 @@
+/* The main window: sidebar | list | conversation (Figma: Screens S1–S3, S9). */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar) minmax(0, 1fr);
+  height: 100vh;
+}
+
+.app.collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ------------------------------------------------------------------ sidebar */
+
+.sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: transparent;
+}
+body.solid .sidebar,
+.sidebar.overlay {
+  background: var(--bg-window);
+}
+
+.sidebar.overlay {
+  position: absolute;
+  z-index: 40;
+  inset: 0 auto 0 0;
+  width: var(--sidebar);
+  box-shadow: var(--elevation-sheet);
+  animation: slide-in var(--dur-medium) var(--ease-spring);
+}
+@keyframes slide-in {
+  from {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+}
+
+.sb-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--toolbar);
+  padding: 0 12px 0 18px;
+  flex: none;
+}
+
+.app-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #3394ff, #4f54eb);
+  color: #fff;
+  flex: none;
+}
+
+.sb-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 10px 8px;
+}
+
+.sb-header {
+  padding: 14px 10px 4px;
+  font: 600 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+
+.sb-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  color: var(--label-primary);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.sb-item:hover {
+  background: var(--fill-quaternary);
+}
+.sb-item[aria-current="true"] {
+  background: var(--fill-tertiary);
+}
+.sb-item[aria-current="true"] .sb-label {
+  font-weight: 600;
+}
+/* Selected Focused (Figma): while the sidebar has focus, its selection is accent. */
+.sb-content:focus-within .sb-item[aria-current="true"] {
+  background: var(--bg-accent);
+  color: var(--label-on-accent);
+}
+.sb-content:focus-within .sb-item[aria-current="true"] .lead-glyph,
+.sb-content:focus-within .sb-item[aria-current="true"] .sb-trail {
+  color: var(--label-on-accent);
+}
+.sb-item .lead-glyph {
+  color: var(--accent-glyph);
+}
+.sb-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: 400 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+}
+.sb-trail {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  flex: none;
+}
+
+/* Plan usage: one thin bar per window, above the sync status. */
+.sb-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px 20px 4px;
+  flex: none;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.sb-usage.stale {
+  opacity: 0.55;
+}
+.usage-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.usage-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.usage-pct {
+  flex: none;
+  font: 500 12px/16px var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  color: var(--label-primary);
+}
+.usage-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill-secondary);
+  overflow: hidden;
+}
+.usage-fill {
+  height: 100%;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--bg-accent);
+  transition: width 400ms var(--ease-out);
+}
+.usage-fill.warm {
+  background: var(--status-warning-dot);
+}
+.usage-fill.hot {
+  background: var(--status-danger);
+}
+
+.sb-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 56px;
+  padding: 6px 10px;
+  flex: none;
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px 6px 10px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.sync-status:hover,
+.sync-status[aria-expanded="true"] {
+  background: var(--fill-tertiary);
+}
+.sync-status .glyph {
+  color: var(--icon-secondary);
+}
+.sync-status .glyph.warning {
+  color: var(--status-warning-dot);
+}
+.sync-status .glyph.danger {
+  color: var(--status-danger);
+}
+.sync-status .t1 {
+  font: 500 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+}
+.sync-status .t2 {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+
+/* Search field: a 32 px capsule at the top of the sidebar. */
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  border-radius: 16px;
+  background: var(--bg-content);
+  border: 1px solid var(--separator-default);
+  color: var(--icon-secondary);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.search-field:focus-within {
+  border-color: transparent;
+  box-shadow: 0 0 0 1px var(--bg-content), 0 0 0 3px var(--focus-ring);
+}
+.search-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: 400 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+  color: var(--label-primary);
+  user-select: text;
+}
+.search-field input::placeholder {
+  color: var(--label-placeholder);
+}
+.search-field .clear {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--fill-primary);
+  color: var(--icon-secondary);
+}
+
+/* ------------------------------------------------------------------ content */
+
+.content {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--list) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-content);
+  box-shadow: inset 1px 0 0 var(--separator-default);
+}
+.app.collapsed .content {
+  box-shadow: none;
+}
+.content.stacked {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ------------------------------------------------------------------ list */
+
+.list-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  box-shadow: inset -1px 0 0 var(--separator-default);
+}
+.content.stacked .list-col {
+  box-shadow: none;
+}
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--toolbar);
+  padding: 0 12px 0 20px;
+  flex: none;
+}
+/* Stacked (below 900 px): the list spans the window, so it keeps clear of the
+   native minimise, maximise and close buttons, as the conversation header does. */
+.content.stacked .list-toolbar {
+  padding-right: calc(var(--caption-buttons) + 12px);
+}
+.list-title {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.list-title .t1 {
+  font: 600 15px/20px var(--font-ui);
+  letter-spacing: -0.009em;
+}
+.list-title .t2 {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px 0 20px;
+  flex: none;
+}
+
+/* The current day group stays at the top while the list scrolls. */
+.sticky-anchor {
+  position: relative;
+  z-index: 3;
+  height: 0;
+  flex: none;
+}
+.sticky-head {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 0;
+  pointer-events: none;
+}
+/* A hairline and a short fade, so rows read as sliding under the header. */
+.sticky-head .list-header {
+  box-shadow: 0 1px 0 var(--fill-tertiary);
+}
+.sticky-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 1px);
+  height: 12px;
+  background: linear-gradient(var(--bg-content), color-mix(in srgb, var(--bg-content) 0%, transparent));
+}
+.list-edge {
+  position: relative;
+  z-index: 2;
+  height: 1px;
+  margin: 0 0 -1px;
+  background: var(--fill-tertiary);
+  opacity: 0;
+  flex: none;
+  transition: opacity var(--dur-fast) linear;
+}
+.list-edge.on {
+  opacity: 1;
+}
+.list-banner {
+  padding: 0 16px 8px;
+  flex: none;
+}
+
+.rows {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 8px 12px;
+}
+
+.list-header {
+  padding: 12px 16px 6px 24px;
+  font: 600 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  background: var(--bg-content);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  padding: 8px 12px 8px 4px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.row::after {
+  content: "";
+  position: absolute;
+  left: 24px;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--separator-default);
+}
+.row:hover {
+  background: var(--fill-tertiary);
+}
+.row[aria-selected="true"] {
+  background: var(--fill-selected);
+}
+.row[aria-selected="true"]::after {
+  background: transparent;
+}
+/* Selected Focused (Figma): while the list has focus, the selection is accent
+   with white text, as in Finder and Mail. */
+.rows:focus-within .row[aria-selected="true"] {
+  background: var(--bg-accent);
+  color: var(--label-on-accent);
+}
+.rows:focus-within .row[aria-selected="true"] :is(.row-time, .row-preview, .row-meta, .row-where .dot, .row-where .icon, .live, .pin) {
+  color: var(--label-on-accent);
+}
+.rows:focus-within .row[aria-selected="true"] .unread {
+  background: var(--label-on-accent);
+}
+.row-gutter {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 18px;
+  flex: none;
+}
+.row-gutter .unread {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--accent-glyph);
+}
+.row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.row-line1 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: 500 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+}
+.row.is-updated .row-title {
+  font-weight: 600;
+}
+.row-time {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  flex: none;
+}
+.row-preview {
+  font: 400 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+  color: var(--label-secondary);
+}
+.row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.row-where {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.row-where .dot {
+  color: var(--label-tertiary);
+}
+.row-where .icon {
+  color: var(--icon-secondary);
+}
+.row-meta .pin {
+  color: var(--icon-tertiary);
+}
+
+.rename-input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  border-radius: 4px;
+  padding: 0 2px;
+  margin: 0 -2px;
+  background: var(--bg-content);
+  box-shadow: 0 0 0 1px var(--bg-content), 0 0 0 3px var(--focus-ring);
+  font: 600 13px/18px var(--font-ui);
+  user-select: text;
+}
+
+/* Empty states: one glyph, a title and one line, centred and grey. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+.empty .glyph {
+  margin-bottom: 8px;
+}
+/* The empty-state glyph: a grey tile with a white symbol. */
+.empty-tile {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0)), var(--tile-graphite);
+  color: var(--icon-on-accent);
+}
+.empty .title {
+  font: 600 15px/20px var(--font-ui);
+  letter-spacing: -0.009em;
+}
+.empty .line {
+  max-width: 420px;
+  font: 400 13px/18px var(--font-ui);
+  color: var(--label-secondary);
+  text-wrap: pretty;
+}
+.empty .btn {
+  margin-top: 12px;
+}
+
+/* A section heading with one quiet action on the right (Projects: new chat in a folder). */
+.sb-header.with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 4px;
+}
+.sb-header-action {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) linear;
+}
+.sidebar:hover .sb-header-action,
+.sb-header-action:focus-visible {
+  opacity: 1;
+}
+
+/* Workspaces: the switcher at the top of the sidebar (its badge is the app icon's tile). */
+.ws-switcher {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.ws-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  height: 28px;
+  margin-left: -6px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--radius-md);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.ws-button:hover,
+.ws-button[aria-expanded="true"] {
+  background: var(--fill-tertiary);
+}
+.ws-badge {
+  font: 700 11px/1 var(--font-ui);
+}
+.ws-badge.small {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+}
+.ws-name {
+  font: 600 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+}
+.ws-chev {
+  flex: none;
+  color: var(--icon-secondary);
+}
+.menu.ws-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: -6px;
+  -webkit-app-region: no-drag;
+}
+.menu-item.ws-item {
+  height: auto;
+  min-height: 28px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.ws-name {
+  min-width: 0;
+}
+.ws-item .ws-item-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+}
+.ws-item .ws-sub {
+  font: 400 11px/14px var(--font-ui);
+  color: var(--label-secondary);
+}
+.menu-item.ws-item[data-active="true"] .ws-sub {
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* The Add workspace sheet. */
+.ws-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0 auto 20px;
+  max-width: 380px;
+  text-align: left;
+}
+.ws-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font: 500 13px/18px var(--font-ui);
+}
+.ws-form input {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--separator-default);
+  background: var(--bg-elevated);
+  font: 400 14px/20px var(--font-ui);
+  color: var(--label-primary);
+  outline: none;
+}
+.ws-form input:focus {
+  border-color: var(--icon-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--icon-accent) 22%, transparent);
+}
+.ws-form input:disabled {
+  opacity: 0.7;
+}
+.ws-hint {
+  margin: 0;
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.ws-error {
+  margin: 0 auto 16px;
+  max-width: 380px;
+  font: 400 13px/18px var(--font-ui);
+  color: var(--status-danger);
+}
+
+/* While the app restarts into another workspace. */
+.ws-switching {
+  z-index: 200;
+}
+.ws-switching-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 22px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-content);
+  box-shadow: var(--elevation-sheet);
+  font: 500 14px/20px var(--font-ui);
+}
+
+.ws-rename {
+  padding-top: 44px;
+}

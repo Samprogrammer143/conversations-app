@@ -1,0 +1,16 @@
+[
+  { "wait": 500 },
+  { "eval": "(() => { const rows = [...document.querySelectorAll('.row')]; const r = rows[0]; if (r) r.click(); })()", "wait": 1200 },
+  { "shot": "s1-first" },
+  { "eval": "window.dispatchEvent(new Event('app:focus-search'))", "wait": 200 },
+  { "type": "the", "wait": 600 },
+  { "shot": "s3-search" },
+  { "press": "Escape", "wait": 200 },
+  { "press": "Escape", "wait": 200 },
+  { "click": ".sync-status", "wait": 500 },
+  { "shot": "s4-sync" },
+  { "press": "Escape", "wait": 300 },
+  { "down": "Control", "wait": 1000 },
+  { "shot": "s8-ctrl", "settle": 100 },
+  { "up": "Control", "wait": 300 }
+]
