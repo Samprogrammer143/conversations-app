@@ -21,6 +21,11 @@ export function toMcpInfo(list: McpServerStatus[]): McpServerInfo[] {
       scope: s.source ?? s.scope ?? null,
       toolCount: Array.isArray(s.tools) ? s.tools.length : 0,
       error: typeof s.error === "string" && s.error.trim() ? s.error.trim().slice(0, 400) : null,
+      transport: typeof (s.config as { type?: unknown } | undefined)?.type === "string" ? (s.config as { type: string }).type : null,
+      tools: (Array.isArray(s.tools) ? s.tools : [])
+        .filter((t) => t && typeof t.name === "string")
+        .slice(0, 200)
+        .map((t) => ({ name: t.name.slice(0, 200), description: typeof t.description === "string" && t.description.trim() ? t.description.trim().replace(/\s+/g, " ").slice(0, 300) : null })),
     }))
     .sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
 }

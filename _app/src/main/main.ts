@@ -23,7 +23,7 @@ import { appDataDir, appRepoDir, engineScriptPath, readSyncConfig, repoDir, sync
 import { claudeDefaultModel, claudeInstall, hasWindowsTerminal, refreshClaude } from "./claude";
 import { createFlyout, createMainWindow, createSettingsWindow, createWelcomeWindow, placeFlyout, setTitleBarColors, themeColors, type WindowFiles } from "./windows";
 import { chooseFolder, launchInTerminal, newChatInCli, openInCli, pullConversation } from "./cli";
-import { ChatManager, type ResumePrep } from "./chat/manager";
+import { ChatManager, type McpAction, type ResumePrep } from "./chat/manager";
 import { knownModels } from "./chat/models";
 import { lastUsage, refreshUsage } from "./chat/usage";
 import { ComposerStore, isComposerKey } from "./composer-state";
@@ -829,29 +829,39 @@ function registerIpc() {
     return chat.commands(id, cwd);
   });
   // /mcp: the chat's MCP servers, and reconnect / enable / disable in its running session.
-  handle("chat:mcp", async (rawId: unknown, projectId: unknown, folder: unknown, opts?: { model?: unknown; effort?: unknown; permissionMode?: unknown }) => {
+  handle("chat:mcp", async (rawId: unknown, projectId: unknown, folder: unknown, opts?: { model?: unknown; effort?: unknown; permissionMode?: unknown; noStart?: unknown }) => {
     const { id, cwd } = chatFolder(rawId, projectId, folder);
     // A chat started for /mcp starts as the next message would: the chat's model, effort and mode.
     const model = isModelName(opts?.model) ? opts.model : settings.get().defaultModel;
     const effort = isEffort(opts?.effort) ? opts.effort : null;
     const permissionMode = isPermissionMode(opts?.permissionMode) ? opts.permissionMode : settings.get().defaultPermissionMode;
     try {
-      return { ok: true, ...(await chat.mcp(id, cwd, { model, effort, permissionMode })) };
+      return { ok: true, ...(await chat.mcp(id, cwd, { model, effort, permissionMode }, { noStart: opts?.noStart === true })) };
     } catch (e) {
       return { ok: false, live: false, servers: [], err: (e as Error).message.slice(0, 300) };
     }
   });
-  handle("chat:mcpAction", (rawId: unknown, name: unknown, action: unknown, opts?: { model?: unknown; effort?: unknown; permissionMode?: unknown }) => {
+  handle("chat:mcpAction", async (rawId: unknown, name: unknown, action: unknown, opts?: { model?: unknown; effort?: unknown; permissionMode?: unknown; url?: unknown }) => {
     if (!isUuid(rawId)) return { ok: false, err: BAD_ID };
     if (typeof name !== "string" || !/^[^\u0000-\u001f]{1,200}$/.test(name)) return { ok: false, err: "That isn't a server name" };
-    if (action !== "reconnect" && action !== "enable" && action !== "disable") return { ok: false, err: "Unknown action" };
+    if (!["reconnect", "enable", "disable", "signin", "callback", "signout"].includes(action as string)) return { ok: false, err: "Unknown action" };
+    // A sign-in's last address (when the browser couldn't hand it back): only a web address.
+    const url = typeof opts?.url === "string" && /^https?:\/\/\S{1,4000}$/.test(opts.url.trim()) ? opts.url.trim() : undefined;
+    if (action === "callback" && !url) return { ok: false, err: "Paste the whole address from the browser's address bar" };
     // If it has to start the chat again, it starts as the next message would.
     const startWith = {
       model: isModelName(opts?.model) ? opts.model : settings.get().defaultModel,
       effort: isEffort(opts?.effort) ? opts.effort : null,
       permissionMode: isPermissionMode(opts?.permissionMode) ? opts.permissionMode : settings.get().defaultPermissionMode,
     };
-    return chat.mcpAction(rawId, name, action, chatFolder(rawId, null, null).cwd, startWith);
+    const r = await chat.mcpAction(rawId, name, action as McpAction, chatFolder(rawId, null, null).cwd, startWith, url);
+    // The provider's sign-in page opens in the browser (a secure page only).
+    if (action === "signin" && r.ok && r.url) {
+      const secure = /^https:\/\//.test(r.url);
+      if (secure) void shell.openExternal(r.url).catch(() => {});
+      return { ...r, opened: secure };
+    }
+    return r;
   });
   handle("chat:setPermissionMode", (id: unknown, mode: unknown) => (isUuid(id) && isPermissionMode(mode) ? chat.setPermissionMode(id, mode) : undefined));
   handle("chat:status", (id: unknown) => (isUuid(id) ? chat.status(id) : null));

@@ -172,6 +172,18 @@ describe("the /mcp panel", () => {
     expect(list[0].error).toBe("Connection timed out after 30s");
   });
 
+  it("gives each server's type and tools for its details", () => {
+    const [s] = toMcpInfo([{ name: "crm", status: "connected", scope: "user", config: { type: "http", url: "https://mcp.example.com/mcp" }, tools: [{ name: "list_tables", description: "  Lists\n tables  " }, { name: "run_sql" }, { bad: 1 }] }] as never);
+    expect(s.transport).toBe("http");
+    expect(s.tools).toEqual([
+      { name: "list_tables", description: "Lists tables" },
+      { name: "run_sql", description: null },
+    ]);
+    // Nothing of its settings (the address, headers) reaches the panel but the type.
+    expect(JSON.stringify(s)).not.toContain("example.com");
+    expect(toMcpInfo([{ name: "x", status: "failed" }] as never)[0]).toMatchObject({ transport: null, tools: [] });
+  });
+
   class Live extends EventEmitter implements SessionLike {
     id: string | null = ID;
     cwd = CWD;
@@ -217,13 +229,29 @@ describe("the /mcp panel", () => {
       this.alive = false;
       this.emit("ended");
     }
+    auth: string[] = [];
+    signInUrl: string | null = "https://auth.example.com/authorize?state=s1";
     async mcpStatus(): Promise<McpServerInfo[]> {
-      return [{ name: "analytics", status: this.reconnected.length ? "connected" : "failed", scope: "project", toolCount: this.reconnected.length ? 3 : 0, error: null }];
+      return [
+        { name: "analytics", status: this.reconnected.length ? "connected" : "failed", scope: "project", toolCount: this.reconnected.length ? 3 : 0, error: null, transport: "stdio", tools: [] },
+        { name: "crm", status: this.auth.at(-1)?.startsWith("callback") ? "connected" : "needs-auth", scope: "user", toolCount: 0, error: null, transport: "http", tools: [] },
+      ];
     }
     async mcpReconnect(name: string) {
       this.reconnected.push(name);
     }
     async mcpToggle() {}
+    async mcpSignIn(name: string) {
+      this.auth.push(`signin ${name}`);
+      return { url: this.signInUrl, callbackExpected: true };
+    }
+    async mcpSignInCallback(name: string, url: string) {
+      if (!url.includes("code=")) throw new Error("Invalid callback URL: missing authorization code.");
+      this.auth.push(`callback ${name} ${url}`);
+    }
+    async mcpSignOut(name: string) {
+      this.auth.push(`signout ${name}`);
+    }
   }
 
   let managers: ChatManager[] = [];
@@ -247,7 +275,7 @@ describe("the /mcp panel", () => {
       },
       probeMcp: async (_c, cwd) => {
         probed.push(cwd);
-        return [{ name: "analytics", status: "connected", scope: "project", toolCount: 3, error: null }];
+        return [{ name: "analytics", status: "connected", scope: "project", toolCount: 3, error: null, transport: "stdio", tools: [] }];
       },
       ...over,
     });
@@ -258,7 +286,7 @@ describe("the /mcp panel", () => {
   it("uses the chat's running session when there is one, and reconnects there", async () => {
     const { m, sessions, probed } = setup();
     await m.send({ id: ID, text: "hi", cwd: CWD });
-    expect(await m.mcp(ID, CWD)).toMatchObject({ live: true, servers: [{ name: "analytics", status: "failed" }] });
+    expect(await m.mcp(ID, CWD)).toMatchObject({ live: true, servers: expect.arrayContaining([expect.objectContaining({ name: "analytics", status: "failed" })]) });
     const r = await m.mcpAction(ID, "analytics", "reconnect");
     expect(r.ok).toBe(true);
     expect(r.servers?.[0]).toMatchObject({ status: "connected", toolCount: 3 });
@@ -268,14 +296,14 @@ describe("the /mcp panel", () => {
 
   it("starts the chat's Claude Code when nothing runs (nothing sent, no turn), as /mcp in a terminal works on a running one", async () => {
     const { m, sessions, probed } = setup();
-    expect(await m.mcp(ID, CWD, { model: "opus", permissionMode: "default" })).toMatchObject({ live: true, servers: [{ name: "analytics", status: "failed" }] });
+    expect(await m.mcp(ID, CWD, { model: "opus", permissionMode: "default" })).toMatchObject({ live: true, servers: expect.arrayContaining([expect.objectContaining({ name: "analytics", status: "failed" })]) });
     expect(sessions).toHaveLength(1);
     expect(sessions[0].idle).toBe(1);
     expect(sessions[0].started).toEqual([]);
     expect(sessions[0].model).toBe("opus");
     expect(probed).toEqual([]);
     const r = await m.mcpAction(ID, "analytics", "reconnect", CWD);
-    expect(r).toMatchObject({ ok: true, servers: [{ status: "connected" }] });
+    expect(r).toMatchObject({ ok: true, servers: expect.arrayContaining([expect.objectContaining({ name: "analytics", status: "connected" })]) });
     // Your next message goes to that same Claude Code.
     await m.send({ id: ID, text: "now check the numbers", cwd: CWD });
     expect(sessions).toHaveLength(1);
@@ -304,6 +332,52 @@ describe("the /mcp panel", () => {
     }
   });
 
+  it("signs in to a server in the chat's session: the provider's page, then the address the browser ended on", async () => {
+    const { m, sessions } = setup();
+    await m.mcp(ID, CWD);
+    const r = await m.mcpAction(ID, "crm", "signin", CWD);
+    expect(r).toMatchObject({ ok: true, url: "https://auth.example.com/authorize?state=s1", callbackExpected: true });
+    expect(r.servers?.find((s) => s.name === "crm")?.status).toBe("needs-auth");
+    // The browser couldn't hand it back: its address finishes it.
+    expect(await m.mcpAction(ID, "crm", "callback", CWD, {}, "http://localhost:47534/callback?state=s1")).toMatchObject({ ok: false, err: expect.stringMatching(/missing authorization code/) });
+    const done = await m.mcpAction(ID, "crm", "callback", CWD, {}, "http://localhost:47534/callback?code=abc&state=s1");
+    expect(done.ok).toBe(true);
+    expect(done.servers?.find((s) => s.name === "crm")?.status).toBe("connected");
+    expect(await m.mcpAction(ID, "crm", "callback", CWD)).toMatchObject({ ok: false });
+    expect((await m.mcpAction(ID, "crm", "signout", CWD)).ok).toBe(true);
+    expect(sessions[0].auth).toEqual(["signin crm", "callback crm http://localhost:47534/callback?code=abc&state=s1", "signout crm"]);
+    // Nothing was sent to Claude for any of it.
+    expect(sessions[0].started).toEqual([]);
+  });
+
+  it("looking again while a sign-in waits never starts a Claude Code (a new one wouldn't be waiting)", async () => {
+    const { m, sessions, probed } = setup();
+    expect(await m.mcp(ID, CWD, {}, { noStart: true })).toMatchObject({ live: false, servers: [] });
+    expect(sessions).toHaveLength(0);
+    expect(probed).toEqual([]);
+    await m.mcp(ID, CWD);
+    expect(await m.mcp(ID, CWD, {}, { noStart: true })).toMatchObject({ live: true });
+    sessions[0].close();
+    expect(await m.mcp(ID, CWD, {}, { noStart: true })).toMatchObject({ live: false });
+    expect(sessions).toHaveLength(1);
+  });
+
+  it("says what failed in words", async () => {
+    const { m, sessions } = setup();
+    await m.mcp(ID, CWD);
+    sessions[0].mcpSignOut = async () => {
+      throw new Error("");
+    };
+    expect(await m.mcpAction(ID, "crm", "signout", CWD)).toMatchObject({ ok: false, err: "Couldn't sign out of crm" });
+  });
+
+  it("a server that needs nothing in the browser gives no page", async () => {
+    const { m, sessions } = setup();
+    await m.mcp(ID, CWD);
+    sessions[0].signInUrl = null;
+    expect(await m.mcpAction(ID, "crm", "signin", CWD)).toMatchObject({ ok: true, url: null });
+  });
+
   it("a restart from a panel button starts with the chat's model and mode", async () => {
     const { m, sessions } = setup();
     await m.mcp(ID, CWD, { model: "fable", permissionMode: "plan" });
@@ -329,6 +403,32 @@ describe("the /mcp panel", () => {
     expect(await m.mcp(null, CWD)).toMatchObject({ live: false });
     expect(sessions).toHaveLength(0);
     expect(probed).toEqual([CWD]);
+  });
+});
+
+describe("MCP sign-in in a session", () => {
+  it("keeps the session open while you sign in, and later use never shortens that", async () => {
+    const s = new ChatSession({ cwd: CWD, claudePath: "claude.exe", machine: "Uni PC", permissionMode: "default" });
+    const calls: string[] = [];
+    (s as unknown as { q: unknown }).q = {
+      mcpAuthenticate: async (n: string) => (calls.push(`auth ${n}`), { authUrl: "https://auth.example.com/a", requiresUserAction: true, callbackExpected: true }),
+      mcpSubmitOAuthCallbackUrl: async (n: string, u: string) => void calls.push(`cb ${n} ${u}`),
+      mcpClearAuth: async (n: string) => void calls.push(`clear ${n}`),
+    };
+    expect(await s.mcpSignIn("crm")).toEqual({ url: "https://auth.example.com/a", callbackExpected: true });
+    const held = s.lastActivity;
+    expect(held - Date.now()).toBeGreaterThan(9 * 60_000);
+    await s.mcpSignInCallback("crm", "http://localhost:1/callback?code=x");
+    await s.mcpSignOut("crm");
+    expect(s.lastActivity).toBe(held);
+    expect(calls).toEqual(["auth crm", "cb crm http://localhost:1/callback?code=x", "clear crm"]);
+  });
+
+  it("says so when this Claude Code can't sign in from the app", async () => {
+    const s = new ChatSession({ cwd: CWD, claudePath: "claude.exe", machine: "Uni PC", permissionMode: "default" });
+    (s as unknown as { q: unknown }).q = {};
+    await expect(s.mcpSignIn("crm")).rejects.toThrow(/can't sign in/);
+    await expect(s.mcpSignOut("crm")).rejects.toThrow(/can't sign out/);
   });
 });
 

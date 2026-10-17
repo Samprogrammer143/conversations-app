@@ -340,6 +340,23 @@ export interface McpServerInfo {
   scope: string | null;
   toolCount: number;
   error: string | null;
+  /** "stdio", "http", "sse", "claudeai-proxy"...: http and sse servers (and claude.ai connectors) can use a sign-in. */
+  transport: string | null;
+  /** Its tools, for the server's details (connected servers only). */
+  tools: { name: string; description: string | null }[];
+}
+
+/** What a /mcp panel action did. A sign-in gives the provider's page (already opened in the browser). */
+export interface McpActionResult {
+  ok: boolean;
+  err?: string;
+  servers?: McpServerInfo[];
+  /** signin: the provider's sign-in page; null when the server needed nothing. */
+  url?: string | null;
+  /** signin: Claude Code on this PC waits for the browser to come back (otherwise the sign-in finishes on the provider's site). */
+  callbackExpected?: boolean;
+  /** signin: the page was opened in the browser (only secure https pages are opened by themselves). */
+  opened?: boolean;
 }
 
 /** The /mcp panel's contents. `live`: the chat's Claude Code is running in the app, so servers can be reconnected. */

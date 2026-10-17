@@ -1079,20 +1079,52 @@
   overflow-y: auto;
   padding: 4px;
 }
+.mcp-item {
+  border-radius: var(--radius-md);
+}
+.mcp-item[data-open] {
+  background: var(--fill-quaternary);
+}
 .mcp-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 48px;
-  padding: 6px 8px 6px 12px;
+  padding: 0 8px 0 0;
   border-radius: var(--radius-md);
 }
 .mcp-row:hover {
   background: var(--fill-quaternary);
 }
+/* The server itself: opens its details. */
+.mcp-expand {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: stretch;
+  padding: 6px 0 6px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+}
+.mcp-expand:focus-visible {
+  outline: 2px solid var(--icon-accent);
+  outline-offset: -2px;
+}
+.mcp-chevron {
+  flex: none;
+  color: var(--label-tertiary);
+}
 .mcp-what {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 .mcp-name {
   font: 500 13px/18px var(--font-mono);
@@ -1100,6 +1132,130 @@
 .mcp-sub {
   font: 400 12px/16px var(--font-ui);
   color: var(--label-secondary);
+}
+.mcp-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.mcp-actions .icon {
+  margin-right: 2px;
+}
+/* A sign-in finishing in the browser, under its server. */
+.mcp-signin {
+  margin: 0 8px 8px 30px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--fill-quaternary);
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-primary);
+}
+.mcp-signin p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+.mcp-paste {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.mcp-paste input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--separator-default);
+  background: var(--bg-elevated);
+  font: 400 12px/16px var(--font-mono);
+  color: var(--label-primary);
+  outline: none;
+}
+.mcp-paste input:focus {
+  border-color: var(--icon-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--icon-accent) 22%, transparent);
+}
+.mcp-signin-actions,
+.mcp-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mcp-signin .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent-glyph);
+  cursor: pointer;
+}
+.mcp-signin .link:hover {
+  text-decoration: underline;
+}
+.mcp-hint {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.mcp-signin .mcp-hint {
+  margin: 0 0 6px;
+}
+/* A server's details: where it is set up, its type, its tools. */
+.mcp-details {
+  padding: 0 12px 10px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mcp-details dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font: 400 12px/16px var(--font-ui);
+}
+.mcp-details dt {
+  color: var(--label-secondary);
+}
+.mcp-details dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mcp-details .mcp-error {
+  color: var(--status-danger);
+}
+.mcp-tools-head {
+  font: 600 11px/14px var(--font-ui);
+  color: var(--label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mcp-tools {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mcp-tools li {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.mcp-tool-name {
+  font: 500 12px/16px var(--font-mono);
+}
+.mcp-tool-desc {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .mcp-row[data-status="failed"] .mcp-sub {
   color: var(--status-danger);

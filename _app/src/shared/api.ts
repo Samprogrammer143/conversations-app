@@ -18,6 +18,7 @@ import type {
   ComposerState,
   WorkspaceInfo,
   McpPanelData,
+  McpActionResult,
   McpServerInfo,
   SearchResult,
   Settings,
@@ -85,9 +86,11 @@ export interface ConversationsApi {
     /** Stops a "!" command running in a new chat (by its composer key). */
     stopShell(key: string): Promise<void>;
     /** /mcp: the chat's MCP servers (from its running session when there is one). */
-    mcp(id: string | null, projectId: string | null, folder: string | null, opts?: { model?: string | null; effort?: Effort | null; permissionMode?: string }): Promise<McpPanelData & { ok: boolean; err?: string }>;
+    /** `noStart`: only ask a Claude Code already running for the chat (looking again while a sign-in waits). */
+    mcp(id: string | null, projectId: string | null, folder: string | null, opts?: { model?: string | null; effort?: Effort | null; permissionMode?: string; noStart?: boolean }): Promise<McpPanelData & { ok: boolean; err?: string }>;
     /** Reconnect, enable or disable a server in the chat's running session. */
-    mcpAction(id: string, name: string, action: "reconnect" | "enable" | "disable", opts?: { model?: string | null; effort?: Effort | null; permissionMode?: string }): Promise<{ ok: boolean; err?: string; servers?: McpServerInfo[] }>;
+    /** signin opens the provider's sign-in page in the browser; callback takes the address it ended on (`opts.url`). */
+    mcpAction(id: string, name: string, action: "reconnect" | "enable" | "disable" | "signin" | "callback" | "signout", opts?: { model?: string | null; effort?: Effort | null; permissionMode?: string; url?: string }): Promise<McpActionResult>;
     stop(id: string): Promise<void>;
     respond(requestId: string, decision: "allow" | "allow-always" | "deny"): Promise<void>;
     setModel(id: string, model: string): Promise<void>;

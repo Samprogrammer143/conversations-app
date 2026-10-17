@@ -2349,7 +2349,9 @@ function toMcpInfo(list) {
     status: STATUSES.has(s.status) ? s.status : "failed",
     scope: s.source ?? s.scope ?? null,
     toolCount: Array.isArray(s.tools) ? s.tools.length : 0,
-    error: typeof s.error === "string" && s.error.trim() ? s.error.trim().slice(0, 400) : null
+    error: typeof s.error === "string" && s.error.trim() ? s.error.trim().slice(0, 400) : null,
+    transport: typeof s.config?.type === "string" ? s.config.type : null,
+    tools: (Array.isArray(s.tools) ? s.tools : []).filter((t) => t && typeof t.name === "string").slice(0, 200).map((t) => ({ name: t.name.slice(0, 200), description: typeof t.description === "string" && t.description.trim() ? t.description.trim().replace(/\s+/g, " ").slice(0, 300) : null }))
   })).sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
 }
 async function* nothing() {
@@ -3162,6 +3164,7 @@ function describeActivity(name, input) {
       return `Using ${name}`;
   }
 }
+var SIGN_IN_WAIT_MS = 10 * 60 * 1e3;
 var ChatSession = class extends EventEmitter4 {
   constructor(opts) {
     super();
@@ -3223,7 +3226,7 @@ var ChatSession = class extends EventEmitter4 {
   }
   set(patch) {
     this.status = { ...this.status, ...patch, conversationId: this.id ?? "" };
-    this.lastActivity = Date.now();
+    this.touch();
     this.emit("status", this.status);
   }
   start(first, attachments = []) {
@@ -3301,7 +3304,7 @@ var ChatSession = class extends EventEmitter4 {
       this.input.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null, shouldQuery: false, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
     }
     this.lastWriteAt = Date.now();
-    this.lastActivity = Date.now();
+    this.touch();
   }
   /** The next queued item once a turn is over: records go straight in, a message starts the next turn. */
   nextFollowUp() {
@@ -3363,7 +3366,7 @@ var ChatSession = class extends EventEmitter4 {
     this.emit("ended");
   }
   handle(m) {
-    this.lastActivity = Date.now();
+    this.touch();
     switch (m.type) {
       case "system":
         if (m.subtype === "init") {
@@ -3595,18 +3598,47 @@ ${JSON.stringify(input, null, 2).slice(0, 1200)}`;
       log("chat", `setPermissionMode failed: ${e.message}`);
     }
   }
+  /** Marks the session used now (never shortening the hold an MCP sign-in put on it). */
+  touch() {
+    this.lastActivity = Math.max(this.lastActivity, Date.now());
+  }
   /** The MCP servers this session has, as /mcp would list them. */
   async mcpStatus() {
     return toMcpInfo(await this.q?.mcpServerStatus() ?? []);
   }
   /** Reconnects one MCP server in this session (throws with Claude Code's reason when it can't). */
   async mcpReconnect(name) {
-    this.lastActivity = Date.now();
+    this.touch();
     await this.q?.reconnectMcpServer(name);
+  }
+  /**
+   * Starts an MCP server's sign-in, as /mcp's Authenticate does: the provider's sign-in
+   * page (Claude Code waits on this PC for the browser to come back), or nothing to do.
+   */
+  async mcpSignIn(name) {
+    const api = this.q;
+    if (!api?.mcpAuthenticate) throw new Error("This Claude Code can't sign in to MCP servers from the app");
+    const r = await api.mcpAuthenticate(name);
+    this.lastActivity = Date.now() + SIGN_IN_WAIT_MS;
+    return { url: typeof r?.authUrl === "string" ? r.authUrl : null, callbackExpected: r?.callbackExpected === true };
+  }
+  /** The address the browser ended on, when it couldn't hand the sign-in back by itself. */
+  async mcpSignInCallback(name, url) {
+    this.touch();
+    const api = this.q;
+    if (!api?.mcpSubmitOAuthCallbackUrl) throw new Error("This Claude Code can't take a sign-in address from the app");
+    await api.mcpSubmitOAuthCallbackUrl(name, url);
+  }
+  /** Signs out of an MCP server (its saved sign-in goes), as /mcp's Clear authentication does. */
+  async mcpSignOut(name) {
+    this.touch();
+    const api = this.q;
+    if (!api?.mcpClearAuth) throw new Error("This Claude Code can't sign out of MCP servers from the app");
+    await api.mcpClearAuth(name);
   }
   /** Turns one MCP server on or off, as /mcp enable and disable do. */
   async mcpToggle(name, enabled) {
-    this.lastActivity = Date.now();
+    this.touch();
     await this.q?.toggleMcpServer(name, enabled);
   }
   async models() {
@@ -3992,10 +4024,14 @@ var ChatManager = class extends EventEmitter5 {
    * The /mcp panel: the running session's servers when the chat is open in the app
    * (they can be reconnected there), otherwise what a chat in its folder would have.
    */
-  async mcp(id, cwd, opts = {}) {
+  async mcp(id, cwd, opts = {}, look) {
     const claudePath = this.deps.claudePath();
     if (!claudePath) throw new Error("Claude Code isn't installed on this PC");
     let note;
+    if (look?.noStart) {
+      const s = id ? this.sessions.get(id) : void 0;
+      return s?.alive && s.mcpStatus ? { live: true, servers: await s.mcpStatus() } : { live: false, servers: [], note: "This chat's Claude Code has stopped." };
+    }
     if (id) {
       const live = await this.ensureLive(id, cwd, opts, claudePath);
       if (live.s?.mcpStatus) return { live: true, servers: await this.settledStatus(live.s, live.fresh) };
@@ -4032,8 +4068,12 @@ var ChatManager = class extends EventEmitter5 {
     }
     return list;
   }
-  /** Reconnect, enable or disable one MCP server in the chat's running session. */
-  async mcpAction(id, name, action, cwd = "", opts = {}) {
+  /**
+   * Reconnect, enable or disable one MCP server in the chat's running session, or sign in
+   * (the provider's page, to open in the browser), take the address a sign-in ended on, or
+   * sign out.
+   */
+  async mcpAction(id, name, action, cwd = "", opts = {}, arg) {
     let s = this.sessions.get(id);
     if (!s?.alive) {
       const claudePath = this.deps.claudePath();
@@ -4044,12 +4084,28 @@ var ChatManager = class extends EventEmitter5 {
     }
     if (!s.mcpReconnect || !s.mcpToggle || !s.mcpStatus) return { ok: false, err: "This chat's Claude Code can't change its servers." };
     try {
+      if (action === "signin") {
+        if (!s.mcpSignIn) return { ok: false, err: "This chat's Claude Code can't sign in to servers from the app." };
+        const r = await s.mcpSignIn(name);
+        return { ok: true, url: r.url, callbackExpected: r.callbackExpected, servers: await s.mcpStatus() };
+      }
+      if (action === "callback") {
+        if (!s.mcpSignInCallback || !arg) return { ok: false, err: "There's no address to finish the sign-in with." };
+        await s.mcpSignInCallback(name, arg);
+        return { ok: true, servers: await s.mcpStatus() };
+      }
+      if (action === "signout") {
+        if (!s.mcpSignOut) return { ok: false, err: "This chat's Claude Code can't sign out of servers from the app." };
+        await s.mcpSignOut(name);
+        return { ok: true, servers: await s.mcpStatus() };
+      }
       if (action === "reconnect") await s.mcpReconnect(name);
       else await s.mcpToggle(name, action === "enable");
       return { ok: true, servers: await s.mcpStatus() };
     } catch (e) {
       const why = e.message.replace(/\s+/g, " ").trim().slice(0, 300);
-      return { ok: false, err: why || `Couldn't ${action} ${name}`, servers: await s.mcpStatus().catch(() => void 0) };
+      const doing = { reconnect: "reconnect", enable: "turn on", disable: "turn off", signin: "sign in to", callback: "finish signing in to", signout: "sign out of" };
+      return { ok: false, err: why || `Couldn't ${doing[action]} ${name}`, servers: await s.mcpStatus().catch(() => void 0) };
     }
   }
   /** Stop for a command running in a new chat, which has no conversation id to stop by. */
@@ -5505,21 +5561,30 @@ function registerIpc() {
     const effort = isEffort(opts?.effort) ? opts.effort : null;
     const permissionMode = isPermissionMode(opts?.permissionMode) ? opts.permissionMode : settings.get().defaultPermissionMode;
     try {
-      return { ok: true, ...await chat.mcp(id, cwd, { model, effort, permissionMode }) };
+      return { ok: true, ...await chat.mcp(id, cwd, { model, effort, permissionMode }, { noStart: opts?.noStart === true }) };
     } catch (e) {
       return { ok: false, live: false, servers: [], err: e.message.slice(0, 300) };
     }
   });
-  handle("chat:mcpAction", (rawId, name, action, opts) => {
+  handle("chat:mcpAction", async (rawId, name, action, opts) => {
     if (!isUuid(rawId)) return { ok: false, err: BAD_ID };
     if (typeof name !== "string" || !/^[^\u0000-\u001f]{1,200}$/.test(name)) return { ok: false, err: "That isn't a server name" };
-    if (action !== "reconnect" && action !== "enable" && action !== "disable") return { ok: false, err: "Unknown action" };
+    if (!["reconnect", "enable", "disable", "signin", "callback", "signout"].includes(action)) return { ok: false, err: "Unknown action" };
+    const url = typeof opts?.url === "string" && /^https?:\/\/\S{1,4000}$/.test(opts.url.trim()) ? opts.url.trim() : void 0;
+    if (action === "callback" && !url) return { ok: false, err: "Paste the whole address from the browser's address bar" };
     const startWith = {
       model: isModelName(opts?.model) ? opts.model : settings.get().defaultModel,
       effort: isEffort(opts?.effort) ? opts.effort : null,
       permissionMode: isPermissionMode(opts?.permissionMode) ? opts.permissionMode : settings.get().defaultPermissionMode
     };
-    return chat.mcpAction(rawId, name, action, chatFolder(rawId, null, null).cwd, startWith);
+    const r = await chat.mcpAction(rawId, name, action, chatFolder(rawId, null, null).cwd, startWith, url);
+    if (action === "signin" && r.ok && r.url) {
+      const secure = /^https:\/\//.test(r.url);
+      if (secure) void shell2.openExternal(r.url).catch(() => {
+      });
+      return { ...r, opened: secure };
+    }
+    return r;
   });
   handle("chat:setPermissionMode", (id, mode) => isUuid(id) && isPermissionMode(mode) ? chat.setPermissionMode(id, mode) : void 0);
   handle("chat:status", (id) => isUuid(id) ? chat.status(id) : null);

@@ -94,7 +94,7 @@ try {
   await run("/mcp");
   const panel = await waitFor(() => {
     const p = document.querySelector(".mcp-panel");
-    const rows = p ? [...p.querySelectorAll(".mcp-row")].map((r) => ({ name: r.querySelector(".mcp-name")?.textContent, status: r.getAttribute("data-status"), buttons: [...r.querySelectorAll("button")].map((b) => b.textContent.trim()) })) : [];
+    const rows = p ? [...p.querySelectorAll(".mcp-row")].map((r) => ({ name: r.querySelector(".mcp-name")?.textContent, status: r.getAttribute("data-status"), buttons: [...r.querySelectorAll(".mcp-actions button")].map((b) => b.textContent.trim()) })) : [];
     return rows.length ? { rows, foot: p.querySelector(".mcp-foot")?.textContent ?? null, text: document.querySelector('textarea[aria-label="Message"]')?.value } : null;
   }, null, 30_000);
   check("/mcp opens the servers panel instead of sending", !!panel && panel.text === "", JSON.stringify(panel?.rows?.slice(0, 3)));
@@ -102,10 +102,88 @@ try {
   await win.screenshot({ path: path.join(out, "mcp-panel-live.png") });
   const target = panel?.rows.find((r) => r.status === "connected" && r.buttons.includes("Reconnect"));
   if (target) {
-    await win.evaluate((name) => [...document.querySelectorAll(".mcp-row")].find((r) => r.querySelector(".mcp-name")?.textContent === name)?.querySelector("button")?.click(), target.name);
+    await win.evaluate((name) => [...document.querySelectorAll(".mcp-row")].find((r) => r.querySelector(".mcp-name")?.textContent === name)?.querySelector(".mcp-actions button")?.click(), target.name);
     const toastText = await waitFor(() => [...document.querySelectorAll(".toast")].map((t) => t.textContent).find((t) => t.includes("connected") || t.includes(":")) ?? null, null, 30_000);
     check("Reconnect works on a server", !!toastText && toastText.includes(`${target.name} is connected`), toastText ?? "no toast");
   } else check("Reconnect works on a server", false, "no connected server to try");
+
+  // A server's details: clicking it shows where it is set up, its type and its tools.
+  if (target) {
+    await win.evaluate((name) => [...document.querySelectorAll(".mcp-item")].find((r) => r.querySelector(".mcp-name")?.textContent === name)?.querySelector(".mcp-expand")?.click(), target.name);
+    const details = await waitFor(
+      (name) => {
+        const item = [...document.querySelectorAll(".mcp-item")].find((r) => r.querySelector(".mcp-name")?.textContent === name);
+        const d = item?.querySelector(".mcp-details");
+        return d ? { tools: d.querySelectorAll(".mcp-tool-name").length, rows: [...d.querySelectorAll("dt")].map((x) => x.textContent) } : null;
+      },
+      target.name,
+      5000,
+    );
+    check("clicking a server shows its details and tools", !!details && details.tools > 0 && details.rows.includes("Set up in"), JSON.stringify(details));
+    await win.screenshot({ path: path.join(out, "mcp-panel-details.png") });
+  }
+
+  // Sign in, without the terminal: the provider's page opens in the browser (caught here,
+  // so no browser opens) and the panel waits, with a box for the address if it can't come back.
+  const signable = panel?.rows.find((r) => r.status === "needs-auth" && r.buttons.includes("Sign in") && !r.name.startsWith("claude.ai "));
+  if (signable) {
+    await app.evaluate(({ shell }) => {
+      globalThis.__opened = [];
+      shell.openExternal = async (u) => {
+        globalThis.__opened.push(u);
+      };
+    });
+    await win.evaluate((name) => [...document.querySelectorAll(".mcp-row")].find((r) => r.querySelector(".mcp-name")?.textContent === name)?.querySelector(".mcp-actions .btn-primary")?.click(), signable.name);
+    const waiting = await waitFor(
+      (name) => {
+        const item = [...document.querySelectorAll(".mcp-item")].find((r) => r.querySelector(".mcp-name")?.textContent === name);
+        const w = item?.querySelector(".mcp-signin");
+        return w ? { text: w.textContent, paste: !!w.querySelector("input") } : null;
+      },
+      signable.name,
+      30_000,
+    );
+    const opened = await app.evaluate(() => globalThis.__opened);
+    check("Sign in opens the server's sign-in page in the browser, not the terminal", opened.length === 1 && /^https:\/\//.test(opened[0]), JSON.stringify(opened.map((u) => new URL(u).host)));
+    check("the panel waits for it, with a box for the browser's address", !!waiting && waiting.paste && waiting.text.includes("in your browser"), JSON.stringify(waiting));
+    await win.screenshot({ path: path.join(out, "mcp-panel-signin.png") });
+    // Closing the panel and opening it again keeps waiting for that sign-in.
+    await win.keyboard.press("Escape");
+    await waitFor(() => !document.querySelector(".mcp-panel"), null, 3000);
+    await run("/mcp");
+    const kept = await waitFor((name) => !![...document.querySelectorAll(".mcp-item")].find((r) => r.querySelector(".mcp-name")?.textContent === name)?.querySelector(".mcp-signin"), signable.name, 30_000);
+    check("closing and reopening the panel keeps waiting for the sign-in", !!kept);
+    const bad = await win.evaluate(
+      ({ id, name }) => window.conversations.chat.mcpAction(id, name, "callback", { url: "http://localhost:1/callback?nothing=1" }),
+      { id, name: signable.name },
+    );
+    check("an address without a code is refused, the sign-in still waiting", !bad.ok && /code/i.test(bad.err ?? ""), bad.err ?? "accepted");
+    await win.evaluate(() => [...document.querySelectorAll(".mcp-signin button")].find((b) => b.textContent.trim() === "Cancel")?.click());
+    const cancelled = await waitFor(() => !document.querySelector(".mcp-signin"), null, 3000);
+    check("Cancel stops waiting", !!cancelled);
+  } else console.log("SKIP  sign-in: no server here needs a sign-in");
+
+  // A claude.ai connector signs in on claude.ai: its page opens, then Done reconnects it here.
+  const connector = panel?.rows.find((r) => r.status === "needs-auth" && r.name.startsWith("claude.ai "));
+  if (connector) {
+    await app.evaluate(() => {
+      globalThis.__opened = [];
+    });
+    await win.evaluate((name) => [...document.querySelectorAll(".mcp-row")].find((r) => r.querySelector(".mcp-name")?.textContent === name)?.querySelector(".mcp-actions .btn-primary")?.click(), connector.name);
+    const waiting = await waitFor(
+      (name) => {
+        const w = [...document.querySelectorAll(".mcp-item")].find((r) => r.querySelector(".mcp-name")?.textContent === name)?.querySelector(".mcp-signin");
+        return w ? { text: w.textContent, done: [...w.querySelectorAll("button")].some((b) => b.textContent.trim() === "Done") } : null;
+      },
+      connector.name,
+      30_000,
+    );
+    const opened = await app.evaluate(() => globalThis.__opened);
+    check("a claude.ai connector's Sign in opens its page on claude.ai", opened.length === 1 && new URL(opened[0]).host.endsWith("claude.ai"), JSON.stringify(opened.map((u) => new URL(u).host)));
+    check("and the panel offers Done for when it is connected there", !!waiting && waiting.done, waiting?.text ?? "");
+    await win.screenshot({ path: path.join(out, "mcp-panel-connector.png") });
+    await win.evaluate(() => [...document.querySelectorAll(".mcp-signin button")].find((b) => b.textContent.trim() === "Cancel")?.click());
+  }
   await win.keyboard.press("Escape");
   await win.waitForTimeout(300);
 
@@ -151,7 +229,7 @@ try {
   const offline = await waitFor(() => {
     const p = document.querySelector(".mcp-panel");
     const rows = p ? p.querySelectorAll(".mcp-row").length : 0;
-    return rows ? { rows, foot: p.querySelector(".mcp-foot")?.textContent ?? "", buttons: p.querySelectorAll(".mcp-row button").length } : null;
+    return rows ? { rows, foot: p.querySelector(".mcp-foot")?.textContent ?? "", buttons: p.querySelectorAll(".mcp-actions button").length } : null;
   }, null, 40_000);
   check("/mcp in a new chat lists its servers, read-only", !!offline && offline.buttons === 0 && offline.foot.includes("hasn’t started"), JSON.stringify(offline));
   await win.screenshot({ path: path.join(out, "mcp-panel-new-chat.png") });
@@ -204,14 +282,14 @@ try {
   await win.press(box, "Enter");
   const panel = await waitFor(() => {
     const p = document.querySelector(".mcp-panel");
-    const rows = p ? [...p.querySelectorAll(".mcp-row")].map((r) => ({ name: r.querySelector(".mcp-name")?.textContent, status: r.getAttribute("data-status"), buttons: [...r.querySelectorAll("button")].map((b) => b.textContent.trim()) })) : [];
+    const rows = p ? [...p.querySelectorAll(".mcp-row")].map((r) => ({ name: r.querySelector(".mcp-name")?.textContent, status: r.getAttribute("data-status"), buttons: [...r.querySelectorAll(".mcp-actions button")].map((b) => b.textContent.trim()) })) : [];
     return rows.length ? { rows, foot: p.querySelector(".mcp-foot")?.textContent ?? null } : null;
   }, null, 60_000);
   check("/mcp on a chat that isn't running starts it, with Reconnect and Turn off", !!panel && !panel.foot && panel.rows.some((r) => r.buttons.includes("Reconnect")) && panel.rows.every((r) => r.buttons.length > 0), JSON.stringify(panel?.rows?.slice(0, 4)));
   await win.screenshot({ path: path.join(out, "mcp-panel-started.png") });
   const target = panel?.rows.find((r) => r.status === "connected" && r.buttons.includes("Reconnect"));
   if (target) {
-    await win.evaluate((name) => [...document.querySelectorAll(".mcp-row")].find((r) => r.querySelector(".mcp-name")?.textContent === name)?.querySelector("button")?.click(), target.name);
+    await win.evaluate((name) => [...document.querySelectorAll(".mcp-row")].find((r) => r.querySelector(".mcp-name")?.textContent === name)?.querySelector(".mcp-actions button")?.click(), target.name);
     const t = await waitFor((name) => [...document.querySelectorAll(".toast")].map((x) => x.textContent).find((x) => x.includes(name)) ?? null, target.name, 30_000);
     check("Reconnect works there", !!t && t.includes("is connected"), t ?? "no toast");
   } else check("Reconnect works there", false, "no connected server");

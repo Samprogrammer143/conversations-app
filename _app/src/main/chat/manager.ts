@@ -10,7 +10,7 @@
 
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
-import type { Attachment, ChatStatus, McpPanelData, McpServerInfo, PermissionRequest, SlashCommandInfo } from "../../shared/types";
+import type { Attachment, ChatStatus, McpActionResult, McpPanelData, McpServerInfo, PermissionRequest, SlashCommandInfo } from "../../shared/types";
 import { probeMcp } from "./mcp";
 import { commandsFor, knownModels, type ModelChoice } from "./models";
 import type { Decision, EffortLevel, PermissionMode } from "../validate";
@@ -25,6 +25,8 @@ export interface ChatManagerLike extends EventEmitter {
   status(id: string): ChatStatus | null;
   pendingPermissions(): PermissionRequest[];
 }
+
+export type McpAction = "reconnect" | "enable" | "disable" | "signin" | "callback" | "signout";
 
 export interface StartArgs {
   /** Existing conversation id, or null for a new chat. */
@@ -61,6 +63,9 @@ export interface SessionLike extends EventEmitter {
   settle?(ms?: number): Promise<void>;
   mcpStatus?(): Promise<McpServerInfo[]>;
   mcpReconnect?(name: string): Promise<void>;
+  mcpSignIn?(name: string): Promise<{ url: string | null; callbackExpected: boolean }>;
+  mcpSignInCallback?(name: string, url: string): Promise<void>;
+  mcpSignOut?(name: string): Promise<void>;
   mcpToggle?(name: string, enabled: boolean): Promise<void>;
   pendingRequests(): PermissionRequest[];
   respond(requestId: string, decision: Decision): boolean;
@@ -293,10 +298,15 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
    * The /mcp panel: the running session's servers when the chat is open in the app
    * (they can be reconnected there), otherwise what a chat in its folder would have.
    */
-  async mcp(id: string | null, cwd: string, opts: Pick<StartArgs, "model" | "effort" | "permissionMode"> = {}): Promise<McpPanelData> {
+  async mcp(id: string | null, cwd: string, opts: Pick<StartArgs, "model" | "effort" | "permissionMode"> = {}, look?: { noStart?: boolean }): Promise<McpPanelData> {
     const claudePath = this.deps.claudePath();
     if (!claudePath) throw new Error("Claude Code isn't installed on this PC");
     let note: string | undefined;
+    // Looking again while a sign-in waits: only the running Claude Code (a new one wouldn't be waiting for the browser).
+    if (look?.noStart) {
+      const s = id ? this.sessions.get(id) : undefined;
+      return s?.alive && s.mcpStatus ? { live: true, servers: await s.mcpStatus() } : { live: false, servers: [], note: "This chat's Claude Code has stopped." };
+    }
     if (id) {
       // As in a terminal, /mcp works on the chat's running Claude Code: it is started
       // (nothing is sent, no turn runs) so its servers can be reconnected and turned off.
@@ -339,8 +349,12 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
     return list;
   }
 
-  /** Reconnect, enable or disable one MCP server in the chat's running session. */
-  async mcpAction(id: string, name: string, action: "reconnect" | "enable" | "disable", cwd = "", opts: Pick<StartArgs, "model" | "effort" | "permissionMode"> = {}): Promise<{ ok: boolean; err?: string; servers?: McpServerInfo[] }> {
+  /**
+   * Reconnect, enable or disable one MCP server in the chat's running session, or sign in
+   * (the provider's page, to open in the browser), take the address a sign-in ended on, or
+   * sign out.
+   */
+  async mcpAction(id: string, name: string, action: McpAction, cwd = "", opts: Pick<StartArgs, "model" | "effort" | "permissionMode"> = {}, arg?: string): Promise<McpActionResult> {
     let s = this.sessions.get(id);
     if (!s?.alive) {
       // It stopped since the panel opened (idle for a while): start it again for this.
@@ -352,12 +366,28 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
     }
     if (!s.mcpReconnect || !s.mcpToggle || !s.mcpStatus) return { ok: false, err: "This chat's Claude Code can't change its servers." };
     try {
+      if (action === "signin") {
+        if (!s.mcpSignIn) return { ok: false, err: "This chat's Claude Code can't sign in to servers from the app." };
+        const r = await s.mcpSignIn(name);
+        return { ok: true, url: r.url, callbackExpected: r.callbackExpected, servers: await s.mcpStatus() };
+      }
+      if (action === "callback") {
+        if (!s.mcpSignInCallback || !arg) return { ok: false, err: "There's no address to finish the sign-in with." };
+        await s.mcpSignInCallback(name, arg);
+        return { ok: true, servers: await s.mcpStatus() };
+      }
+      if (action === "signout") {
+        if (!s.mcpSignOut) return { ok: false, err: "This chat's Claude Code can't sign out of servers from the app." };
+        await s.mcpSignOut(name);
+        return { ok: true, servers: await s.mcpStatus() };
+      }
       if (action === "reconnect") await s.mcpReconnect(name);
       else await s.mcpToggle(name, action === "enable");
       return { ok: true, servers: await s.mcpStatus() };
     } catch (e) {
       const why = (e as Error).message.replace(/\s+/g, " ").trim().slice(0, 300);
-      return { ok: false, err: why || `Couldn't ${action} ${name}`, servers: await s.mcpStatus().catch(() => undefined) };
+      const doing: Record<McpAction, string> = { reconnect: "reconnect", enable: "turn on", disable: "turn off", signin: "sign in to", callback: "finish signing in to", signout: "sign out of" };
+      return { ok: false, err: why || `Couldn't ${doing[action]} ${name}`, servers: await s.mcpStatus().catch(() => undefined) };
     }
   }
 

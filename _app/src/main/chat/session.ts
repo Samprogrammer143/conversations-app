@@ -102,6 +102,16 @@ export function describeActivity(name: string, input: Record<string, unknown>): 
   }
 }
 
+/** How long an MCP sign-in may take in the browser before an unused session can close. */
+const SIGN_IN_WAIT_MS = 10 * 60 * 1000;
+
+/** What the Agent SDK's session offers for MCP sign-in (the requests /mcp uses; not in its published types). */
+interface McpAuthApi {
+  mcpAuthenticate?(serverName: string, redirectUri?: string): Promise<unknown>;
+  mcpSubmitOAuthCallbackUrl?(serverName: string, callbackUrl: string): Promise<unknown>;
+  mcpClearAuth?(serverName: string): Promise<unknown>;
+}
+
 export class ChatSession extends EventEmitter {
   id: string | null;
   readonly cwd: string;
@@ -165,7 +175,7 @@ export class ChatSession extends EventEmitter {
 
   private set(patch: Partial<ChatStatus>) {
     this.status = { ...this.status, ...patch, conversationId: this.id ?? "" };
-    this.lastActivity = Date.now();
+    this.touch();
     this.emit("status", this.status);
   }
 
@@ -253,7 +263,7 @@ export class ChatSession extends EventEmitter {
       this.input.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null, shouldQuery: false, timestamp: new Date().toISOString() } as SDKUserMessage);
     }
     this.lastWriteAt = Date.now();
-    this.lastActivity = Date.now();
+    this.touch();
   }
 
   /** The next queued item once a turn is over: records go straight in, a message starts the next turn. */
@@ -324,7 +334,7 @@ export class ChatSession extends EventEmitter {
   }
 
   private handle(m: SDKMessage) {
-    this.lastActivity = Date.now();
+    this.touch();
     switch (m.type) {
       case "system":
         if (m.subtype === "init") {
@@ -586,6 +596,11 @@ export class ChatSession extends EventEmitter {
     }
   }
 
+  /** Marks the session used now (never shortening the hold an MCP sign-in put on it). */
+  private touch() {
+    this.lastActivity = Math.max(this.lastActivity, Date.now());
+  }
+
   /** The MCP servers this session has, as /mcp would list them. */
   async mcpStatus(): Promise<McpServerInfo[]> {
     return toMcpInfo((await this.q?.mcpServerStatus()) ?? []);
@@ -593,13 +608,43 @@ export class ChatSession extends EventEmitter {
 
   /** Reconnects one MCP server in this session (throws with Claude Code's reason when it can't). */
   async mcpReconnect(name: string): Promise<void> {
-    this.lastActivity = Date.now();
+    this.touch();
     await this.q?.reconnectMcpServer(name);
+  }
+
+  /**
+   * Starts an MCP server's sign-in, as /mcp's Authenticate does: the provider's sign-in
+   * page (Claude Code waits on this PC for the browser to come back), or nothing to do.
+   */
+  async mcpSignIn(name: string): Promise<{ url: string | null; callbackExpected: boolean }> {
+    const api = this.q as unknown as McpAuthApi | null;
+    if (!api?.mcpAuthenticate) throw new Error("This Claude Code can't sign in to MCP servers from the app");
+    const r = (await api.mcpAuthenticate(name)) as { authUrl?: unknown; callbackExpected?: unknown } | undefined;
+    // Claude Code waits here for the browser: keep this session open while you sign in,
+    // even when it was started only for /mcp (those close after two minutes unused).
+    this.lastActivity = Date.now() + SIGN_IN_WAIT_MS;
+    return { url: typeof r?.authUrl === "string" ? r.authUrl : null, callbackExpected: r?.callbackExpected === true };
+  }
+
+  /** The address the browser ended on, when it couldn't hand the sign-in back by itself. */
+  async mcpSignInCallback(name: string, url: string): Promise<void> {
+    this.touch();
+    const api = this.q as unknown as McpAuthApi | null;
+    if (!api?.mcpSubmitOAuthCallbackUrl) throw new Error("This Claude Code can't take a sign-in address from the app");
+    await api.mcpSubmitOAuthCallbackUrl(name, url);
+  }
+
+  /** Signs out of an MCP server (its saved sign-in goes), as /mcp's Clear authentication does. */
+  async mcpSignOut(name: string): Promise<void> {
+    this.touch();
+    const api = this.q as unknown as McpAuthApi | null;
+    if (!api?.mcpClearAuth) throw new Error("This Claude Code can't sign out of MCP servers from the app");
+    await api.mcpClearAuth(name);
   }
 
   /** Turns one MCP server on or off, as /mcp enable and disable do. */
   async mcpToggle(name: string, enabled: boolean): Promise<void> {
-    this.lastActivity = Date.now();
+    this.touch();
     await this.q?.toggleMcpServer(name, enabled);
   }
 
