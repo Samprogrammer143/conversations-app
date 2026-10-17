@@ -195,7 +195,7 @@ export function ConversationList({ showSidebarToggle, onOpen }: { showSidebarTog
             <Icon name="wifi-off" />
             <div className="text">
               <span className="title">You're offline</span>
-              <span className="detail">Everything on this PC still works. Changes upload when you reconnect.</span>
+              <span className="sub">Everything on this PC still works. Changes upload when you reconnect.</span>
             </div>
           </div>
         </div>

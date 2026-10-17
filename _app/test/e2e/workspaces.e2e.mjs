@@ -158,6 +158,22 @@ try {
   check("everything it starts uses the workspace's folders", procEnv.claude === wsDir?.claude && procEnv.sync === wsDir?.sync && !!procEnv.data?.includes("workspaces"), JSON.stringify(procEnv));
   check("its sync engine is the first workspace's", !!procEnv.engine && procEnv.engine.endsWith(path.join("_sync", "sync.mjs")) && !procEnv.engine.startsWith(wsDir?.sync ?? "?"), procEnv.engine ?? "");
   check("Open in CLI uses its claude-<id> command", !!procEnv.launcher && procEnv.launcher.endsWith(".cmd"), procEnv.launcher ?? "");
+  // Not signed in (a scratch Claude folder): the window says so where you'd type, with a way in.
+  await win.evaluate((id) => document.querySelector(`[data-id="${id}"]`)?.click(), WS_ID);
+  const banner = await waitFor(win, () => [...document.querySelectorAll(".banner")].map((b) => b.textContent).find((t) => t.includes("isn't signed in")) ?? null, null, 15_000);
+  check("a workspace that isn't signed in says so above the message box, with Sign in", !!banner && banner.includes("Test WS") && banner.includes("Sign in"), banner ?? "");
+  await win.screenshot({ path: path.join(out, "ws-signed-out-banner.png") });
+  await win.click(".ws-button");
+  await win.waitForTimeout(300);
+  const signItem = await win.evaluate(() => [...document.querySelectorAll(".ws-menu .menu-item")].map((b) => b.textContent.trim()).find((t) => t.startsWith("Sign in to")) ?? null);
+  const sub = await win.evaluate(() => document.querySelector('.ws-menu .menu-item[aria-checked="true"] .ws-sub')?.textContent ?? null);
+  check("the menu offers Sign in for the workspace, and says it isn't signed in", signItem === "Sign in to Test WS…" && sub === "Not signed in", `${signItem} | ${sub}`);
+  await win.keyboard.press("Escape");
+  // A new chat (where a new workspace starts) says so too.
+  await win.keyboard.press("Control+N");
+  const draftBanner = await waitFor(win, () => (document.querySelector('section[aria-label="New chat"]') ? [...document.querySelectorAll(".banner")].map((b) => b.textContent).find((t) => t.includes("isn't signed in")) ?? null : null), null, 10_000);
+  check("a new chat says the workspace isn't signed in, with Sign in", !!draftBanner && draftBanner.includes("Sign in"), draftBanner ?? "");
+  await win.keyboard.press("Escape");
   await win.evaluate(() => document.body.classList.add("solid"));
   await win.click(".ws-button");
   await win.waitForTimeout(400);

@@ -589,7 +589,7 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
    * delete needs no writer). A start in flight is called off first, so when this
    * returns the app has no session for it and won't start one.
    */
-  async release(id: string) {
+  async release(id: string, opts: { onlyIdle?: boolean } = {}) {
     // A command running here stops, and its record is not written: the terminal has the conversation now.
     const sh = this.shells.get(id);
     if (sh) {
@@ -599,6 +599,8 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
       // A record already on its way is called off with the start below, or written before the close.
     }
     await this.cancelStart(id);
+    // Only an idle one (after a sign-in): something sent meanwhile keeps it going.
+    if (opts.onlyIdle && this.isRunning(id)) return;
     const s = this.sessionFor(id);
     if (!s) return;
     if (s.busy) await s.interrupt();
@@ -607,6 +609,12 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
     s.close();
     this.sessions.delete(id);
     this.drafts.delete(id);
+  }
+
+  /** Ends every session that isn't working on something (after a sign-in: they start again with it). */
+  async releaseIdle() {
+    // Not one working on something: a turn, a start, a "!" command, a permission question.
+    for (const id of [...this.sessions.keys()]) if (!this.isRunning(id)) await this.release(id, { onlyIdle: true });
   }
 
   respond(requestId: string, decision: Decision): boolean {

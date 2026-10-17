@@ -39,6 +39,7 @@ import { StartupQueue } from "./startup-queue";
 import { cleanStages, writeRunningMark } from "../shell/stages";
 import { log, logPath } from "./log";
 import { loadSdk, sdkLoadedFrom } from "./chat/sdk";
+import { authStatus, credentialsTime, watchSignIn } from "./auth";
 
 // A programming mistake must never take the tray agent (and sync) down with it.
 // Logged, never shown as a dialog: the window shows nothing and the app carries on.
@@ -514,7 +515,21 @@ function registerIpc() {
   handle("app:updateReady", () => updateReady);
   handle("app:restart", () => restartForUpdate());
   // Workspaces: one Claude account each; switching restarts the app into the other one.
-  handle("workspace:list", () => workspacesForWindow());
+  // Each workspace's Claude account as Claude Code reports it (cached for a minute).
+  handle("workspace:list", async () => {
+    const r = workspacesForWindow();
+    const all = listWorkspaces().workspaces;
+    const claudePath = claudeInstall().path ?? null;
+    const workspaces = await Promise.all(
+      r.workspaces.map(async (info) => {
+        const w = all.find((x) => x.id === info.id);
+        if (!w || !info.setUp || w.disconnected) return info;
+        const s = await authStatus(w, claudePath);
+        return s ? { ...info, signedIn: s.loggedIn, account: s.email } : info;
+      }),
+    );
+    return { ...r, workspaces };
+  });
   handle("workspace:switch", (id: unknown, force: unknown) => {
     if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: "That workspace isn't set up on this PC" };
     if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: "That workspace is disconnected on this PC: reconnect it first" };
@@ -531,14 +546,26 @@ function registerIpc() {
     if (typeof i.name !== "string" || !isRemote(i.remote)) return { ok: false, err: "Give it a name and the repository's address" };
     return setUpWorkspace({ id: isWorkspaceId(i.id) ? i.id : undefined, name: i.name, remote: i.remote });
   });
-  handle("workspace:signIn", (id: unknown) => {
-    const w = listWorkspaces().workspaces.find((x) => x.id === id);
-    if (!w || w.id === "main") return { ok: false, err: "Sign in to this workspace's account in a terminal with claude" };
-    writeLauncher(w);
-    const launcher = launcherPath(w);
-    if (!launcher) return { ok: false, err: "Signing in from the app works on Windows only" };
-    // Claude Code asks to sign in the first time it starts in a new folder.
-    launchInTerminal(app.getPath("home"), launcher, []);
+  // Signs a workspace's Claude Code in (or into another account): `claude auth login` for
+  // its Claude folder, in a terminal; the browser does the rest. The app watches until it
+  // took, then tells the window, and idle chats in this workspace start again with it.
+  // (No id: the workspace this window is in.)
+  handle("workspace:signIn", async (id: unknown) => {
+    const w = id == null ? currentWorkspace() : listWorkspaces().workspaces.find((x) => x.id === id);
+    if (!w) return { ok: false, err: "There's no such workspace" };
+    if (!writeLauncher(w)) return { ok: false, err: "Signing in from the app works on Windows only" };
+    const launcher = launcherPath(w)!;
+    const claudePath = claudeInstall().path ?? null;
+    // How it is now, read alongside the terminal opening (a sign-in takes far longer).
+    const credsAt = credentialsTime(w);
+    const state = authStatus(w, claudePath, true);
+    launchInTerminal(app.getPath("home"), launcher, ["auth", "login", "--claudeai"]);
+    watchSignIn(w, claudePath, { state: await state, credsAt }, (s) => {
+      broadcast("workspaces-changed", null);
+      broadcast("toast", { text: `${w.name} is signed in${s.email ? ` as ${s.email}` : ""}` });
+      // Sessions started before the sign-in still run without it.
+      if (w.id === currentWorkspace().id) void chat.releaseIdle();
+    });
     return { ok: true };
   });
   // Leaves a workspace out of Conversations on this PC (its Claude Code chats stay as they

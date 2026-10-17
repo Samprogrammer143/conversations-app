@@ -328,6 +328,8 @@ export interface WorkspaceInfo {
   signedIn: boolean;
   /** Left out of Conversations on this PC (its Claude Code chats stay as they are). */
   disconnected: boolean;
+  /** The Claude account it is signed in with, when Claude Code says. */
+  account?: string | null;
 }
 
 /** One MCP server as Claude Code reports it, for the /mcp panel. */

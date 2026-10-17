@@ -113,7 +113,8 @@ export interface ConversationsApi {
     /** Sets up a workspace on this PC (a new one, or one another PC has: pass its id). */
     add(input: { id?: string; name: string; remote: string }): Promise<{ ok: boolean; id?: string; err?: string }>;
     /** Opens a terminal where Claude Code asks to sign in to the workspace's account. */
-    signIn(id: string): Promise<{ ok: boolean; err?: string }>;
+    /** No id: the workspace this window is in. */
+    signIn(id: string | null): Promise<{ ok: boolean; err?: string }>;
     disconnect(id: string, force?: boolean): Promise<{ ok: boolean; err?: string; running?: number; switchedTo?: string }>;
     reconnect(id: string): Promise<{ ok: boolean; err?: string; synced?: boolean }>;
     rename(id: string, name: string): Promise<void>;

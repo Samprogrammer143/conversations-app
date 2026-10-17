@@ -27,6 +27,13 @@ export async function switchWorkspace(w: WorkspaceInfo, force = false) {
 
 const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";
 
+/** Opens the sign-in for a workspace's Claude account (a terminal, then the browser). */
+export async function signInWorkspace(w: { id: string | null; name: string }) {
+  const r = await api.workspace.signIn(w.id);
+  if (r.ok) useStore.getState().toast({ text: `Sign in to ${w.name}'s Claude account in the browser that opens. The app notices when it's done.`, icon: "terminal", durationMs: 8000 });
+  else useStore.getState().toast({ text: r.err ?? "Couldn't open the sign-in", icon: "alert" });
+}
+
 /** Brings a disconnected workspace back into Conversations, and goes to it. */
 async function reconnectWorkspace(w: WorkspaceInfo) {
   const r = await api.workspace.reconnect(w.id);
@@ -62,12 +69,13 @@ export function WorkspaceSwitcher() {
   const setUp = list.filter((w) => w.setUp);
   // Conversations always shows one: the current one can go only when another is set up here.
   const canDisconnect = !!current && setUp.some((w) => w.id !== current.id);
-  type Item = { w: WorkspaceInfo } | { rename: true } | { disconnect: true } | { add: true } | { reconnect: WorkspaceInfo };
-  const items: Item[] = [...list.map((w) => ({ w })), { rename: true as const }, ...(canDisconnect ? [{ disconnect: true as const }] : []), { add: true as const }, ...off.map((w) => ({ reconnect: w }))];
+  type Item = { w: WorkspaceInfo } | { signin: true } | { rename: true } | { disconnect: true } | { add: true } | { reconnect: WorkspaceInfo };
+  const items: Item[] = [...list.map((w) => ({ w })), ...(current ? [{ signin: true as const }] : []), { rename: true as const }, ...(canDisconnect ? [{ disconnect: true as const }] : []), { add: true as const }, ...off.map((w) => ({ reconnect: w }))];
   const run = (i: number) => {
     const it = items[i];
     setOpen(false);
     if ("add" in it) useStore.getState().openAddWorkspace(null);
+    else if ("signin" in it) current && void signInWorkspace(current);
     else if ("rename" in it) useStore.setState({ renamingWorkspace: true });
     else if ("disconnect" in it) useStore.setState({ disconnectingWorkspace: current ?? null });
     else if ("reconnect" in it) void reconnectWorkspace(it.reconnect);
@@ -113,13 +121,14 @@ export function WorkspaceSwitcher() {
               </span>
               <span className="ws-item-text">
                 <span className="ellipsis">{w.name}</span>
-                {!w.setUp ? <span className="ws-sub">On another PC · set up here</span> : !w.signedIn ? <span className="ws-sub">Not signed in yet</span> : null}
+                {!w.setUp ? <span className="ws-sub">On another PC · set up here</span> : !w.signedIn ? <span className="ws-sub">Not signed in</span> : w.account ? <span className="ws-sub ellipsis">{w.account}</span> : null}
               </span>
               {w.id === ws?.current ? <Icon name="check" /> : w.setUp ? <span className="shortcut">Ctrl+Shift+{setUp.indexOf(w) + 1}</span> : null}
             </button>
           ))}
           <div className="menu-sep" role="separator" />
           {([
+            ["signin", "square-terminal", current?.signedIn ? `Change ${current.name}'s Claude account…` : `Sign in to ${current?.name ?? "this workspace"}…`],
             ["rename", "pencil", `Rename ${current?.name ?? "this workspace"}…`],
             ["disconnect", "unlink", `Disconnect ${current?.name ?? "this workspace"}…`],
             ["add", "plus", "Add workspace…"],

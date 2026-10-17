@@ -542,7 +542,8 @@
 .banner .title {
   font: 500 12px/16px var(--font-ui);
 }
-.banner .detail {
+/* The second line (not .detail: that is the conversation pane itself). */
+.banner .sub {
   font: 400 12px/16px var(--font-ui);
   color: var(--label-secondary);
 }

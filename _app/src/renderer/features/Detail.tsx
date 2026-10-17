@@ -7,6 +7,7 @@ import { useStore } from "../lib/store";
 import { SEP, modelLabel } from "../lib/format";
 import { Transcript } from "./Transcript";
 import { McpPanel } from "./McpPanel";
+import { signInWorkspace } from "./Workspaces";
 
 const MODES: { value: string; label: string; icon: string; hint: string }[] = [
   { value: "default", label: "Ask first", icon: "shield-check", hint: "Asks before each tool runs" },
@@ -466,6 +467,16 @@ function Composer({
     if (slash) {
       const name = slash[1].toLowerCase();
       const arg = (slash[2] ?? "").trim();
+      // Signing in is a browser step: the app opens it for this workspace's Claude account.
+      if (name === "login") {
+        setText("");
+        setMenu(null);
+        const ws = useStore.getState().workspaces;
+        const cur = ws?.workspaces.find((w) => w.id === ws.current);
+        // Until the list is in, the main process picks the workspace this window is in.
+        void signInWorkspace(cur ?? { id: null, name: "this workspace" });
+        return;
+      }
       if (name === "mcp" && !arg) {
         setText("");
         setMenu(null);
@@ -764,6 +775,27 @@ export async function chooseDraftFolder() {
   if (folder) useStore.getState().startDraft(null, folder);
 }
 
+/** Above the message box, new chat or not: the workspace this window is in isn't signed in to Claude. */
+function SignInBanner() {
+  const signedOut = useStore((s) => {
+    const c = s.workspaces?.workspaces.find((w) => w.id === s.workspaces?.current);
+    return c && c.setUp && !c.signedIn ? c : null;
+  });
+  if (!signedOut) return null;
+  return (
+    <div className="banner accent">
+      <Icon name="info" />
+      <div className="text">
+        <span className="title">{signedOut.name} isn't signed in to Claude on this PC</span>
+        <span className="sub">Claude can't answer until it is. The sign-in opens in your browser.</span>
+      </div>
+      <Button kind="primary" icon="square-terminal" onClick={() => void signInWorkspace(signedOut)}>
+        Sign in
+      </Button>
+    </div>
+  );
+}
+
 /** A new chat: no transcript yet, just where it will run and the composer. */
 function Draft({ narrow }: { narrow: boolean }) {
   const draft = useStore((s) => s.draft)!;
@@ -813,6 +845,7 @@ function Draft({ narrow }: { narrow: boolean }) {
             <span className="label">Starting Claude Code</span>
           </div>
         ) : null}
+        <SignInBanner />
         <Composer id={null} projectId={draft.projectId} folder={draft.folder ?? null} status={null} disabledReason={!info?.claude.found ? "Chat needs Claude Code on this PC" : null} onSent={(cid) => setWaitingFor(cid)} lastModel={resolveAlias(info?.claude.defaultModel ?? null)} />
       </div>
     </section>
@@ -929,12 +962,13 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
             {newCount} new{row.lastPc && row.lastPc !== info?.machine ? ` from ${row.lastPc}` : ""}
           </button>
         )}
+        <SignInBanner />
         {detail.alsoOpenOn && !running && (
           <div className="banner accent">
             <Icon name="git-fork" />
             <div className="text">
               <span className="title">Also open on {detail.alsoOpenOn.pc}, updated just now</span>
-              <span className="detail">Sending from this PC starts a branch. Both parts are kept.</span>
+              <span className="sub">Sending from this PC starts a branch. Both parts are kept.</span>
             </div>
           </div>
         )}
