@@ -1725,13 +1725,23 @@ export const isDeleted = (state, id) => state?.[id]?.deleted === true;
  * Appends edits to this PC's log and uploads them. ops: [{ session, field, value }].
  * Edits are committed even when GitHub cannot be reached; they upload with the next sync.
  */
-export function appendStateOps(ops, { push = true } = {}) {
+export function appendStateOps(ops, { push = true, writtenBy = null } = {}) {
   const config = ensureRepo();
   const clean = (ops || []).filter((o) => o && isUuid(o.session) && STATE_FIELDS.has(o.field) && validValue(o.field, o.value ?? null));
   if (!clean.length) return { ok: true, nothing: true };
   // A conversation that is open on this PC is never deleted from under it.
   const open = openSessions();
-  if (clean.some((o) => o.field === "deleted" && o.value === true && isLive(o.session, ownedLocalTranscripts(o.session), open))) {
+  // writtenBy (ms): the caller (the Conversations app) wrote to it last and closed it then.
+  // Its writes don't count; anything written after that (a terminal) still does.
+  const after = (p) => {
+    try {
+      return fs.statSync(p).mtimeMs > writtenBy + 2000 && writtenRecently(p);
+    } catch {
+      return false;
+    }
+  };
+  const live = (id) => (writtenBy ? (open.get(String(id).toLowerCase()) || 0) > 0 || ownedLocalTranscripts(id).some(after) : isLive(id, ownedLocalTranscripts(id), open));
+  if (clean.some((o) => o.field === "deleted" && o.value === true && live(o.session))) {
     return { ok: false, code: "live", err: "That conversation is open in Claude Code on this PC, or was written to in the last two minutes. Close it first, then delete it." };
   }
   return withLock(() => {

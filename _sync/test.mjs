@@ -161,6 +161,11 @@ run(B, ["push", "--session", ID, "--cwd", PB]);
 r = hook(A, "session-start", { session_id: ID, transcript_path: TA, cwd: PA, source: "resume" });
 check("resume adds the newer entries to the file", has(TA, "B new while A was away"), r.stdout + r.stderr);
 check("resume tells Claude to have the user /resume again", /newer entries from PC-B/.test(r.stdout) && /\/resume/.test(r.stdout), r.stdout);
+// In the Conversations app (which brought the newest copy first) there is no /resume to ask for.
+fs.appendFileSync(TB, line("B newer again", PB));
+run(B, ["push", "--session", ID, "--cwd", PB]);
+r = run(A, ["hook", "session-start"], { CLAUDE_SYNC_IN_APP: "1" }, JSON.stringify({ session_id: ID, transcript_path: TA, cwd: PA, source: "resume" }));
+check("in the app, resume still brings the newer entries, without telling anyone to /resume", has(TA, "B newer again") && !/\/resume/.test(r.stdout), r.stdout + r.stderr);
 
 // ---- 6b. a slow download is finished in the background, never cut off (5 Oct 2026)
 fs.appendFileSync(TB, line("B slow one", PB));
@@ -1162,6 +1167,32 @@ check("live: a transcript dated hours in the future is not treated as live", has
   const importLines = text60.split("\n").filter((l) => l.startsWith("@") && l.includes("_shared/CLAUDE.md"));
   check("rules: install adds one import line to the global CLAUDE.md, and only once", i60a.status === 0 && i60b.status === 0 && importLines.length === 1 && text60.includes("# Rules shared with my other PCs"), text60 + i60a.stderr + i60b.stderr);
   check("rules: the import names the file from ~ so it works under any user name", importLines[0]?.startsWith("@~/") || importLines[0]?.startsWith("@/") || /^@[A-Za-z]:\//.test(importLines[0] ?? ""), importLines[0] ?? "");
+}
+
+// ---- 60b. deleting a conversation the Conversations app just wrote to (and closed)
+{
+  const D62 = "62626262-0000-4000-8000-000000000062";
+  fs.writeFileSync(tpath(A, PA, D62), line("written by the app just now", PA, D62));
+  run(A, ["push", "--session", D62, "--cwd", PA]);
+  const del = (extra = [], env = {}) => jsonOf(run(A, ["edit", "--json", "--ops", JSON.stringify([{ session: D62, field: "deleted", value: true }]), ...extra], env));
+  // The two-minute "written just now" check is off in these tests unless asked for.
+  const plainDel = del([], { CLAUDE_SYNC_LIVE_WINDOW_MS: "120000" });
+  check("delete: refused right after a write (something may still have it open)", plainDel && !plainDel.ok && plainDel.code === "live", JSON.stringify(plainDel));
+  // A Claude Code process that still has it open (its session file, a live pid) always stops it.
+  const sessions = path.join(A.claude, "sessions");
+  fs.mkdirSync(sessions, { recursive: true });
+  const held = path.join(sessions, `${process.pid}.json`);
+  fs.writeFileSync(held, JSON.stringify({ pid: process.pid, sessionId: D62 }));
+  const heldDel = del(["--written-by", String(Date.now())]);
+  check("delete: --written-by still refuses while a Claude Code process has it open", heldDel && !heldDel.ok && heldDel.code === "live", JSON.stringify(heldDel));
+  fs.rmSync(held, { force: true });
+  // Written after the app closed it (a terminal): still refused.
+  const closedAt = Date.now() - 10_000;
+  const laterDel = del(["--written-by", String(closedAt)], { CLAUDE_SYNC_LIVE_WINDOW_MS: "120000" });
+  check("delete: a write after the app closed it still stops it", laterDel && !laterDel.ok && laterDel.code === "live", JSON.stringify(laterDel));
+  // Only the app's own writes (before it closed it): deleted, the two-minute check on.
+  const okDel = del(["--written-by", String(Date.now())], { CLAUDE_SYNC_LIVE_WINDOW_MS: "120000" });
+  check("delete: when only the app wrote to it (before closing it), it deletes", okDel?.ok === true, JSON.stringify(okDel));
 }
 
 // ---- 61. workspaces: --sync-home, and the shared list of workspaces

@@ -3242,7 +3242,7 @@ var ChatSession = class extends EventEmitter4 {
     this.open();
   }
   open() {
-    const env = { ...process.env, CLAUDE_SYNC_INCLUDE_HEADLESS: "1" };
+    const env = { ...process.env, CLAUDE_SYNC_INCLUDE_HEADLESS: "1", CLAUDE_SYNC_IN_APP: "1" };
     delete env.ELECTRON_RUN_AS_NODE;
     this.q = query({
       prompt: this.input,
@@ -5159,15 +5159,23 @@ var EDIT_TEXT = {
   deleted: (v) => v ? "Deleted" : "Restored"
 };
 async function applyEdit(id, field, value) {
+  let releasedAt = 0;
   if (field === "deleted" && value === true) {
     if (chat.isRunning(id)) return { ok: false, err: "Claude is still working in this conversation. Stop it first, then delete it." };
     if (await chat.openInTerminal(id)) return { ok: false, err: "This conversation is open in a terminal on this PC. Close it there first, then delete it." };
     if (chat.isOpenInApp(id)) await chat.release(id);
+    releasedAt = Date.now();
   }
   const before = overlay.apply(id, field, value);
   broadcast("index-changed", [id]);
   if (await detectEngineVersion() < 3) return { ok: true, queued: true, err: "Saved on this PC; the sync engine on this PC needs its update to share it" };
-  const r = await runEngineSerial(["edit", "--json", "--ops", JSON.stringify([{ session: id, field, value }])]);
+  const deleting = field === "deleted" && value === true;
+  const args = ["edit", "--json", "--ops", JSON.stringify([{ session: id, field, value }]), ...deleting ? ["--written-by", String(releasedAt)] : []];
+  let r = await runEngineSerial(args);
+  for (let i = 0; deleting && !r.ok && r.json?.code === "live" && i < 8; i++) {
+    await new Promise((res) => setTimeout(res, 750));
+    r = await runEngineSerial(args);
+  }
   if (!r.ok) {
     overlay.rollback(id, field, before);
     broadcast("index-changed", [id]);

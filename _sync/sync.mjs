@@ -301,7 +301,10 @@ function doEdit(args) {
   } catch {
     throw new SyncError("--ops must be a JSON array of {session, field, value}.", "usage");
   }
-  printJson(appendStateOps(Array.isArray(ops) ? ops : [ops], { push: !args["no-push"] }));
+  // --written-by <ms>: the caller (the Conversations app) wrote to it last and closed it at
+  // that time: only a Claude Code process that has it open, or a write after that, stops a delete.
+  const writtenBy = Number(argText(args["written-by"]));
+  printJson(appendStateOps(Array.isArray(ops) ? ops : [ops], { push: !args["no-push"], writtenBy: Number.isFinite(writtenBy) && writtenBy > 0 ? writtenBy : null }));
 }
 
 function doConfig(args) {
@@ -429,8 +432,11 @@ function doHook(event) {
           const meta = readJson(path.join(REPO_DIR, findSessionKey(id) ?? "", id, "meta.json"), {});
           r = { added: "some", from: meta.lastPushedFrom, updatedAt: meta.updatedAt };
         }
-        if (!done) lines.push("Conversation sync is still fetching this conversation's newer entries from GitHub in the background (a large download). At the start of your next reply, tell the user that this window may be behind another PC, and that typing /resume again in a minute and picking this conversation loads the rest.");
-        if (r) lines.push(`Conversation sync: this conversation has ${r.added} newer entries from ${r.from ?? "another PC"} (${ago(r.updatedAt)}). They were added to its file but are not in this window yet. At the start of your next reply, tell the user to type /resume and pick this conversation again to load them.`);
+        // In the Conversations app the newest copy was brought down before this started, and
+        // /resume isn't something the user can do there: nothing to tell Claude.
+        const inApp = process.env.CLAUDE_SYNC_IN_APP === "1";
+        if (!done && !inApp) lines.push("Conversation sync is still fetching this conversation's newer entries from GitHub in the background (a large download). At the start of your next reply, tell the user that this window may be behind another PC, and that typing /resume again in a minute and picking this conversation loads the rest.");
+        if (r && !inApp) lines.push(`Conversation sync: this conversation has ${r.added} newer entries from ${r.from ?? "another PC"} (${ago(r.updatedAt)}). They were added to its file but are not in this window yet. At the start of your next reply, tell the user to type /resume and pick this conversation again to load them.`);
       } else if (input.source !== "compact") {
         const done = downloadInBackground("startup", cwd, id, STARTUP_WAIT_MS);
         const pulled = done?.pulled ?? [];

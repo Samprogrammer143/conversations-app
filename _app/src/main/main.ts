@@ -445,18 +445,28 @@ const EDIT_TEXT: Record<EditField, (v: unknown) => string> = {
 };
 
 async function applyEdit(id: string, field: EditField, value: boolean | string | null) {
+  let releasedAt = 0;
   if (field === "deleted" && value === true) {
     // Never delete under a writer: Claude would recreate the file a moment later.
     if (chat.isRunning(id)) return { ok: false, err: "Claude is still working in this conversation. Stop it first, then delete it." };
     if (await chat.openInTerminal(id)) return { ok: false, err: "This conversation is open in a terminal on this PC. Close it there first, then delete it." };
     // An idle chat in the app is simply closed first.
     if (chat.isOpenInApp(id)) await chat.release(id);
+    releasedAt = Date.now();
   }
   // Shown at once; GitHub catches up in the background. Taken back if the engine refuses it.
   const before = overlay.apply(id, field, value);
   broadcast("index-changed", [id]);
   if ((await detectEngineVersion()) < 3) return { ok: true, queued: true, err: "Saved on this PC; the sync engine on this PC needs its update to share it" };
-  const r = await runEngineSerial<{ ok: boolean; queued?: boolean; pushed?: boolean; err?: string }>(["edit", "--json", "--ops", JSON.stringify([{ session: id, field, value }])]);
+  const deleting = field === "deleted" && value === true;
+  // Writes up to now were the app's own (it has just closed its session): they don't stop the delete.
+  const args = ["edit", "--json", "--ops", JSON.stringify([{ session: id, field, value }]), ...(deleting ? ["--written-by", String(releasedAt)] : [])];
+  let r = await runEngineSerial<{ ok: boolean; queued?: boolean; pushed?: boolean; err?: string; code?: string }>(args);
+  // The app's own session for it was just closed: its Claude Code can take a moment to exit.
+  for (let i = 0; deleting && !r.ok && r.json?.code === "live" && i < 8; i++) {
+    await new Promise((res) => setTimeout(res, 750));
+    r = await runEngineSerial(args);
+  }
   if (!r.ok) {
     overlay.rollback(id, field, before);
     broadcast("index-changed", [id]);

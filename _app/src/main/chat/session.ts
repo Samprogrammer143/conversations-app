@@ -188,7 +188,9 @@ export class ChatSession extends EventEmitter {
   }
 
   private open() {
-    const env: Record<string, string | undefined> = { ...process.env, CLAUDE_SYNC_INCLUDE_HEADLESS: "1" };
+    // CLAUDE_SYNC_IN_APP: the sync's hooks know the app brought the newest copy before
+    // starting, and don't tell Claude to have you /resume (a terminal's step).
+    const env: Record<string, string | undefined> = { ...process.env, CLAUDE_SYNC_INCLUDE_HEADLESS: "1", CLAUDE_SYNC_IN_APP: "1" };
     delete env.ELECTRON_RUN_AS_NODE;
     this.q = query({
       prompt: this.input,
