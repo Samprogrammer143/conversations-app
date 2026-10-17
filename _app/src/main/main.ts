@@ -39,7 +39,7 @@ import { StartupQueue } from "./startup-queue";
 import { cleanStages, writeRunningMark } from "../shell/stages";
 import { log, logPath } from "./log";
 import { loadSdk, sdkLoadedFrom } from "./chat/sdk";
-import { authStatus, cancelAllLogins, cancelLogin, startLogin, submitLoginCode } from "./auth";
+import { authStatus, cancelAllLogins, cancelLogin, loginEnded, startLogin, submitLoginCode } from "./auth";
 
 // A programming mistake must never take the tray agent (and sync) down with it.
 // Logged, never shown as a dialog: the window shows nothing and the app carries on.
@@ -561,6 +561,20 @@ function registerIpc() {
     const fake = app.isPackaged ? undefined : process.env.CONVERSATIONS_TEST_LOGIN?.split("|");
     const r = fake?.length === 2 ? await startLogin(w, fake[0], [fake[1]]) : await startLogin(w, claudePath);
     log("app", r.ok ? `sign-in started for workspace ${w.id}` : `sign-in for workspace ${w.id} didn't start: ${r.err}`);
+    // Mostly the browser finishes the sign-in itself (no code to paste): the window hears so.
+    if (r.ok)
+      void loginEnded(w.id)?.then(async ({ code, byCode, cancelled, out }) => {
+        if (byCode || cancelled) return;
+        if (code === 0) {
+          const s = await authStatus(w, claudeInstall().path ?? null, true);
+          log("app", `workspace ${w.id} signed in in the browser${s?.email ? ` as ${s.email}` : ""}`);
+          broadcast("workspaces-changed", null);
+          if (w.id === currentWorkspace().id) void chat.releaseIdle();
+          // Only what Claude Code then says counts (a clean exit alone isn't proof); a test's stand-in signs nothing in.
+          if (s?.loggedIn === false && !fake) broadcast("signin-finished", { id: w.id, ok: false, err: "Claude Code still isn't signed in: try again" });
+          else broadcast("signin-finished", { id: w.id, ok: true, email: s?.email ?? null });
+        } else broadcast("signin-finished", { id: w.id, ok: false, err: out || null });
+      });
     return { ...r, id: w.id, name: w.name };
   });
   handle("workspace:signInCode", async (id: unknown, code: unknown) => {

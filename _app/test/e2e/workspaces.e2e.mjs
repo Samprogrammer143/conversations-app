@@ -64,6 +64,7 @@ fs.writeFileSync(
   [
     'process.stdout.write("Opening browser to sign in\\nIf the browser didn\'t open, visit: https://claude.com/cai/oauth/authorize?code=true&state=e2e\\nPaste code here if prompted > ");',
     'process.stdin.once("data", (d) => { if (String(d).trim() === "good#code") process.exit(0); console.log("Login failed: Request failed with status code 400"); process.exit(1); });',
+    `if ((await import("node:fs")).existsSync(${JSON.stringify(path.join(T, "auto-login"))})) setTimeout(() => process.exit(0), 1500);`,
   ].join("\n"),
 );
 const env = launchEnv({ CONVERSATIONS_TEST_LOGIN: `${process.execPath}|${fakeLogin}`,  CLAUDE_CONFIG_DIR: claudeDir, CONVERSATIONS_DATA_DIR: dataDir, CLAUDE_SYNC_HOME: syncHome, CONVERSATIONS_LAUNCHER_DIR: bin, CONVERSATIONS_TEST_NO_RELAUNCH: "1" });
@@ -200,6 +201,13 @@ try {
   check("the right code signs in, and the sheet says so", done !== null && done.includes("Chats in Test WS use this account now"), done ?? "");
   await win.screenshot({ path: path.join(out, "ws-signin-done.png") });
   await win.click('.ws-sheet button:has-text("Done")');
+  // Mostly the browser finishes the sign-in by itself: the sheet notices, no code needed.
+  fs.writeFileSync(path.join(T, "auto-login"), "");
+  await win.click('.banner button:has-text("Sign in")');
+  const auto = await waitFor(win, () => document.querySelector("#ws-signin-title")?.textContent?.endsWith("is signed in") || null, null, 20_000);
+  check("a sign-in the browser finishes by itself shows as done, with no code", !!auto);
+  await win.click('.ws-sheet button:has-text("Done")').catch(() => {});
+  fs.rmSync(path.join(T, "auto-login"), { force: true });
   check("no toast is shown for the sign-in (the sheet says it all)", !(await win.evaluate(() => [...document.querySelectorAll(".toast")].some((t) => /sign/i.test(t.textContent)))));
   await win.keyboard.press("Escape");
   await win.evaluate(() => document.body.classList.add("solid"));

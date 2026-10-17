@@ -11,7 +11,7 @@ vi.hoisted(() => {
 });
 vi.mock("../src/main/log", () => ({ log: () => {} }));
 
-const { parseAuthStatus, authEnv, authStatus, startLogin, submitLoginCode, cancelLogin, isClaudeSignInUrl } = await import("../src/main/auth");
+const { parseAuthStatus, authEnv, authStatus, startLogin, submitLoginCode, cancelLogin, isClaudeSignInUrl, loginEnded } = await import("../src/main/auth");
 const ws = await import("../src/main/workspace");
 
 describe("a workspace's Claude account", () => {
@@ -102,6 +102,18 @@ describe("signing in from the app", () => {
     const first = submitLoginCode("main", "abc");
     expect((await submitLoginCode("main", "abc")).err).toMatch(/Already/);
     expect(await first).toEqual({ ok: true });
+  });
+  it("notices a sign-in the browser finished by itself (no code)", async () => {
+    const auto = path.join(process.env.CONVERSATIONS_DATA_DIR!, "auto-login.mjs");
+    fs.writeFileSync(auto, 'process.stdout.write("visit: https://claude.com/cai/oauth/authorize?a=1\\nPaste code here if prompted > "); setTimeout(() => { console.log("Login successful."); process.exit(0); }, 300);');
+    await startLogin(main(), process.execPath, [auto]);
+    expect(await loginEnded("main")).toMatchObject({ code: 0, byCode: false, cancelled: false });
+  });
+  it("says nothing about a sign-in the app ended itself (Try again, Cancel)", async () => {
+    await startLogin(main(), process.execPath, [fake]);
+    const ended = loginEnded("main")!;
+    cancelLogin("main");
+    expect(await ended).toMatchObject({ cancelled: true });
   });
   it("reports a Claude Code that can't start the sign-in", async () => {
     const r = await startLogin(main(), path.join(process.env.CONVERSATIONS_DATA_DIR!, "no-such-claude.exe"));

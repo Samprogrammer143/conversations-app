@@ -96,6 +96,10 @@ interface LoginRun {
   out: string;
   exited: Promise<number | null>;
   submitting: boolean;
+  /** Ended by the app (cancelled, replaced, quitting): nothing to report. */
+  cancelled?: boolean;
+  /** Left open too long: reported, so the window doesn't wait for it. */
+  timedOut?: boolean;
 }
 const logins = new Map<string, LoginRun>();
 // The whole address (followed by a space or line end: a pipe can hand it over in pieces).
@@ -129,7 +133,10 @@ export function startLogin(w: Workspace, claudePath: string, argv = ["auth", "lo
   child.stdin.on("error", () => {});
   logins.set(w.id, run);
   // A sign-in left open stops after a quarter of an hour.
-  const stale = setTimeout(() => cancelLogin(w.id, run), 15 * 60_000);
+  const stale = setTimeout(() => {
+    run.timedOut = true;
+    cancelLogin(w.id, run);
+  }, 15 * 60_000);
   stale.unref?.();
   void run.exited.then(() => {
     clearTimeout(stale);
@@ -192,6 +199,22 @@ export async function submitLoginCode(id: string, code: string): Promise<{ ok: b
   return { ok: false, err: lastLine(run.out.slice(before)) || "The sign-in didn't work: start it again" };
 }
 
+/**
+ * When a sign-in ends without a code from the window: the browser usually hands the
+ * login straight back to Claude Code, which then finishes by itself. Null when no
+ * sign-in is running for that workspace.
+ */
+export function loginEnded(id: string): Promise<{ code: number | null; byCode: boolean; cancelled: boolean; out: string }> | null {
+  const run = logins.get(id);
+  if (!run) return null;
+  return run.exited.then((code) => ({
+    code,
+    byCode: run.submitting,
+    cancelled: !!run.cancelled && !run.timedOut,
+    out: run.timedOut ? "The sign-in timed out: start it again" : lastLine(run.out),
+  }));
+}
+
 /** Ends every sign-in still running (the app is quitting). */
 export function cancelAllLogins() {
   for (const id of [...logins.keys()]) cancelLogin(id);
@@ -201,6 +224,7 @@ export function cancelLogin(id: string, only?: LoginRun) {
   const run = logins.get(id);
   if (!run || (only && run !== only)) return;
   logins.delete(id);
+  run.cancelled = true;
   try {
     run.child.kill();
   } catch {}

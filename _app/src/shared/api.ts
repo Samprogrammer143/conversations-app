@@ -133,6 +133,8 @@ export interface ConversationsApi {
   on(event: "sync-status", cb: (s: SyncStatus) => void): () => void;
   on(event: "usage", cb: (u: PlanUsage | null) => void): () => void;
   on(event: "workspaces-changed", cb: () => void): () => void;
+  /** A sign-in ended in the browser, without a code from the window. */
+  on(event: "signin-finished", cb: (r: { id: string; ok: boolean; email?: string | null; err?: string | null }) => void): () => void;
   on(event: "chat-status", cb: (s: ChatStatus) => void): () => void;
   on(event: "open-conversation", cb: (id: string) => void): () => void;
   on(event: "settings-changed", cb: (s: Settings) => void): () => void;
@@ -201,4 +203,4 @@ export const CHANNELS = [
 
 export type Channel = (typeof CHANNELS)[number];
 
-export const EVENTS = ["index-changed", "sync-status", "chat-status", "open-conversation", "settings-changed", "toast", "window-state", "chat-pending", "update-ready", "usage", "workspaces-changed"] as const;
+export const EVENTS = ["index-changed", "sync-status", "chat-status", "open-conversation", "settings-changed", "toast", "window-state", "chat-pending", "update-ready", "usage", "workspaces-changed", "signin-finished"] as const;

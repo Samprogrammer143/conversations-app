@@ -4740,7 +4740,10 @@ function startLogin(w, claudePath, argv = ["auth", "login", "--claudeai"]) {
   child.stdin.on("error", () => {
   });
   logins.set(w.id, run3);
-  const stale = setTimeout(() => cancelLogin(w.id, run3), 15 * 6e4);
+  const stale = setTimeout(() => {
+    run3.timedOut = true;
+    cancelLogin(w.id, run3);
+  }, 15 * 6e4);
   stale.unref?.();
   void run3.exited.then(() => {
     clearTimeout(stale);
@@ -4800,6 +4803,16 @@ async function submitLoginCode(id, code) {
   }
   return { ok: false, err: lastLine(run3.out.slice(before)) || "The sign-in didn't work: start it again" };
 }
+function loginEnded(id) {
+  const run3 = logins.get(id);
+  if (!run3) return null;
+  return run3.exited.then((code) => ({
+    code,
+    byCode: run3.submitting,
+    cancelled: !!run3.cancelled && !run3.timedOut,
+    out: run3.timedOut ? "The sign-in timed out: start it again" : lastLine(run3.out)
+  }));
+}
 function cancelAllLogins() {
   for (const id of [...logins.keys()]) cancelLogin(id);
 }
@@ -4807,6 +4820,7 @@ function cancelLogin(id, only) {
   const run3 = logins.get(id);
   if (!run3 || only && run3 !== only) return;
   logins.delete(id);
+  run3.cancelled = true;
   try {
     run3.child.kill();
   } catch {
@@ -5241,6 +5255,18 @@ function registerIpc() {
     const fake = app2.isPackaged ? void 0 : process.env.CONVERSATIONS_TEST_LOGIN?.split("|");
     const r = fake?.length === 2 ? await startLogin(w, fake[0], [fake[1]]) : await startLogin(w, claudePath);
     log("app", r.ok ? `sign-in started for workspace ${w.id}` : `sign-in for workspace ${w.id} didn't start: ${r.err}`);
+    if (r.ok)
+      void loginEnded(w.id)?.then(async ({ code, byCode, cancelled, out }) => {
+        if (byCode || cancelled) return;
+        if (code === 0) {
+          const s = await authStatus(w, claudeInstall().path ?? null, true);
+          log("app", `workspace ${w.id} signed in in the browser${s?.email ? ` as ${s.email}` : ""}`);
+          broadcast("workspaces-changed", null);
+          if (w.id === currentWorkspace().id) void chat.releaseIdle();
+          if (s?.loggedIn === false && !fake) broadcast("signin-finished", { id: w.id, ok: false, err: "Claude Code still isn't signed in: try again" });
+          else broadcast("signin-finished", { id: w.id, ok: true, email: s?.email ?? null });
+        } else broadcast("signin-finished", { id: w.id, ok: false, err: out || null });
+      });
     return { ...r, id: w.id, name: w.name };
   });
   handle("workspace:signInCode", async (id, code) => {

@@ -48,6 +48,11 @@ export function SignInSheet() {
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // Once signed in, nothing that arrives later turns the sheet into a failure.
+  const doneRef = useRef(false);
+  useEffect(() => {
+    doneRef.current = step === "done";
+  }, [step]);
   useEffect(() => {
     if (!target) return;
     let live = true;
@@ -78,6 +83,22 @@ export function SignInSheet() {
       live = false;
     };
   }, [target, attempt]);
+  // The browser usually finishes the sign-in itself: then there's no code to paste.
+  useEffect(
+    () =>
+      api.on("signin-finished", (r) => {
+        if (!target || r.id !== id) return;
+        if (r.ok) {
+          setEmail(r.email ?? null);
+          setStep("done");
+          void useStore.getState().loadWorkspaces();
+        } else if (step !== "checking") {
+          setError(r.err || "The sign-in didn't finish");
+          setStep("failed");
+        }
+      }),
+    [target, id, step],
+  );
   if (!target) return null;
   const close = () => {
     if (id && step !== "done") void api.workspace.signInCancel(id);
@@ -92,7 +113,7 @@ export function SignInSheet() {
       setEmail(r.email ?? null);
       setStep("done");
       void useStore.getState().loadWorkspaces();
-    } else {
+    } else if (!doneRef.current) {
       setError(r.err ?? "That didn't work");
       // The sign-in ends with a wrong code: a new one starts for the next try.
       setStep("failed");
@@ -110,7 +131,7 @@ export function SignInSheet() {
         )}
         {(step === "code" || step === "checking") && (
           <>
-            <p className="lede">Sign in in your browser with the account for {name}. Claude then shows a code: paste it here.</p>
+            <p className="lede">Sign in in your browser with the account for {name}. This finishes by itself; if Claude shows a code instead, paste it here.</p>
             <div className="ws-form">
               <label>
                 <span>Code</span>
