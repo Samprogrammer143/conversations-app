@@ -112,9 +112,12 @@ export interface ConversationsApi {
     switch(id: string, force?: boolean): Promise<{ ok: boolean; err?: string; running?: number }>;
     /** Sets up a workspace on this PC (a new one, or one another PC has: pass its id). */
     add(input: { id?: string; name: string; remote: string }): Promise<{ ok: boolean; id?: string; err?: string }>;
-    /** Opens a terminal where Claude Code asks to sign in to the workspace's account. */
-    /** No id: the workspace this window is in. */
-    signIn(id: string | null): Promise<{ ok: boolean; err?: string }>;
+    /** (Signing in: signIn below, with the Sign in sheet.) */
+    /** Starts the sign-in to a workspace's Claude account (no id: the one this window is in): Claude's sign-in page opens in the browser. */
+    signIn(id: string | null): Promise<{ ok: boolean; err?: string; url?: string; id?: string; name?: string }>;
+    /** Hands over the code the sign-in page ends on. */
+    signInCode(id: string, code: string): Promise<{ ok: boolean; err?: string; email?: string | null }>;
+    signInCancel(id: string): Promise<void>;
     disconnect(id: string, force?: boolean): Promise<{ ok: boolean; err?: string; running?: number; switchedTo?: string }>;
     reconnect(id: string): Promise<{ ok: boolean; err?: string; synced?: boolean }>;
     rename(id: string, name: string): Promise<void>;
@@ -188,6 +191,8 @@ export const CHANNELS = [
   "workspace:add",
   "workspace:signIn",
   "workspace:rename",
+  "workspace:signInCode",
+  "workspace:signInCancel",
   "workspace:disconnect",
   "workspace:reconnect",
   "composer:load",

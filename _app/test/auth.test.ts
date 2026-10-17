@@ -11,7 +11,7 @@ vi.hoisted(() => {
 });
 vi.mock("../src/main/log", () => ({ log: () => {} }));
 
-const { parseAuthStatus, authEnv, authStatus, signInTook } = await import("../src/main/auth");
+const { parseAuthStatus, authEnv, authStatus, startLogin, submitLoginCode, cancelLogin, isClaudeSignInUrl } = await import("../src/main/auth");
 const ws = await import("../src/main/workspace");
 
 describe("a workspace's Claude account", () => {
@@ -24,22 +24,6 @@ describe("a workspace's Claude account", () => {
     expect(parseAuthStatus('{"loggedIn": true, "email": "a@b.c", "orgId": "1"}')!.key).not.toBe(parseAuthStatus('{"loggedIn": true, "email": "a@b.c", "orgId": "2"}')!.key);
     expect(parseAuthStatus("Not logged in · Please run /login")).toBeNull();
     expect(parseAuthStatus('{"other": 1}')).toBeNull();
-  });
-  it("knows when a sign-in took", () => {
-    const out = parseAuthStatus('{"loggedIn": false}');
-    const a = parseAuthStatus('{"loggedIn": true, "email": "a@b.c", "orgId": "1"}');
-    const b = parseAuthStatus('{"loggedIn": true, "email": "a@b.c", "orgId": "2"}');
-    // Signed out before, signed in now.
-    expect(signInTook({ state: out, credsAt: 0 }, a, 0)).toBe(true);
-    // Already signed in: only another login counts (a token refresh rewrites the file too).
-    expect(signInTook({ state: a, credsAt: 5 }, a, 5)).toBe(false);
-    expect(signInTook({ state: a, credsAt: 5 }, b, 5)).toBe(true);
-    expect(signInTook({ state: a, credsAt: 5 }, a, 9)).toBe(false);
-    // No reading from before (Claude Code didn't answer): only a written login counts.
-    expect(signInTook({ state: null, credsAt: 5 }, a, 5)).toBe(false);
-    expect(signInTook({ state: null, credsAt: 5 }, a, 6)).toBe(true);
-    // Not signed in now: never.
-    expect(signInTook({ state: out, credsAt: 0 }, out, 7)).toBe(false);
   });
   it("asks Claude Code with each workspace's own Claude folder", () => {
     ws.addWorkspace({ id: "work", name: "Work", remote: "https://github.com/me/work" });
@@ -55,5 +39,72 @@ describe("a workspace's Claude account", () => {
     expect(await authStatus(main, null, true)).toBeNull();
     expect(await authStatus(main, path.join(process.env.CONVERSATIONS_DATA_DIR!, "no-such-claude.exe"), true)).toBeNull();
     expect(fs.existsSync(process.env.CONVERSATIONS_DATA_DIR!)).toBe(true);
+  });
+});
+
+describe("signing in from the app", () => {
+  // A stand-in for `claude auth login`: prints the sign-in address, then takes a code.
+  const fake = path.join(process.env.CONVERSATIONS_DATA_DIR!, "fake-login.mjs");
+  fs.writeFileSync(
+    fake,
+    [
+      'process.stdout.write("Opening browser to sign in\\nIf the browser didn\'t open, visit: https://claude.com/cai/oauth/authorize?code=true&state=abc\\nPaste code here if prompted > ");',
+      'process.stdin.once("data", (d) => { if (String(d).trim() === "good#code") process.exit(0); console.log("Login failed: Request failed with status code 400"); process.exit(1); });',
+    ].join("\n"),
+  );
+  const main = () => ws.listWorkspaces().workspaces[0];
+  it("hands back the sign-in page's address, then signs in with the code", async () => {
+    const r = await startLogin(main(), process.execPath, [fake]);
+    expect(r).toEqual({ ok: true, url: "https://claude.com/cai/oauth/authorize?code=true&state=abc" });
+    expect(await submitLoginCode("main", "  good#code  ")).toEqual({ ok: true });
+  });
+  it("says why a wrong code didn't work", async () => {
+    await startLogin(main(), process.execPath, [fake]);
+    expect(await submitLoginCode("main", "bad")).toEqual({ ok: false, err: "Login failed: Request failed with status code 400" });
+    // The sign-in has ended: a second try needs a new one.
+    expect((await submitLoginCode("main", "good#code")).err).toMatch(/start it again/);
+  });
+  it("refuses something that isn't a code, and can be cancelled", async () => {
+    await startLogin(main(), process.execPath, [fake]);
+    expect((await submitLoginCode("main", "two\nlines")).ok).toBe(false);
+    cancelLogin("main");
+    expect((await submitLoginCode("main", "good#code")).err).toMatch(/start it again/);
+  });
+  it("waits for the whole address, without terminal colours", async () => {
+    const split = path.join(process.env.CONVERSATIONS_DATA_DIR!, "split-login.mjs");
+    fs.writeFileSync(
+      split,
+      [
+        'process.stdout.write("\\x1b[1mvisit: https://claude.com/cai/oauth/authorize?code=true&sta");',
+        'setTimeout(() => process.stdout.write("te=abc\\x1b[0m\\nPaste code here if prompted > "), 300);',
+        'process.stdin.once("data", () => process.exit(0));',
+      ].join("\n"),
+    );
+    const r = await startLogin(main(), process.execPath, [split]);
+    expect(r).toEqual({ ok: true, url: "https://claude.com/cai/oauth/authorize?code=true&state=abc" });
+    cancelLogin("main");
+  });
+  it("opens only Claude's own sign-in pages", async () => {
+    expect(isClaudeSignInUrl("https://claude.com/cai/oauth/authorize?x=1")).toBe(true);
+    expect(isClaudeSignInUrl("https://console.anthropic.com/oauth/x")).toBe(true);
+    expect(isClaudeSignInUrl("http://claude.com/oauth")).toBe(false);
+    expect(isClaudeSignInUrl("https://evil.example/oauth?claude.com")).toBe(false);
+    expect(isClaudeSignInUrl("https://claude.com.evil.example/oauth")).toBe(false);
+    const evil = path.join(process.env.CONVERSATIONS_DATA_DIR!, "evil-login.mjs");
+    fs.writeFileSync(evil, 'process.stdout.write("visit: https://evil.example/oauth/authorize?x=1\\n"); setTimeout(() => {}, 5000);');
+    const r = await startLogin(main(), process.execPath, [evil]);
+    expect(r.ok).toBe(false);
+  });
+  it("takes one code at a time", async () => {
+    const slow = path.join(process.env.CONVERSATIONS_DATA_DIR!, "slow-login.mjs");
+    fs.writeFileSync(slow, 'process.stdout.write("visit: https://claude.com/cai/oauth/authorize?s=1\\n"); process.stdin.once("data", () => setTimeout(() => process.exit(0), 400));');
+    await startLogin(main(), process.execPath, [slow]);
+    const first = submitLoginCode("main", "abc");
+    expect((await submitLoginCode("main", "abc")).err).toMatch(/Already/);
+    expect(await first).toEqual({ ok: true });
+  });
+  it("reports a Claude Code that can't start the sign-in", async () => {
+    const r = await startLogin(main(), path.join(process.env.CONVERSATIONS_DATA_DIR!, "no-such-claude.exe"));
+    expect(r.ok).toBe(false);
   });
 });

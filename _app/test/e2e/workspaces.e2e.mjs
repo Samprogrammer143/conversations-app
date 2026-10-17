@@ -57,7 +57,16 @@ const MAIN_ID = "aaaaaaaa-1111-4111-8111-111111111111";
 const WS_ID = "bbbbbbbb-2222-4222-8222-222222222222";
 conversation(claudeDir, MAIN_ID, path.join(T, "work", "main-project"), "A conversation in the first workspace");
 
-const env = launchEnv({ CLAUDE_CONFIG_DIR: claudeDir, CONVERSATIONS_DATA_DIR: dataDir, CLAUDE_SYNC_HOME: syncHome, CONVERSATIONS_LAUNCHER_DIR: bin, CONVERSATIONS_TEST_NO_RELAUNCH: "1" });
+// A stand-in for `claude auth login`: the sign-in page's address, then a code ("good#code" works).
+const fakeLogin = path.join(T, "fake-login.mjs");
+fs.writeFileSync(
+  fakeLogin,
+  [
+    'process.stdout.write("Opening browser to sign in\\nIf the browser didn\'t open, visit: https://claude.com/cai/oauth/authorize?code=true&state=e2e\\nPaste code here if prompted > ");',
+    'process.stdin.once("data", (d) => { if (String(d).trim() === "good#code") process.exit(0); console.log("Login failed: Request failed with status code 400"); process.exit(1); });',
+  ].join("\n"),
+);
+const env = launchEnv({ CONVERSATIONS_TEST_LOGIN: `${process.execPath}|${fakeLogin}`,  CLAUDE_CONFIG_DIR: claudeDir, CONVERSATIONS_DATA_DIR: dataDir, CLAUDE_SYNC_HOME: syncHome, CONVERSATIONS_LAUNCHER_DIR: bin, CONVERSATIONS_TEST_NO_RELAUNCH: "1" });
 async function launch() {
   const app = await electron.launch({ args: [root], cwd: root, env, timeout: 60_000 });
   const win = await app.firstWindow();
@@ -173,6 +182,25 @@ try {
   await win.keyboard.press("Control+N");
   const draftBanner = await waitFor(win, () => (document.querySelector('section[aria-label="New chat"]') ? [...document.querySelectorAll(".banner")].map((b) => b.textContent).find((t) => t.includes("isn't signed in")) ?? null : null), null, 10_000);
   check("a new chat says the workspace isn't signed in, with Sign in", !!draftBanner && draftBanner.includes("Sign in"), draftBanner ?? "");
+  // Sign in from the banner: a sheet, no terminal. A wrong code says why; the right one signs in.
+  await win.click('.banner button:has-text("Sign in")');
+  const codeStep = await waitFor(win, () => (document.querySelector("#ws-signin-title") && document.querySelector('.ws-form input') ? document.querySelector("#ws-signin-title").textContent : null), null, 15_000);
+  check("Sign in opens a sheet that asks for the code from the browser", codeStep === "Sign in to Test WS's Claude account", codeStep ?? "");
+  check("...with a way to open the sign-in page again", await win.evaluate(() => !!document.querySelector('.ws-hint .link')));
+  await win.screenshot({ path: path.join(out, "ws-signin-sheet.png") });
+  await win.fill(".ws-form input", "wrong");
+  await win.click('.ws-sheet button:has-text("Sign in")');
+  const wrong = await waitFor(win, () => document.querySelector(".ws-error")?.textContent ?? null, null, 15_000);
+  check("a wrong code says why, and offers to try again", !!wrong?.includes("400") && (await win.evaluate(() => [...document.querySelectorAll('.ws-sheet button')].some((b) => b.textContent.includes("Try again")))), wrong ?? "");
+  await win.click('.ws-sheet button:has-text("Try again")');
+  await waitFor(win, () => (document.querySelector(".ws-form input") ? true : null), null, 15_000);
+  await win.fill(".ws-form input", "good#code");
+  await win.click('.ws-sheet button:has-text("Sign in")');
+  const done = await waitFor(win, () => (document.querySelector("#ws-signin-title")?.textContent?.endsWith("is signed in") ? document.querySelector(".ws-sheet .lede")?.textContent ?? "" : null), null, 20_000);
+  check("the right code signs in, and the sheet says so", done !== null && done.includes("Chats in Test WS use this account now"), done ?? "");
+  await win.screenshot({ path: path.join(out, "ws-signin-done.png") });
+  await win.click('.ws-sheet button:has-text("Done")');
+  check("no toast is shown for the sign-in (the sheet says it all)", !(await win.evaluate(() => [...document.querySelectorAll(".toast")].some((t) => /sign/i.test(t.textContent)))));
   await win.keyboard.press("Escape");
   await win.evaluate(() => document.body.classList.add("solid"));
   await win.click(".ws-button");

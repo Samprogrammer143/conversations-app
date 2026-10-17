@@ -1,12 +1,10 @@
 // Which Claude account each workspace's Claude Code is signed in with, as Claude Code
 // itself reports it (`claude auth status`): a login file that exists isn't necessarily
 // a login that works. Signing in runs `claude auth login` for that workspace's Claude
-// folder in a terminal, and the app watches until it took.
+// folder from the app (no terminal): the browser shows Claude's sign-in, and the window
+// asks for the code it ends on.
 
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Workspace } from "./workspace";
 import { baseEnv, workspaceEnv } from "./workspace";
 import { log } from "./log";
@@ -86,53 +84,134 @@ export function authStatus(w: Workspace, claudePath: string | null, fresh = fals
   return p;
 }
 
-/** The time Claude Code last wrote this workspace's login (0: none yet). */
-export function credentialsTime(w: Workspace): number {
-  const dir = w.id === "main" ? baseEnv().CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude") : w.claudeDir;
+// ------------------------------------------------------------ signing in
+
+/**
+ * A sign-in in progress: `claude auth login` run by the app itself (no terminal). It
+ * opens Claude's sign-in in the browser, which ends on a page with a code; the window
+ * asks for that code and hands it over here.
+ */
+interface LoginRun {
+  child: ChildProcessWithoutNullStreams;
+  out: string;
+  exited: Promise<number | null>;
+  submitting: boolean;
+}
+const logins = new Map<string, LoginRun>();
+// The whole address (followed by a space or line end: a pipe can hand it over in pieces).
+const URL_RE = /https:\/\/\S*oauth\S*(?=\s)/;
+// Colours and links a terminal would draw (FORCE_COLOR may be set for this user).
+const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+const plain = (s: string) => s.replace(ANSI_RE, "");
+
+/** Only Claude's own sign-in pages are opened from the app. */
+export function isClaudeSignInUrl(u: string): boolean {
   try {
-    return fs.statSync(path.join(dir, ".credentials.json")).mtimeMs;
+    const x = new URL(u);
+    return x.protocol === "https:" && /(^|\.)(claude\.ai|claude\.com|anthropic\.com)$/i.test(x.hostname);
   } catch {
-    return 0;
+    return false;
   }
 }
 
-/**
- * Whether a sign-in took. Signed in before: only another login counts (Claude Code
- * rewrites its login file whenever it refreshes the token, so a new write proves
- * nothing). Signed out, or unknown: signed in now, with a login written since.
- */
-export function signInTook(before: { state: AuthState | null; credsAt: number }, now: AuthState | null, credsAt: number): boolean {
-  if (!now?.loggedIn) return false;
-  if (before.state?.loggedIn) return before.state.key !== now.key;
-  return credsAt !== before.credsAt || before.state?.loggedIn === false;
+/** Starts a sign-in for a workspace (a running one is replaced): the sign-in page's address. */
+export function startLogin(w: Workspace, claudePath: string, argv = ["auth", "login", "--claudeai"]): Promise<{ ok: boolean; url?: string; err?: string }> {
+  cancelLogin(w.id);
+  let child: ChildProcessWithoutNullStreams;
+  try {
+    child = spawn(claudePath, argv, { env: authEnv(w) as NodeJS.ProcessEnv, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+  } catch (e) {
+    return Promise.resolve({ ok: false, err: (e as Error).message });
+  }
+  // "close", not "exit": by then everything it printed has been read.
+  const run: LoginRun = { child, out: "", submitting: false, exited: new Promise((resolve) => child.on("close", (code) => resolve(code))) };
+  // Writing the code to one that has just ended must not throw in the app.
+  child.stdin.on("error", () => {});
+  logins.set(w.id, run);
+  // A sign-in left open stops after a quarter of an hour.
+  const stale = setTimeout(() => cancelLogin(w.id, run), 15 * 60_000);
+  stale.unref?.();
+  void run.exited.then(() => {
+    clearTimeout(stale);
+    if (logins.get(w.id) === run) logins.delete(w.id);
+  });
+  return new Promise((resolve) => {
+    const onData = (d: Buffer) => {
+      run.out += d;
+      const m = URL_RE.exec(plain(run.out));
+      if (m && !isClaudeSignInUrl(m[0])) {
+        clearTimeout(timer);
+        cancelLogin(w.id, run);
+        resolve({ ok: false, err: "Claude Code offered a sign-in page that isn't Claude's" });
+        return;
+      }
+      if (m) {
+        clearTimeout(timer);
+        child.stdout.off("data", onData);
+        child.stderr.off("data", onData);
+        // Keep reading what it says later (an error after the code).
+        child.stdout.on("data", (x: Buffer) => (run.out += x));
+        child.stderr.on("data", (x: Buffer) => (run.out += x));
+        resolve({ ok: true, url: m[0] });
+      }
+    };
+    child.stdout.on("data", onData);
+    child.stderr.on("data", onData);
+    const timer = setTimeout(() => {
+      cancelLogin(w.id, run);
+      resolve({ ok: false, err: "Claude Code didn't start the sign-in" });
+    }, 30_000);
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      resolve({ ok: false, err: e.message });
+    });
+    void run.exited.then((code) => {
+      clearTimeout(timer);
+      resolve({ ok: false, err: lastLine(run.out) || `Claude Code stopped (${code})` });
+    });
+  });
 }
 
-const watching = new Map<string, symbol>();
+/** Hands the code from the sign-in page to Claude Code; resolves once it has finished. */
+export async function submitLoginCode(id: string, code: string): Promise<{ ok: boolean; err?: string }> {
+  const run = logins.get(id);
+  if (!run) return { ok: false, err: "That sign-in has ended: start it again" };
+  if (run.submitting) return { ok: false, err: "Already signing in with a code" };
+  const clean = code.trim();
+  if (!clean || clean.length > 1000 || /[\r\n]/.test(clean)) return { ok: false, err: "That doesn't look like the code from the sign-in page" };
+  const before = run.out.length;
+  run.submitting = true;
+  run.child.stdin.write(`${clean}\n`);
+  let slow: NodeJS.Timeout | undefined;
+  const code_ = await Promise.race([run.exited, new Promise<"slow">((r) => (slow = setTimeout(() => r("slow"), 60_000)))]).finally(() => clearTimeout(slow));
+  if (code_ === 0) return { ok: true };
+  if (code_ === "slow") {
+    cancelLogin(id, run);
+    return { ok: false, err: "Claude didn't answer in time: start the sign-in again" };
+  }
+  return { ok: false, err: lastLine(run.out.slice(before)) || "The sign-in didn't work: start it again" };
+}
 
-/**
- * After a sign-in starts: asks every few seconds, for up to ten minutes, until the
- * sign-in took. One watcher per workspace; a new sign-in replaces the old watcher.
- */
-export function watchSignIn(w: Workspace, claudePath: string | null, before: { state: AuthState | null; credsAt: number }, onDone: (state: AuthState) => void) {
-  const me = Symbol(w.id);
-  watching.set(w.id, me);
-  const until = Date.now() + 10 * 60_000;
-  const tick = async () => {
-    if (watching.get(w.id) !== me) return;
-    if (Date.now() > until) {
-      watching.delete(w.id);
-      return;
-    }
-    const credsAt = credentialsTime(w);
-    const s = await authStatus(w, claudePath, true);
-    if (watching.get(w.id) !== me) return;
-    if (s && signInTook(before, s, credsAt)) {
-      watching.delete(w.id);
-      log("app", `workspace ${w.id} signed in${s.email ? ` as ${s.email}` : ""}`);
-      onDone(s);
-      return;
-    }
-    setTimeout(() => void tick(), 3000).unref?.();
-  };
-  setTimeout(() => void tick(), 3000).unref?.();
+/** Ends every sign-in still running (the app is quitting). */
+export function cancelAllLogins() {
+  for (const id of [...logins.keys()]) cancelLogin(id);
+}
+
+export function cancelLogin(id: string, only?: LoginRun) {
+  const run = logins.get(id);
+  if (!run || (only && run !== only)) return;
+  logins.delete(id);
+  try {
+    run.child.kill();
+  } catch {}
+}
+
+/** The last thing Claude Code printed, without addresses or the prompt. */
+function lastLine(out: string): string {
+  const lines = plain(out)
+    .replace(/https:\/\/\S+/g, "")
+    .split(/\r?\n|>/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/^Paste code|^Opening browser|^If the browser/i.test(l));
+  return (lines.pop() ?? "").slice(0, 200);
 }

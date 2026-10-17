@@ -39,7 +39,7 @@ import { StartupQueue } from "./startup-queue";
 import { cleanStages, writeRunningMark } from "../shell/stages";
 import { log, logPath } from "./log";
 import { loadSdk, sdkLoadedFrom } from "./chat/sdk";
-import { authStatus, credentialsTime, watchSignIn } from "./auth";
+import { authStatus, cancelAllLogins, cancelLogin, startLogin, submitLoginCode } from "./auth";
 
 // A programming mistake must never take the tray agent (and sync) down with it.
 // Logged, never shown as a dialog: the window shows nothing and the app carries on.
@@ -407,6 +407,7 @@ function restartForUpdate() {
 function quit() {
   quitting = true;
   chat.closeAll();
+  cancelAllLogins();
   scheduler?.stop();
   index.stop();
   app.quit();
@@ -546,27 +547,36 @@ function registerIpc() {
     if (typeof i.name !== "string" || !isRemote(i.remote)) return { ok: false, err: "Give it a name and the repository's address" };
     return setUpWorkspace({ id: isWorkspaceId(i.id) ? i.id : undefined, name: i.name, remote: i.remote });
   });
-  // Signs a workspace's Claude Code in (or into another account): `claude auth login` for
-  // its Claude folder, in a terminal; the browser does the rest. The app watches until it
-  // took, then tells the window, and idle chats in this workspace start again with it.
-  // (No id: the workspace this window is in.)
+  // Signs a workspace's Claude Code in (or into another account), with no terminal:
+  // `claude auth login` for its Claude folder, run by the app. It opens Claude's sign-in in
+  // the browser; the window asks for the code the page ends on (signInCode). Once signed
+  // in, idle chats in this workspace start again with the login. (No id: the workspace
+  // this window is in.)
   handle("workspace:signIn", async (id: unknown) => {
     const w = id == null ? currentWorkspace() : listWorkspaces().workspaces.find((x) => x.id === id);
     if (!w) return { ok: false, err: "There's no such workspace" };
-    if (!writeLauncher(w)) return { ok: false, err: "Signing in from the app works on Windows only" };
-    const launcher = launcherPath(w)!;
-    const claudePath = claudeInstall().path ?? null;
-    // How it is now, read alongside the terminal opening (a sign-in takes far longer).
-    const credsAt = credentialsTime(w);
-    const state = authStatus(w, claudePath, true);
-    launchInTerminal(app.getPath("home"), launcher, ["auth", "login", "--claudeai"]);
-    watchSignIn(w, claudePath, { state: await state, credsAt }, (s) => {
-      broadcast("workspaces-changed", null);
-      broadcast("toast", { text: `${w.name} is signed in${s.email ? ` as ${s.email}` : ""}` });
-      // Sessions started before the sign-in still run without it.
-      if (w.id === currentWorkspace().id) void chat.releaseIdle();
-    });
-    return { ok: true };
+    const claudePath = claudeInstall().path;
+    if (!claudePath) return { ok: false, err: "Claude Code isn't installed on this PC" };
+    // Tests sign in with a stand-in ("<node>|<script>"), never with a real browser sign-in.
+    const fake = app.isPackaged ? undefined : process.env.CONVERSATIONS_TEST_LOGIN?.split("|");
+    const r = fake?.length === 2 ? await startLogin(w, fake[0], [fake[1]]) : await startLogin(w, claudePath);
+    log("app", r.ok ? `sign-in started for workspace ${w.id}` : `sign-in for workspace ${w.id} didn't start: ${r.err}`);
+    return { ...r, id: w.id, name: w.name };
+  });
+  handle("workspace:signInCode", async (id: unknown, code: unknown) => {
+    const w = listWorkspaces().workspaces.find((x) => x.id === id);
+    if (!w || typeof code !== "string") return { ok: false, err: "There's no such workspace" };
+    const r = await submitLoginCode(w.id, code);
+    if (!r.ok) return r;
+    const s = await authStatus(w, claudeInstall().path ?? null, true);
+    log("app", `workspace ${w.id} signed in${s?.email ? ` as ${s.email}` : ""}`);
+    broadcast("workspaces-changed", null);
+    // Sessions started before the sign-in still run without it.
+    if (w.id === currentWorkspace().id) void chat.releaseIdle();
+    return { ok: true, email: s?.email ?? null };
+  });
+  handle("workspace:signInCancel", (id: unknown) => {
+    if (typeof id === "string") cancelLogin(id);
   });
   // Leaves a workspace out of Conversations on this PC (its Claude Code chats stay as they
   // are). The one the app is in can go only when another one is there to switch to.
@@ -904,6 +914,7 @@ app.on("window-all-closed", () => {
 });
 app.on("before-quit", () => {
   quitting = true;
+  cancelAllLogins();
   composer.closing = true;
   composer.flush();
 });

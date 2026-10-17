@@ -474,7 +474,7 @@ function Composer({
         const ws = useStore.getState().workspaces;
         const cur = ws?.workspaces.find((w) => w.id === ws.current);
         // Until the list is in, the main process picks the workspace this window is in.
-        void signInWorkspace(cur ?? { id: null, name: "this workspace" });
+        signInWorkspace(cur ?? { id: null, name: "this workspace" });
         return;
       }
       if (name === "mcp" && !arg) {
@@ -789,7 +789,7 @@ function SignInBanner() {
         <span className="title">{signedOut.name} isn't signed in to Claude on this PC</span>
         <span className="sub">Claude can't answer until it is. The sign-in opens in your browser.</span>
       </div>
-      <Button kind="primary" icon="square-terminal" onClick={() => void signInWorkspace(signedOut)}>
+      <Button kind="primary" icon="lock" onClick={() => signInWorkspace(signedOut)}>
         Sign in
       </Button>
     </div>

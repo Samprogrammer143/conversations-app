@@ -79,6 +79,8 @@ const api: ConversationsApi = {
     add: (input) => invoke("workspace:add", input),
     signIn: (id) => invoke("workspace:signIn", id),
     rename: (id, name) => invoke("workspace:rename", id, name),
+    signInCode: (id, code) => invoke("workspace:signInCode", id, code),
+    signInCancel: (id) => invoke("workspace:signInCancel", id),
     disconnect: (id, force) => invoke("workspace:disconnect", id, force === true),
     reconnect: (id) => invoke("workspace:reconnect", id),
   },

@@ -27,11 +27,157 @@ export async function switchWorkspace(w: WorkspaceInfo, force = false) {
 
 const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";
 
-/** Opens the sign-in for a workspace's Claude account (a terminal, then the browser). */
-export async function signInWorkspace(w: { id: string | null; name: string }) {
-  const r = await api.workspace.signIn(w.id);
-  if (r.ok) useStore.getState().toast({ text: `Sign in to ${w.name}'s Claude account in the browser that opens. The app notices when it's done.`, icon: "terminal", durationMs: 8000 });
-  else useStore.getState().toast({ text: r.err ?? "Couldn't open the sign-in", icon: "alert" });
+/** Opens the Sign in sheet for a workspace's Claude account. */
+export function signInWorkspace(w: { id: string | null; name: string }) {
+  // One at a time: a second click while the sheet is open does nothing.
+  if (useStore.getState().signingIn) return;
+  useStore.setState({ signingIn: { id: w.id, name: w.name } });
+}
+
+/**
+ * Signs a workspace in to its Claude account: Claude's sign-in opens in the browser,
+ * and the code it ends on is pasted here. No terminal.
+ */
+export function SignInSheet() {
+  const target = useStore((s) => s.signingIn);
+  const [step, setStep] = useState<"starting" | "code" | "checking" | "done" | "failed">("starting");
+  const [id, setId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (!target) return;
+    let live = true;
+    setStep("starting");
+    setId(target.id);
+    setName(target.name);
+    setUrl(null);
+    setCode("");
+    setError(null);
+    setEmail(null);
+    void api.workspace.signIn(target.id).then((r) => {
+      // Closed before it started: the sign-in that did start ends here.
+      if (!live) {
+        if (r.ok && r.id) void api.workspace.signInCancel(r.id);
+        return;
+      }
+      if (r.id) setId(r.id);
+      if (r.name) setName(r.name);
+      if (r.ok && r.url) {
+        setUrl(r.url);
+        setStep("code");
+      } else {
+        setError(r.err ?? "The sign-in didn't start");
+        setStep("failed");
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [target, attempt]);
+  if (!target) return null;
+  const close = () => {
+    if (id && step !== "done") void api.workspace.signInCancel(id);
+    useStore.setState({ signingIn: null });
+  };
+  const submit = async () => {
+    if (!id || !code.trim()) return;
+    setStep("checking");
+    setError(null);
+    const r = await api.workspace.signInCode(id, code);
+    if (r.ok) {
+      setEmail(r.email ?? null);
+      setStep("done");
+      void useStore.getState().loadWorkspaces();
+    } else {
+      setError(r.err ?? "That didn't work");
+      // The sign-in ends with a wrong code: a new one starts for the next try.
+      setStep("failed");
+    }
+  };
+  return (
+    <div className="scrim">
+      <div className="sheet ws-sheet ws-rename" role="dialog" aria-modal="true" aria-labelledby="ws-signin-title">
+        {step !== "checking" && <IconButton icon="x" label="Close" className="close" onClick={close} />}
+        <h1 id="ws-signin-title">{step === "done" ? `${name} is signed in` : `Sign in to ${name}'s Claude account`}</h1>
+        {step === "starting" && (
+          <p className="foot">
+            <Spinner size={12} /> Opening Claude's sign-in in your browser…
+          </p>
+        )}
+        {(step === "code" || step === "checking") && (
+          <>
+            <p className="lede">Sign in in your browser with the account for {name}. Claude then shows a code: paste it here.</p>
+            <div className="ws-form">
+              <label>
+                <span>Code</span>
+                <input
+                  type="text"
+                  value={code}
+                  autoFocus
+                  spellCheck={false}
+                  disabled={step === "checking"}
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void submit();
+                    if (e.key === "Escape") close();
+                  }}
+                />
+              </label>
+              {url && (
+                <p className="ws-hint">
+                  Browser didn't open?{" "}
+                  <button type="button" className="link" onClick={() => void api.app.openExternal(url)}>
+                    Open the sign-in page
+                  </button>
+                </p>
+              )}
+            </div>
+            <div className="row-actions">
+              <Button kind="primary" disabled={step === "checking" || !code.trim()} onClick={() => void submit()}>
+                {step === "checking" ? (
+                  <>
+                    <Spinner size={14} /> Signing in…
+                  </>
+                ) : (
+                  "Sign in"
+                )}
+              </Button>
+              <Button kind="plain" disabled={step === "checking"} onClick={close}>
+                Cancel
+              </Button>
+            </div>
+          </>
+        )}
+        {step === "failed" && (
+          <>
+            {error && <p className="ws-error" role="alert">{error}</p>}
+            <div className="row-actions">
+              <Button kind="primary" onClick={() => setAttempt((a) => a + 1)}>
+                Try again
+              </Button>
+              <Button kind="plain" onClick={close}>
+                Close
+              </Button>
+            </div>
+          </>
+        )}
+        {step === "done" && (
+          <>
+            <p className="lede">{email ? `Signed in as ${email}. ` : ""}Chats in {name} use this account now.</p>
+            <div className="row-actions">
+              <Button kind="primary" autoFocus onClick={close}>
+                Done
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /** Brings a disconnected workspace back into Conversations, and goes to it. */
@@ -75,7 +221,9 @@ export function WorkspaceSwitcher() {
     const it = items[i];
     setOpen(false);
     if ("add" in it) useStore.getState().openAddWorkspace(null);
-    else if ("signin" in it) current && void signInWorkspace(current);
+    else if ("signin" in it) {
+      if (current) signInWorkspace(current);
+    }
     else if ("rename" in it) useStore.setState({ renamingWorkspace: true });
     else if ("disconnect" in it) useStore.setState({ disconnectingWorkspace: current ?? null });
     else if ("reconnect" in it) void reconnectWorkspace(it.reconnect);
@@ -128,7 +276,7 @@ export function WorkspaceSwitcher() {
           ))}
           <div className="menu-sep" role="separator" />
           {([
-            ["signin", "square-terminal", current?.signedIn ? `Change ${current.name}'s Claude account…` : `Sign in to ${current?.name ?? "this workspace"}…`],
+            ["signin", "lock", current?.signedIn ? `Change ${current.name}'s Claude account…` : `Sign in to ${current?.name ?? "this workspace"}…`],
             ["rename", "pencil", `Rename ${current?.name ?? "this workspace"}…`],
             ["disconnect", "unlink", `Disconnect ${current?.name ?? "this workspace"}…`],
             ["add", "plus", "Add workspace…"],
@@ -217,11 +365,10 @@ export function AddWorkspaceSheet() {
     setSignedIn(!!w?.signedIn);
     setStep("signin");
   };
-  const signIn = async () => {
+  const signIn = () => {
     if (!id) return;
-    const r = await api.workspace.signIn(id);
-    if (!r.ok) setError(r.err ?? "Couldn't open the sign-in");
-    else setWaitingSignIn(true);
+    signInWorkspace({ id, name });
+    setWaitingSignIn(true);
   };
   const switchNow = async () => {
     const list = await api.workspace.list();
@@ -270,7 +417,7 @@ export function AddWorkspaceSheet() {
             <p className="lede">
               {signedIn
                 ? "Its Claude account is signed in on this PC. Switching restarts the app in it; switch back the same way."
-                : "A terminal opens with Claude Code. Choose your login method and sign in with the account for this workspace; you can close the terminal afterwards."}
+                : "Claude's sign-in opens in your browser. Sign in with the account for this workspace, then paste the code it shows."}
             </p>
             {error && <p className="ws-error" role="alert">{error}</p>}
             <div className="row-actions">

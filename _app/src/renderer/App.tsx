@@ -3,7 +3,7 @@ import { Sidebar } from "./features/Sidebar";
 import { ConversationList } from "./features/ConversationList";
 import { Detail } from "./features/Detail";
 import { ContextMenu, SearchResults, ShortcutOverlay, SyncPopover, Toasts, Welcome, copyResumeCommand } from "./features/Overlays";
-import { AddWorkspaceSheet, DisconnectWorkspaceSheet, RenameWorkspaceSheet, SwitchingOverlay, switchWorkspace } from "./features/Workspaces";
+import { AddWorkspaceSheet, DisconnectWorkspaceSheet, RenameWorkspaceSheet, SignInSheet, SwitchingOverlay, switchWorkspace } from "./features/Workspaces";
 import { useStore } from "./lib/store";
 import { api } from "./lib/api";
 
@@ -168,6 +168,7 @@ export function App() {
       <AddWorkspaceSheet />
       <RenameWorkspaceSheet />
       <DisconnectWorkspaceSheet />
+      <SignInSheet />
       <SwitchingOverlay />
       <ShortcutOverlay />
       <Welcome />

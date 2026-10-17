@@ -39,6 +39,8 @@ interface State {
   /** Set while the app restarts into another workspace. */
   switchingTo: string | null;
   renamingWorkspace: boolean;
+  /** The workspace the Sign in sheet signs in (id null: the one this window is in). */
+  signingIn: { id: string | null; name: string } | null;
   /** The workspace the Disconnect sheet asks about. */
   disconnectingWorkspace: WorkspaceInfo | null;
   /** Unsent messages and per-chat model, effort and mode (kept by the app across restarts). */
@@ -122,6 +124,7 @@ export const useStore = create<State>((set, get) => ({
   switchingTo: null,
   renamingWorkspace: false,
   disconnectingWorkspace: null,
+  signingIn: null,
   async loadWorkspaces() {
     try {
       set({ workspaces: await api.workspace.list() });

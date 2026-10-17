@@ -700,3 +700,16 @@ body.solid .sidebar,
 .ws-rename {
   padding-top: 44px;
 }
+
+/* A link inside a sheet's hint line (the Sign in sheet's 'Open the sign-in page'). */
+.ws-hint .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent-glyph);
+  cursor: pointer;
+}
+.ws-hint .link:hover {
+  text-decoration: underline;
+}
