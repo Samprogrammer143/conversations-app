@@ -3164,6 +3164,15 @@ function describeActivity(name, input) {
       return `Using ${name}`;
   }
 }
+var IN_APP_NOTE = [
+  "You are running inside Conversations, a desktop app for Claude Code chats. The user talks to you in the app's chat window, not a terminal.",
+  "In this app, typing /mcp in the chat opens a panel for this session's MCP servers: Sign in (it opens the server's sign-in page in the user's browser; for a claude.ai connector, its page on claude.ai), Reconnect, Turn on or off, and each server's tools. What the user does there applies to this session straight away.",
+  "So when an MCP server needs a sign-in or has failed to connect, tell the user to type /mcp in this chat and use Sign in or Reconnect there; afterwards, search for its tools again. Never send them to a terminal or 'Open in CLI' for it: a terminal starts a separate copy of this chat, so a server connected there stays unavailable here.",
+  "If you are told this session is non-interactive and that a sign-in needs /mcp in an interactive session, that means the terminal. Here, the /mcp panel does it."
+].join("\n");
+function systemPrompt(resuming) {
+  return { type: "preset", preset: "claude_code", append: IN_APP_NOTE, snapshot: !resuming };
+}
 var SIGN_IN_WAIT_MS = 10 * 60 * 1e3;
 var ChatSession = class extends EventEmitter4 {
   constructor(opts) {
@@ -3258,6 +3267,7 @@ var ChatSession = class extends EventEmitter4 {
         permissionMode: this.opts.permissionMode,
         model: this.opts.model ?? void 0,
         effort: this.opts.effort ?? void 0,
+        systemPrompt: systemPrompt(!!this.opts.resume),
         // The same Claude in Chrome integration a terminal session has (`claude --chrome`).
         // When the extension isn't running, the browser tools are simply absent.
         extraArgs: { chrome: null },

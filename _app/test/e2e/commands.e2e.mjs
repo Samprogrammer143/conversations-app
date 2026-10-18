@@ -70,6 +70,17 @@ try {
     return r ? { typed: r.querySelector(".command-typed")?.textContent ?? "", output: r.querySelector(".command-output")?.textContent ?? "" } : null;
   };
 
+  // Claude knows it runs in the app: a failed MCP server is fixed with /mcp here, not in a terminal.
+  await run("The figma-local MCP server failed to connect and I have just started Figma. In one or two sentences: what should I do so you can use it in this chat? Don't use any tools.");
+  // Its answer: the last reply once Claude is done, and not the first chat's "OK".
+  await waitFor((cid) => window.conversations.chat.status(cid).then((s) => s?.state !== "idle"), id, 15_000);
+  await waitFor((cid) => window.conversations.chat.status(cid).then((s) => s?.state === "idle"), id, 90_000);
+  const said = await waitFor(() => {
+    const t = [...document.querySelectorAll(".claude")].at(-1)?.textContent ?? "";
+    return /figma|mcp/i.test(t) ? t : null;
+  }, null, 10_000) ?? "";
+  check("Claude sends you to /mcp in the app, not to a terminal", /\/mcp/.test(said) && !/\bterminal\b|\bCLI\b/i.test(said), said.replace(/\s+/g, " ").slice(0, 220));
+
   // A local command: what you typed, and what it printed.
   await run("/output-style");
   const os1 = await waitFor((n) => {

@@ -11,7 +11,7 @@ process.env.CONVERSATIONS_DATA_DIR = path.join(os.tmpdir(), `conversations-test-
 import { localOutput, parseTranscript, slashRecord } from "../src/main/index/parse";
 import { toMcpInfo } from "../src/main/chat/mcp";
 import { ChatManager, type ManagerDeps, type SessionLike } from "../src/main/chat/manager";
-import { ChatSession, type SessionOptions } from "../src/main/chat/session";
+import { ChatSession, IN_APP_NOTE, systemPrompt, type SessionOptions } from "../src/main/chat/session";
 
 const CWD = "C:\\Users\\alex\\Projects\\website";
 const ID = "cccccccc-3333-4333-8333-cccccccccccc";
@@ -403,6 +403,18 @@ describe("the /mcp panel", () => {
     expect(await m.mcp(null, CWD)).toMatchObject({ live: false });
     expect(sessions).toHaveLength(0);
     expect(probed).toEqual([CWD]);
+  });
+});
+
+describe("what Claude is told in the app", () => {
+  it("gets Claude Code's own system prompt, as in a terminal, plus where /mcp is", () => {
+    // Left out, the Agent SDK sends a much shorter prompt than Claude Code's.
+    expect(systemPrompt(false)).toEqual({ type: "preset", preset: "claude_code", append: IN_APP_NOTE, snapshot: true });
+    // A chat carried on gets it fresh (one from before may have recorded the short prompt).
+    expect(systemPrompt(true).snapshot).toBe(false);
+    expect(IN_APP_NOTE).toMatch(/type \/mcp in this chat/);
+    expect(IN_APP_NOTE).toMatch(/Never send them to a terminal/);
+    expect(IN_APP_NOTE).not.toMatch(/\u2014/);
   });
 });
 

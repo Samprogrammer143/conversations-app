@@ -1,7 +1,7 @@
 {
   "name": "conversations",
   "productName": "Conversations",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "private": true,
   "description": "Every Claude Code conversation from all your PCs, in one place and always in sync.",
   "author": "Samprogrammer143",

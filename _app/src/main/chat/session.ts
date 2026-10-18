@@ -102,6 +102,24 @@ export function describeActivity(name: string, input: Record<string, unknown>): 
   }
 }
 
+/** What Claude is told about where it runs: the app, where /mcp is a panel (not a terminal's). */
+export const IN_APP_NOTE = [
+  "You are running inside Conversations, a desktop app for Claude Code chats. The user talks to you in the app's chat window, not a terminal.",
+  "In this app, typing /mcp in the chat opens a panel for this session's MCP servers: Sign in (it opens the server's sign-in page in the user's browser; for a claude.ai connector, its page on claude.ai), Reconnect, Turn on or off, and each server's tools. What the user does there applies to this session straight away.",
+  "So when an MCP server needs a sign-in or has failed to connect, tell the user to type /mcp in this chat and use Sign in or Reconnect there; afterwards, search for its tools again. Never send them to a terminal or 'Open in CLI' for it: a terminal starts a separate copy of this chat, so a server connected there stays unavailable here.",
+  "If you are told this session is non-interactive and that a sign-in needs /mcp in an interactive session, that means the terminal. Here, the /mcp panel does it.",
+].join("\n");
+
+/**
+ * Claude Code's own system prompt, as a terminal session has (left out, the Agent SDK sends a
+ * much shorter one), with the note about the app. A new chat records it, as Claude Code
+ * recommends; a chat carried on is given it fresh, so one started before this (recorded with
+ * the short prompt) gets it too.
+ */
+export function systemPrompt(resuming: boolean) {
+  return { type: "preset", preset: "claude_code", append: IN_APP_NOTE, snapshot: !resuming } as const;
+}
+
 /** How long an MCP sign-in may take in the browser before an unused session can close. */
 const SIGN_IN_WAIT_MS = 10 * 60 * 1000;
 
@@ -213,6 +231,7 @@ export class ChatSession extends EventEmitter {
         permissionMode: this.opts.permissionMode,
         model: this.opts.model ?? undefined,
         effort: this.opts.effort ?? undefined,
+        systemPrompt: systemPrompt(!!this.opts.resume),
         // The same Claude in Chrome integration a terminal session has (`claude --chrome`).
         // When the extension isn't running, the browser tools are simply absent.
         extraArgs: { chrome: null },
