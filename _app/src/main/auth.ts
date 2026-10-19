@@ -215,10 +215,10 @@ export function loginEnded(id: string): Promise<{ code: number | null; byCode: b
   }));
 }
 
-/** Ends every sign-in still running (the app is quitting). */
 /** A sign-in is under way in this copy of the app (its sheet waits for the browser or a code). */
 export const signingIn = () => logins.size > 0;
 
+/** Ends every sign-in still running (the app is quitting). */
 export function cancelAllLogins() {
   for (const id of [...logins.keys()]) cancelLogin(id);
 }

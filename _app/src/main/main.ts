@@ -1018,7 +1018,12 @@ function registerIpc() {
   });
   handle("chat:pending", () => chat.pendingPermissions());
 
-  handle("settings:get", () => settings.get());
+  handle("settings:get", () => {
+    // Start at login may have changed in another workspace's window since this one started.
+    const loginChoice = sharedStartAtLogin();
+    if (loginChoice !== null && loginChoice !== settings.get().startAtLogin) settings.set({ startAtLogin: loginChoice });
+    return settings.get();
+  });
   handle("settings:set", (patch: unknown) => {
     const { patch: clean, rejected } = sanitizeSettingsPatch(patch);
     if (rejected.length) log("settings", `refused from the window: ${rejected.join(", ")}`);
