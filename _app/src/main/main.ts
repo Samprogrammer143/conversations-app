@@ -4,14 +4,14 @@
 // and a window that is a view over the local index (so it opens instantly).
 
 // First: the workspace this app runs in decides every folder the rest of it reads.
-import { askedFor, baseEngine, baseEnv, baseRepoDir, currentWorkspace, engineOverridden, isWorkspaceId, listWorkspaces, markRelaunch, prepareSwitch, renameWorkspace, setDisconnected } from "./workspace";
-import { dropMark, leftOpen, markOpen, openElsewhere, unmarkOpen } from "./open-windows";
+import { askedFor, baseEngine, baseEnv, baseRepoDir, currentWorkspace, engineOverridden, isWorkspaceId, listWorkspaces, markRelaunch, prepareSwitch, registryPath, renameWorkspace, setDisconnected, sharedDataFile } from "./workspace";
+import { dropMark, leftOpen, MARK_EVERY_MS, markOpen, openElsewhere, openNow, startArgs, unmarkOpen } from "./open-windows";
 import { shareWorkspace, isRemote, launcherPath, setUpWorkspace, workspacesForWindow, writeLauncher } from "./workspace-actions";
 import fs from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, session as electronSession, shell, Tray, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, session as electronSession, shell, Tray, type IpcMainInvokeEvent } from "electron";
 import type { EditField } from "../shared/api";
 import type { AppInfo, Attachment, ListQuery, Settings } from "../shared/types";
 import { IndexService } from "./index/service";
@@ -29,7 +29,7 @@ import { knownModels } from "./chat/models";
 import { lastUsage, refreshUsage } from "./chat/usage";
 import { ComposerStore, isComposerKey } from "./composer-state";
 import { sweepPidFiles } from "./chat/shell";
-import { clearApproval, notifyApproval, parseProtocolArgs, PROTOCOL, pruneApprovals, registerProtocol } from "./chat/notify";
+import { clearApproval, notifyApproval, parseProtocolArgs, pruneApprovals, registerProtocol } from "./chat/notify";
 import { isOpenInTerminal, readRegistry, sessionProcesses, thisPidDomain } from "./chat/terminals";
 import { NO_FOLDER, NOT_HERE, OPEN_ON_THIS_PC } from "./handover";
 import { folderForTranscript } from "./resume-folder";
@@ -40,7 +40,7 @@ import { StartupQueue } from "./startup-queue";
 import { cleanStages, writeRunningMark } from "../shell/stages";
 import { log, logPath } from "./log";
 import { loadSdk, sdkLoadedFrom } from "./chat/sdk";
-import { authStatus, cancelAllLogins, cancelLogin, loginEnded, startLogin, submitLoginCode } from "./auth";
+import { authStatus, cancelAllLogins, cancelLogin, loginEnded, signingIn, startLogin, submitLoginCode } from "./auth";
 
 // A programming mistake must never take the tray agent (and sync) down with it.
 // Logged, never shown as a dialog: the window shows nothing and the app carries on.
@@ -75,6 +75,16 @@ if (!app.requestSingleInstanceLock()) {
 if (process.argv.includes("--restart-for-update")) {
   app.quit();
   process.exit(0);
+}
+// This copy has its workspace open, from now (another window asking while it starts up
+// brings it forward rather than switching to it), and says so again every minute.
+let markingOpen = true;
+markOpen(currentWorkspace().id);
+setInterval(() => markingOpen && markOpen(currentWorkspace().id), MARK_EVERY_MS).unref();
+/** This copy no longer has its workspace open (Quit, or a switch to another). */
+function closeMark() {
+  markingOpen = false;
+  unmarkOpen(currentWorkspace().id);
 }
 app.setAppUserModelId("com.samcan.conversations");
 
@@ -270,15 +280,21 @@ function showMain() {
   scheduler?.nudge();
 }
 
-/** "Conversations", or with more than one workspace here, which one this window is in. */
-function appLabel(): string {
+/** With more than one workspace here, the workspace this window is in (null: just the one). */
+function workspaceLabel(): string | null {
   const connected = listWorkspaces().workspaces.filter((w) => !w.disconnected);
-  return connected.length > 1 ? `${currentWorkspace().name} · Conversations` : "Conversations";
+  return connected.length > 1 ? currentWorkspace().name : null;
 }
-/** The window's title (the taskbar shows it) and the tray icon's name, after a rename or a new workspace. */
+/** "Conversations", or "<workspace> · Conversations" with more than one workspace here. */
+function appLabel(): string {
+  const w = workspaceLabel();
+  return w ? `${w} · Conversations` : "Conversations";
+}
+/** The window's title (the taskbar shows it) and the tray icon's name and menu, after a rename or a new workspace. */
 function refreshLabels() {
   if (mainWin && !mainWin.isDestroyed()) mainWin.setTitle(appLabel());
   updateTrayBadge();
+  refreshTrayMenu();
 }
 
 function makeMain(show: boolean): BrowserWindow {
@@ -326,24 +342,28 @@ function toggleFlyout() {
 function trayMenuTemplate(paused: boolean): Electron.MenuItemConstructorOptions[] {
   return [
     ...(updateReady ? ([{ label: `Restart to update to ${updateReady}`, click: () => restartForUpdate() }, { type: "separator" }] as Electron.MenuItemConstructorOptions[]) : []),
-    { label: "Open Conversations", click: showMain },
+    // Each workspace's window has its own tray icon: its menu says which one.
+    { label: workspaceLabel() ? `Open ${workspaceLabel()}` : "Open Conversations", click: showMain },
     { label: "Sync now", click: () => void scheduler.syncNow() },
     { label: "Pause sync", type: "checkbox", checked: paused, click: (item) => scheduler.setPaused(item.checked) },
     { type: "separator" },
     { label: "Settings", click: () => openSettings() },
     { type: "separator" },
-    { label: "Quit Conversations", click: () => userQuit() },
+    { label: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations", click: () => userQuit() },
   ];
 }
 
 let trayPaused: boolean | null = null;
 let trayUpdate: string | null = null;
+let trayName: string | null | undefined;
 function refreshTrayMenu() {
   if (!tray) return;
   const paused = !settings.get().syncAutomatically;
-  if (paused === trayPaused && updateReady === trayUpdate) return;
+  const name = workspaceLabel();
+  if (paused === trayPaused && updateReady === trayUpdate && name === trayName) return;
   trayPaused = paused;
   trayUpdate = updateReady;
+  trayName = name;
   tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(paused)));
 }
 
@@ -419,10 +439,6 @@ function checkForUpdate(): Promise<void> {
   );
 }
 
-/** What this copy of the app was started with, less what only applied to that start. */
-function launchArgs(): string[] {
-  return process.argv.slice(1).filter((a) => a !== "--hidden" && a !== "--restart-for-update" && a !== "--restart-others" && !a.startsWith("--workspace=") && !a.startsWith(`${PROTOCOL}://`));
-}
 
 /**
  * Another copy of the app, for a workspace of its own (its window, tray icon and sync).
@@ -433,7 +449,7 @@ function openWorkspaceWindow(id: string, extra: string[] = []): boolean {
   const env = baseEnv();
   for (const k of ["CONVERSATIONS_RELAUNCH", "CONVERSATIONS_BASE_ENV", "CONVERSATIONS_CLAUDE_LAUNCHER", "ELECTRON_RUN_AS_NODE"]) delete env[k];
   try {
-    const child = spawn(process.execPath, [...launchArgs(), `--workspace=${id}`, ...extra], { env, detached: true, stdio: "ignore" });
+    const child = spawn(process.execPath, startArgs(process.argv, id, extra), { env, detached: true, stdio: "ignore" });
     child.on("error", (e) => log("app", `could not open workspace ${id} in its own window: ${e.message}`));
     child.unref();
     return true;
@@ -454,8 +470,10 @@ function restart({ into, others }: { into?: string; others: boolean }) {
   // The restart starts from the launch environment: the shell finds the app's code in
   // the app's repository, and the copy stays in its workspace (or goes to the one switched to).
   markRelaunch();
+  // A window that was out of sight (in the tray) comes back out of sight.
+  const extra = [...(mainWin && !mainWin.isDestroyed() && mainWin.isVisible() ? [] : ["--hidden"]), ...(others ? ["--restart-others"] : [])];
   // Tests start the app again themselves (their runner can't follow a relaunch).
-  if (!process.env.CONVERSATIONS_TEST_NO_RELAUNCH) app.relaunch({ args: [...launchArgs(), `--workspace=${into ?? self}`, ...(others ? ["--restart-others"] : [])] });
+  if (!process.env.CONVERSATIONS_TEST_NO_RELAUNCH) app.relaunch({ args: startArgs(process.argv, into ?? self, extra) });
   quit();
 }
 
@@ -468,7 +486,7 @@ const restartForUpdate = () => restart({ others: true });
 
 /** Quit from the tray: this workspace is no longer open, so a later start doesn't open it again. */
 function userQuit() {
-  unmarkOpen(currentWorkspace().id);
+  closeMark();
   quit();
 }
 
@@ -481,10 +499,35 @@ function quit() {
   app.quit();
 }
 
+// Start at login is one Windows entry for the app, whichever workspace's window changes it:
+// the choice is kept where every workspace's copy reads it.
+const loginChoiceFile = () => sharedDataFile("start-at-login.json");
+function sharedStartAtLogin(): boolean | null {
+  try {
+    const v = JSON.parse(fs.readFileSync(loginChoiceFile(), "utf8"))?.on;
+    return typeof v === "boolean" ? v : null;
+  } catch {
+    return null;
+  }
+}
+function saveStartAtLogin(on: boolean) {
+  try {
+    const f = loginChoiceFile();
+    const tmp = `${f}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ on }));
+    fs.renameSync(tmp, f);
+  } catch (e) {
+    log("app", `could not keep the start-at-login choice: ${(e as Error).message}`);
+  }
+}
+
 function applySettings(s: Settings, patch: Partial<Settings>) {
   if ("syncAutomatically" in patch) refreshTrayMenu();
   if ("theme" in patch) nativeTheme.themeSource = s.theme;
-  if ("startAtLogin" in patch && app.isPackaged) app.setLoginItemSettings({ openAtLogin: s.startAtLogin, args: ["--hidden"] });
+  if ("startAtLogin" in patch) {
+    saveStartAtLogin(s.startAtLogin);
+    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: s.startAtLogin, args: ["--hidden"] });
+  }
   if ("theme" in patch) for (const w of [mainWin, settingsWin]) if (w && !w.isDestroyed()) setTitleBarColors(w);
   broadcast("settings-changed", s);
 }
@@ -620,7 +663,7 @@ function registerIpc() {
     const running = chat.runningIds().size;
     if (running && force !== true) return { ok: false, running };
     log("app", `switching to workspace ${id}`);
-    unmarkOpen(currentWorkspace().id);
+    closeMark();
     prepareSwitch(id);
     restart({ into: id, others: false });
     return { ok: true };
@@ -702,7 +745,7 @@ function registerIpc() {
     if (id === "main" && !fs.existsSync(path.join(appRepoDir(), ".git"))) return { ok: false, err: "This PC still gets the app's updates through this workspace: it can be disconnected after its next update" };
     if (id !== currentWorkspace().id) {
       // Its own window would carry on in a workspace that is no longer here.
-      if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first (its tray icon, Quit Conversations).` };
+      if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first: right-click its tray icon, then Quit ${target.name}.` };
       setDisconnected(id, true);
       log("app", `disconnected workspace ${id}`);
       broadcast("workspaces-changed", null);
@@ -711,7 +754,7 @@ function registerIpc() {
     const running = chat.runningIds().size;
     if (running && force !== true) return { ok: false, running };
     setDisconnected(id, true);
-    unmarkOpen(id);
+    closeMark();
     if (openElsewhere(next.id)) {
       // The workspace to go to has a window of its own already: this one comes to an end.
       log("app", `disconnected workspace ${id}; ${next.id} is open in its own window`);
@@ -1022,10 +1065,13 @@ function updateTrayBadge(onlyIfChanged = false) {
 const secondInstances = new StartupQueue<string[]>((argv) => handleSecondInstance(argv));
 
 function handleSecondInstance(argv: string[]) {
-  // Another window's update restart: this one restarts too once nothing runs here (otherwise its own banner offers it).
+  // Another window's update restart: this one restarts too when nothing is going on in it
+  // (no chat running, no sign-in, not the window in use); otherwise its own banner offers it.
   if (argv.includes("--restart-for-update")) {
     void checkForUpdate().then(() => {
-      if (updateReady && !chat.runningIds().size) restart({ others: false });
+      const inUse = !!mainWin && !mainWin.isDestroyed() && mainWin.isFocused();
+      if (updateReady && !chat.runningIds().size && !signingIn() && !inUse) restart({ others: false });
+      else if (updateReady) log("app", `version ${updateReady} is ready; this window restarts for it when you choose`);
     });
     return;
   }
@@ -1074,8 +1120,12 @@ void app.whenReady().then(async () => {
   nativeTheme.on("updated", () => {
     for (const w of [mainWin, settingsWin]) if (w && !w.isDestroyed()) setTitleBarColors(w);
   });
+  // Start at login as last chosen in any workspace's window; only a plain start (the one
+  // Windows starts at login) writes Windows' entry, never another workspace's window.
+  const loginChoice = sharedStartAtLogin();
+  if (loginChoice !== null && loginChoice !== s.startAtLogin) settings.set({ startAtLogin: loginChoice });
   settings.on("change", applySettings);
-  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: s.startAtLogin, args: ["--hidden"] });
+  if (app.isPackaged && !askedFor(process.argv)) app.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin, args: ["--hidden"] });
   // The window never needs the camera, microphone, notifications API and so on.
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   electronSession.defaultSession.setPermissionCheckHandler(() => false);
@@ -1125,8 +1175,9 @@ void app.whenReady().then(async () => {
   const mainHere = listWorkspaces().workspaces[0];
   if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs.existsSync(path.join(mainHere.syncHome, "config.json"))) {
     const keepMainCurrent = () => {
-      // Open in a window of its own, it syncs itself.
-      if (openElsewhere("main")) return;
+      // Open in a window of its own, it syncs itself; with other workspaces open too, one of them does it.
+      const open = openNow();
+      if (open.includes("main") || open.some((id) => id < currentWorkspace().id)) return;
       const child = spawn(process.execPath, [baseEngine(), "pull-all", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
       child.on("error", (e) => log("sync", `main workspace sync could not start: ${e.message}`));
     };
@@ -1199,9 +1250,8 @@ void app.whenReady().then(async () => {
   const hidden = process.argv.includes("--hidden");
   if (!settings.get().welcomed && !hidden) showWelcome();
   else ensureMain(!hidden);
-  // This copy has its workspace open. A plain start (the Start menu, at login) also opens
-  // again the workspaces whose windows were still open when the app last stopped.
-  markOpen(currentWorkspace().id);
+  // A plain start (the Start menu, at login) also opens again the workspaces whose windows
+  // were still open when the app last stopped.
   if (!askedFor(process.argv)) {
     const here = workspacesForWindow().workspaces;
     for (const id of leftOpen()) {
@@ -1233,6 +1283,13 @@ void app.whenReady().then(async () => {
 
   // Start-up is done: anything a second instance asked for in the meantime happens now.
   secondInstances.finish();
+  // Back from sleep: this window's record is current again at once (it went quiet meanwhile).
+  powerMonitor.on("resume", () => markingOpen && markOpen(currentWorkspace().id));
+  // Another window may add, rename or switch workspaces: this one's menu, title and tray follow.
+  fs.watchFile(registryPath(), { interval: 2000 }, () => {
+    broadcast("workspaces-changed", null);
+    refreshLabels();
+  });
   // Back from an update restart: the other windows follow, now the new version is set up.
   if (process.argv.includes("--restart-others")) restartOthers();
 });

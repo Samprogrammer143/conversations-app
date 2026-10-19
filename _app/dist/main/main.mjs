@@ -156,9 +156,11 @@ function askedFor(argv) {
     if (m) return m[1];
   }
   const url = argv.find((a) => a.startsWith("conversations://"));
-  return url && /[?&]ws=([a-z0-9][a-z0-9-]{0,39})(?:[&#]|$)/.exec(url)?.[1] || null;
+  return url && /[?&]ws=([a-z0-9][a-z0-9-]{0,39})(?:[&#/]|$)/.exec(url)?.[1] || null;
 }
 var openMarksDir = () => path2.join(baseDataDir(), "open");
+var sharedDataFile = (name) => path2.join(baseDataDir(), name);
+var registryPath = () => registryFile();
 function newWorkspaceId(name) {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || "workspace";
   const taken = new Set(listWorkspaces().workspaces.map((w) => w.id));
@@ -229,6 +231,7 @@ function workspaceEnv(w) {
 
 // src/main/open-windows.ts
 import fs3 from "node:fs";
+import os3 from "node:os";
 import path3 from "node:path";
 var processAlive = (pid) => {
   try {
@@ -237,6 +240,14 @@ var processAlive = (pid) => {
   } catch (e) {
     return e.code === "EPERM";
   }
+};
+var bootTime = () => Date.now() - os3.uptime() * 1e3;
+var MARK_EVERY_MS = 6e4;
+var MARK_STALE_MS = 3 * MARK_EVERY_MS;
+var live = (m, alive, since) => {
+  if (!m || !alive(m.pid)) return false;
+  const at = Date.parse(m.at);
+  return at >= since - 6e4 && Date.now() - at < MARK_STALE_MS;
 };
 var markFile = (id, dir = openMarksDir()) => path3.join(dir, `${id}.json`);
 function readMark(id, dir = openMarksDir()) {
@@ -263,21 +274,32 @@ function unmarkOpen(id, pid = process.pid, dir = openMarksDir()) {
   } catch {
   }
 }
-function openElsewhere(id, pid = process.pid, dir = openMarksDir(), alive = processAlive) {
+function openElsewhere(id, pid = process.pid, dir = openMarksDir(), alive = processAlive, since = bootTime()) {
   const m = readMark(id, dir);
-  return !!m && m.pid !== pid && alive(m.pid);
+  return live(m, alive, since) && m.pid !== pid;
 }
-function leftOpen(dir = openMarksDir(), alive = processAlive) {
-  let names = [];
+var recorded = (dir) => {
   try {
-    names = fs3.readdirSync(dir).filter((f) => f.endsWith(".json"));
+    return fs3.readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5)).filter((id) => isWorkspaceId(id));
   } catch {
     return [];
   }
-  return names.map((f) => f.slice(0, -5)).filter((id) => isWorkspaceId(id)).filter((id) => {
+};
+function leftOpen(dir = openMarksDir(), alive = processAlive, since = bootTime()) {
+  return recorded(dir).filter((id) => {
     const m = readMark(id, dir);
-    return !!m && !alive(m.pid);
+    return !!m && !live(m, alive, since);
   });
+}
+function openNow(pid = process.pid, dir = openMarksDir(), alive = processAlive, since = bootTime()) {
+  return recorded(dir).filter((id) => {
+    const m = readMark(id, dir);
+    return live(m, alive, since) && m.pid !== pid;
+  });
+}
+function startArgs(argv, workspace, extra = []) {
+  const once = (a) => a === "--hidden" || a === "--restart-for-update" || a === "--restart-others" || a.startsWith("--workspace=") || a.startsWith("conversations://");
+  return [...argv.slice(1).filter((a) => !once(a)), `--workspace=${workspace}`, ...extra];
 }
 function dropMark(id, dir = openMarksDir()) {
   try {
@@ -288,7 +310,7 @@ function dropMark(id, dir = openMarksDir()) {
 
 // src/main/workspace-actions.ts
 import fs5 from "node:fs";
-import os3 from "node:os";
+import os4 from "node:os";
 import path5 from "node:path";
 import { spawn } from "node:child_process";
 
@@ -311,7 +333,7 @@ function log(scope, message) {
 }
 
 // src/main/workspace-actions.ts
-var local2 = () => process.env.LOCALAPPDATA || path5.join(os3.homedir(), "AppData", "Local");
+var local2 = () => process.env.LOCALAPPDATA || path5.join(os4.homedir(), "AppData", "Local");
 function signedIn(w) {
   try {
     if (fs5.existsSync(path5.join(w.claudeDir, ".credentials.json"))) return true;
@@ -383,7 +405,7 @@ function baseMachine() {
     if (typeof cfg?.machine === "string" && cfg.machine) return cfg.machine;
   } catch {
   }
-  return os3.hostname();
+  return os4.hostname();
 }
 async function setUpWorkspace(input) {
   const name = input.name.trim().slice(0, 40);
@@ -448,9 +470,9 @@ function launcherPath(w) {
   return path5.join(launcherDir(), `claude-${w.id}.cmd`);
 }
 function claudeExe() {
-  const npm = path5.join(process.env.APPDATA || path5.join(os3.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+  const npm = path5.join(process.env.APPDATA || path5.join(os4.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
   if (fs5.existsSync(npm)) return npm;
-  const native = path5.join(os3.homedir(), ".local", "bin", "claude.exe");
+  const native = path5.join(os4.homedir(), ".local", "bin", "claude.exe");
   return fs5.existsSync(native) ? native : "claude";
 }
 function writeLauncher(w) {
@@ -476,11 +498,11 @@ import fs25 from "node:fs";
 import { execFile, spawn as spawn9 } from "node:child_process";
 import path23 from "node:path";
 import { fileURLToPath } from "node:url";
-import { app as app2, BrowserWindow as BrowserWindow2, clipboard, dialog as dialog2, ipcMain, Menu, nativeImage, nativeTheme as nativeTheme2, session as electronSession, shell as shell2, Tray } from "electron";
+import { app as app2, BrowserWindow as BrowserWindow2, clipboard, dialog as dialog2, ipcMain, Menu, nativeImage, nativeTheme as nativeTheme2, powerMonitor, session as electronSession, shell as shell2, Tray } from "electron";
 
 // src/main/index/service.ts
 import fs6 from "node:fs";
-import os4 from "node:os";
+import os5 from "node:os";
 import path6 from "node:path";
 import zlib from "node:zlib";
 import { EventEmitter } from "node:events";
@@ -677,7 +699,7 @@ var IndexService = class _IndexService extends EventEmitter {
   /** The worker, and the promise of its "ready" message; rejected if it dies first. */
   spawnWorker() {
     const worker = new Worker(this.workerFile, {
-      workerData: { dbPath: this.dbPath, opts: { projectsDir: projectsDir(), repoDir: repoDir(), home: os4.homedir(), thisMachine: thisMachine() } }
+      workerData: { dbPath: this.dbPath, opts: { projectsDir: projectsDir(), repoDir: repoDir(), home: os5.homedir(), thisMachine: thisMachine() } }
     });
     this.worker = worker;
     return new Promise((resolve, reject) => {
@@ -935,7 +957,7 @@ function toRow(r, ctx2) {
   const pinned = p.pinned ?? r.e_pinned === 1;
   const archived = p.archived ?? r.e_archived === 1;
   const title = (p.title !== void 0 ? p.title : r.e_title) || r.title;
-  const live = !!r.local_mtime_ms && ctx2.now - r.local_mtime_ms < LIVE_MS;
+  const live2 = !!r.local_mtime_ms && ctx2.now - r.local_mtime_ms < LIVE_MS;
   const updated = !!r.last_pc && r.last_pc !== ctx2.thisMachine && !!r.last_at && (!r.seen_last_at || r.last_at > r.seen_last_at);
   let pcs = [];
   try {
@@ -958,7 +980,7 @@ function toRow(r, ctx2) {
     pinned,
     archived,
     updated,
-    live,
+    live: live2,
     runningHere: ctx2.running.has(r.id),
     onThisPc: !!r.local_path,
     cwd: r.cwd,
@@ -1194,7 +1216,7 @@ function readDevices(repoDir2) {
 
 // src/main/sync/scheduler.ts
 import fs11 from "node:fs";
-import os5 from "node:os";
+import os6 from "node:os";
 import path9 from "node:path";
 import { EventEmitter as EventEmitter3 } from "node:events";
 import { spawn as spawn3 } from "node:child_process";
@@ -1600,7 +1622,7 @@ var SyncScheduler = class extends EventEmitter3 {
       if (this.engineVersion < 3) {
         if (Date.now() - this.lastEngineRefresh > 10 * 6e4) {
           this.lastEngineRefresh = Date.now();
-          await runEngineSerial(["pull", "list", "--cwd", os5.homedir()], { timeoutMs: 5 * 6e4 });
+          await runEngineSerial(["pull", "list", "--cwd", os6.homedir()], { timeoutMs: 5 * 6e4 });
           this.opts.onDownloaded();
         }
         this.engineVersion = await detectEngineVersion(true);
@@ -1755,7 +1777,7 @@ var SyncScheduler = class extends EventEmitter3 {
 
 // src/main/claude.ts
 import fs12 from "node:fs";
-import os6 from "node:os";
+import os7 from "node:os";
 import path10 from "node:path";
 import { spawn as spawn4 } from "node:child_process";
 var KEEP_MS = 6e4;
@@ -1793,7 +1815,7 @@ function run2(exe, args, timeoutMs) {
 function knownCandidates() {
   const out = [];
   if (process.env.CONVERSATIONS_CLAUDE_PATH) out.push(process.env.CONVERSATIONS_CLAUDE_PATH);
-  const home = os6.homedir();
+  const home = os7.homedir();
   const appData = process.env.APPDATA || path10.join(home, "AppData", "Roaming");
   const local3 = process.env.LOCALAPPDATA || path10.join(home, "AppData", "Local");
   out.push(path10.join(home, ".local", "bin", "claude.exe"));
@@ -1826,7 +1848,7 @@ var isFile = (p) => {
 function signedInNow() {
   try {
     if (fs12.existsSync(path10.join(claudeDir(), ".credentials.json"))) return true;
-    const record = process.env.CLAUDE_CONFIG_DIR ? path10.join(claudeDir(), ".claude.json") : path10.join(os6.homedir(), ".claude.json");
+    const record = process.env.CLAUDE_CONFIG_DIR ? path10.join(claudeDir(), ".claude.json") : path10.join(os7.homedir(), ".claude.json");
     const cfg = JSON.parse(fs12.readFileSync(record, "utf8"));
     return !!cfg?.oauthAccount;
   } catch {
@@ -2167,11 +2189,11 @@ function folderForTranscript(transcript, candidates, exists2 = isDir) {
 
 // src/main/chat/terminals.ts
 import fs15 from "node:fs";
-import os7 from "node:os";
+import os8 from "node:os";
 import path13 from "node:path";
 import { spawn as spawn5 } from "node:child_process";
 function thisPidDomain() {
-  return `${process.platform}:${os7.hostname().toLowerCase()}`;
+  return `${process.platform}:${os8.hostname().toLowerCase()}`;
 }
 function registryDir() {
   return path13.join(claudeDir(), "sessions");
@@ -2359,7 +2381,7 @@ import { EventEmitter as EventEmitter5 } from "node:events";
 import fs21 from "node:fs";
 
 // src/main/chat/mcp.ts
-import os8 from "node:os";
+import os9 from "node:os";
 
 // src/main/chat/sdk.ts
 import crypto from "node:crypto";
@@ -2433,7 +2455,7 @@ async function* nothing() {
 async function probeMcp(claudePath, cwd, waitMs = 8e3) {
   const env = { ...process.env, CLAUDE_SYNC_DISABLE: "1" };
   delete env.ELECTRON_RUN_AS_NODE;
-  const q = query({ prompt: nothing(), options: { cwd: cwd || os8.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: ["user", "project", "local"], extraArgs: { chrome: null }, env } });
+  const q = query({ prompt: nothing(), options: { cwd: cwd || os9.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: ["user", "project", "local"], extraArgs: { chrome: null }, env } });
   const timer = setTimeout(() => q.close(), waitMs + 2e4);
   try {
     const t0 = Date.now();
@@ -2454,7 +2476,7 @@ async function probeMcp(claudePath, cwd, waitMs = 8e3) {
 
 // src/main/chat/models.ts
 import fs18 from "node:fs";
-import os9 from "node:os";
+import os10 from "node:os";
 import path15 from "node:path";
 var MAX_AGE_MS = 12 * 60 * 60 * 1e3;
 var file2 = () => path15.join(appDataDir(), "models.json");
@@ -2544,7 +2566,7 @@ function refresh(claudePath) {
   refreshing2 ??= (async () => {
     const env = { ...process.env, CLAUDE_SYNC_DISABLE: "1" };
     delete env.ELECTRON_RUN_AS_NODE;
-    const q = query({ prompt: nothing2(), options: { cwd: os9.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: ["user"], env } });
+    const q = query({ prompt: nothing2(), options: { cwd: os10.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: ["user"], env } });
     const timer = setTimeout(() => q.close(), 3e4);
     try {
       remember(toChoices(await q.supportedModels()));
@@ -3769,7 +3791,7 @@ function plainError(msg) {
 // src/main/chat/shell.ts
 import crypto2 from "node:crypto";
 import fs20 from "node:fs";
-import os10 from "node:os";
+import os11 from "node:os";
 import path18 from "node:path";
 import { spawn as spawn7 } from "node:child_process";
 var MAX_OUTPUT = 3e4;
@@ -3894,7 +3916,7 @@ function runShell(command, cwd, opts = {}) {
   env.CHERE_INVOKING = "1";
   let stopped = null;
   let child;
-  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path18.join(os10.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
+  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path18.join(os11.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
   let args = shell3.args(command);
   if (bashGroup) {
     env.CONVERSATIONS_SHELL_COMMAND = command;
@@ -3942,7 +3964,7 @@ function runShell(command, cwd, opts = {}) {
   });
   return { done, stop: () => settledFlag ? void 0 : end("you") };
 }
-function sweepPidFiles(dir = os10.tmpdir(), olderThanMs = 6e4) {
+function sweepPidFiles(dir = os11.tmpdir(), olderThanMs = 6e4) {
   try {
     for (const name of fs20.readdirSync(dir)) {
       if (!/^conversations-shell-\d+-[0-9a-f-]{36}\.pid$/.test(name)) continue;
@@ -4060,10 +4082,10 @@ var ChatManager = class extends EventEmitter5 {
     if (id && await this.openInTerminal(id)) return { ok: false, err: OPEN_IN_TERMINAL };
     const late = refuse();
     if (late) return { ok: false, err: late };
-    const live = id ? this.sessions.get(id) : void 0;
-    const cwd = live?.alive ? live.cwd : args.cwd;
+    const live2 = id ? this.sessions.get(id) : void 0;
+    const cwd = live2?.alive ? live2.cwd : args.cwd;
     const label = shellLabel(args.command);
-    const base = live?.alive ? live.status : { conversationId: id ?? "", state: "idle", activity: null, model: null, permissionMode: args.permissionMode ?? "default", contextPercent: null, queued: [], error: null, permission: null, streamingText: "", turnTokens: null };
+    const base = live2?.alive ? live2.status : { conversationId: id ?? "", state: "idle", activity: null, model: null, permissionMode: args.permissionMode ?? "default", contextPercent: null, queued: [], error: null, permission: null, streamingText: "", turnTokens: null };
     const run3 = this.deps.runShell ? this.deps.runShell(args.command, cwd) : runShell(args.command, cwd);
     const entry = { run: run3, cwd: args.cwd, id, cancelled: null, status: { ...base, conversationId: id ?? "", state: "running-tool", activity: `Running ${label}`, error: null } };
     this.shells.set(key, entry);
@@ -4115,9 +4137,9 @@ var ChatManager = class extends EventEmitter5 {
       return s?.alive && s.mcpStatus ? { live: true, servers: await s.mcpStatus() } : { live: false, servers: [], note: "This chat's Claude Code has stopped." };
     }
     if (id) {
-      const live = await this.ensureLive(id, cwd, opts, claudePath);
-      if (live.s?.mcpStatus) return { live: true, servers: await this.settledStatus(live.s, live.fresh) };
-      note = live.err;
+      const live2 = await this.ensureLive(id, cwd, opts, claudePath);
+      if (live2.s?.mcpStatus) return { live: true, servers: await this.settledStatus(live2.s, live2.fresh) };
+      note = live2.err;
     }
     const k = cwd.toLowerCase();
     let p = this.mcpProbes.get(k);
@@ -4160,9 +4182,9 @@ var ChatManager = class extends EventEmitter5 {
     if (!s?.alive) {
       const claudePath = this.deps.claudePath();
       if (!claudePath) return { ok: false, err: "Chat needs Claude Code on this PC" };
-      const live = await this.ensureLive(id, s?.cwd ?? cwd, opts, claudePath);
-      if (!live.s) return { ok: false, err: live.err ?? "Claude Code didn't start for this chat." };
-      s = live.s;
+      const live2 = await this.ensureLive(id, s?.cwd ?? cwd, opts, claudePath);
+      if (!live2.s) return { ok: false, err: live2.err ?? "Claude Code didn't start for this chat." };
+      s = live2.s;
     }
     if (!s.mcpReconnect || !s.mcpToggle || !s.mcpStatus) return { ok: false, err: "This chat's Claude Code can't change its servers." };
     try {
@@ -4420,9 +4442,9 @@ var ChatManager = class extends EventEmitter5 {
   }
   /** The commands of a live session in that folder when there is one; otherwise asked of Claude Code. */
   async commands(id, cwd) {
-    const live = id ? this.sessions.get(id) : void 0;
-    if (live?.alive && live.commands) {
-      const list = await live.commands();
+    const live2 = id ? this.sessions.get(id) : void 0;
+    if (live2?.alive && live2.commands) {
+      const list = await live2.commands();
       if (list.length) return list;
     }
     return commandsFor(this.deps.claudePath(), cwd);
@@ -4454,7 +4476,7 @@ var ChatManager = class extends EventEmitter5 {
 
 // src/main/chat/usage.ts
 import fs22 from "node:fs";
-import os11 from "node:os";
+import os12 from "node:os";
 import path19 from "node:path";
 var file3 = () => path19.join(appDataDir(), "usage.json");
 var clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
@@ -4505,7 +4527,7 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
   inflight = (async () => {
     const env = { ...process.env, CLAUDE_SYNC_DISABLE: "1" };
     delete env.ELECTRON_RUN_AS_NODE;
-    const q = query({ prompt: nothing3(), options: { cwd: os11.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: [], env } });
+    const q = query({ prompt: nothing3(), options: { cwd: os12.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: [], env } });
     const timer = setTimeout(() => q.close(), 3e4);
     try {
       const qq = q;
@@ -4774,8 +4796,8 @@ var readMarker = (root, f) => {
   }
 };
 function readRunningMarks(root, alive = processAlive2) {
-  const live = markerNames(root).map((f) => readMarker(root, f)).filter((m) => !!m && alive(m.pid));
-  return [...new Map(live.map((m) => [m.pid, m])).values()];
+  const live2 = markerNames(root).map((f) => readMarker(root, f)).filter((m) => !!m && alive(m.pid));
+  return [...new Map(live2.map((m) => [m.pid, m])).values()];
 }
 function stagesToRemove(root, inUse, alive = processAlive2, keepAlso = []) {
   let names;
@@ -4968,6 +4990,7 @@ function loginEnded(id) {
     out: run3.timedOut ? "The sign-in timed out: start it again" : lastLine(run3.out)
   }));
 }
+var signingIn = () => logins.size > 0;
 function cancelAllLogins() {
   for (const id of [...logins.keys()]) cancelLogin(id);
 }
@@ -5013,6 +5036,13 @@ if (process.argv.includes("--restart-for-update")) {
   app2.quit();
   process.exit(0);
 }
+var markingOpen = true;
+markOpen(currentWorkspace().id);
+setInterval(() => markingOpen && markOpen(currentWorkspace().id), MARK_EVERY_MS).unref();
+function closeMark() {
+  markingOpen = false;
+  unmarkOpen(currentWorkspace().id);
+}
 app2.setAppUserModelId("com.samcan.conversations");
 var mainWin = null;
 var settingsWin = null;
@@ -5036,15 +5066,15 @@ function recordedCwdOnThisPc(id) {
   }
 }
 async function prepareResume(id, projectFolder) {
-  const recorded = recordedCwdOnThisPc(id);
-  const pulled = await pullConversation(id, recorded ?? projectFolder);
+  const recorded2 = recordedCwdOnThisPc(id);
+  const pulled = await pullConversation(id, recorded2 ?? projectFolder);
   if (pulled?.live) {
     const procs = await sessionProcesses(id, { anyKind: true });
     if (procs?.length) return { refuse: OPEN_ON_THIS_PC };
   }
   const transcript = (pulled?.ok ? pulled.dest : null) ?? localTranscript(id);
   if (!transcript) return { refuse: NOT_HERE };
-  const folder = folderForTranscript(transcript, [recorded, projectFolder]);
+  const folder = folderForTranscript(transcript, [recorded2, projectFolder]);
   return folder ? { cwd: folder } : { refuse: NO_FOLDER };
 }
 var chat = new ChatManager({
@@ -5161,13 +5191,18 @@ function showMain() {
   w.focus();
   scheduler?.nudge();
 }
-function appLabel() {
+function workspaceLabel() {
   const connected = listWorkspaces().workspaces.filter((w) => !w.disconnected);
-  return connected.length > 1 ? `${currentWorkspace().name} \xB7 Conversations` : "Conversations";
+  return connected.length > 1 ? currentWorkspace().name : null;
+}
+function appLabel() {
+  const w = workspaceLabel();
+  return w ? `${w} \xB7 Conversations` : "Conversations";
 }
 function refreshLabels() {
   if (mainWin && !mainWin.isDestroyed()) mainWin.setTitle(appLabel());
   updateTrayBadge();
+  refreshTrayMenu();
 }
 function makeMain(show) {
   const w = createMainWindow(files, { show });
@@ -5208,23 +5243,27 @@ function toggleFlyout() {
 function trayMenuTemplate(paused) {
   return [
     ...updateReady ? [{ label: `Restart to update to ${updateReady}`, click: () => restartForUpdate() }, { type: "separator" }] : [],
-    { label: "Open Conversations", click: showMain },
+    // Each workspace's window has its own tray icon: its menu says which one.
+    { label: workspaceLabel() ? `Open ${workspaceLabel()}` : "Open Conversations", click: showMain },
     { label: "Sync now", click: () => void scheduler.syncNow() },
     { label: "Pause sync", type: "checkbox", checked: paused, click: (item) => scheduler.setPaused(item.checked) },
     { type: "separator" },
     { label: "Settings", click: () => openSettings() },
     { type: "separator" },
-    { label: "Quit Conversations", click: () => userQuit() }
+    { label: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations", click: () => userQuit() }
   ];
 }
 var trayPaused = null;
 var trayUpdate = null;
+var trayName;
 function refreshTrayMenu() {
   if (!tray) return;
   const paused = !settings.get().syncAutomatically;
-  if (paused === trayPaused && updateReady === trayUpdate) return;
+  const name = workspaceLabel();
+  if (paused === trayPaused && updateReady === trayUpdate && name === trayName) return;
   trayPaused = paused;
   trayUpdate = updateReady;
+  trayName = name;
   tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(paused)));
 }
 function buildTray() {
@@ -5287,14 +5326,11 @@ function checkForUpdate() {
     })
   );
 }
-function launchArgs() {
-  return process.argv.slice(1).filter((a) => a !== "--hidden" && a !== "--restart-for-update" && a !== "--restart-others" && !a.startsWith("--workspace=") && !a.startsWith(`${PROTOCOL}://`));
-}
 function openWorkspaceWindow(id, extra = []) {
   const env = baseEnv();
   for (const k of ["CONVERSATIONS_RELAUNCH", "CONVERSATIONS_BASE_ENV", "CONVERSATIONS_CLAUDE_LAUNCHER", "ELECTRON_RUN_AS_NODE"]) delete env[k];
   try {
-    const child = spawn9(process.execPath, [...launchArgs(), `--workspace=${id}`, ...extra], { env, detached: true, stdio: "ignore" });
+    const child = spawn9(process.execPath, startArgs(process.argv, id, extra), { env, detached: true, stdio: "ignore" });
     child.on("error", (e) => log("app", `could not open workspace ${id} in its own window: ${e.message}`));
     child.unref();
     return true;
@@ -5306,7 +5342,8 @@ function openWorkspaceWindow(id, extra = []) {
 function restart({ into, others }) {
   const self = currentWorkspace().id;
   markRelaunch();
-  if (!process.env.CONVERSATIONS_TEST_NO_RELAUNCH) app2.relaunch({ args: [...launchArgs(), `--workspace=${into ?? self}`, ...others ? ["--restart-others"] : []] });
+  const extra = [...mainWin && !mainWin.isDestroyed() && mainWin.isVisible() ? [] : ["--hidden"], ...others ? ["--restart-others"] : []];
+  if (!process.env.CONVERSATIONS_TEST_NO_RELAUNCH) app2.relaunch({ args: startArgs(process.argv, into ?? self, extra) });
   quit();
 }
 function restartOthers() {
@@ -5315,7 +5352,7 @@ function restartOthers() {
 }
 var restartForUpdate = () => restart({ others: true });
 function userQuit() {
-  unmarkOpen(currentWorkspace().id);
+  closeMark();
   quit();
 }
 function quit() {
@@ -5326,10 +5363,32 @@ function quit() {
   index.stop();
   app2.quit();
 }
+var loginChoiceFile = () => sharedDataFile("start-at-login.json");
+function sharedStartAtLogin() {
+  try {
+    const v = JSON.parse(fs25.readFileSync(loginChoiceFile(), "utf8"))?.on;
+    return typeof v === "boolean" ? v : null;
+  } catch {
+    return null;
+  }
+}
+function saveStartAtLogin(on) {
+  try {
+    const f = loginChoiceFile();
+    const tmp = `${f}.${process.pid}.tmp`;
+    fs25.writeFileSync(tmp, JSON.stringify({ on }));
+    fs25.renameSync(tmp, f);
+  } catch (e) {
+    log("app", `could not keep the start-at-login choice: ${e.message}`);
+  }
+}
 function applySettings(s, patch) {
   if ("syncAutomatically" in patch) refreshTrayMenu();
   if ("theme" in patch) nativeTheme2.themeSource = s.theme;
-  if ("startAtLogin" in patch && app2.isPackaged) app2.setLoginItemSettings({ openAtLogin: s.startAtLogin, args: ["--hidden"] });
+  if ("startAtLogin" in patch) {
+    saveStartAtLogin(s.startAtLogin);
+    if (app2.isPackaged) app2.setLoginItemSettings({ openAtLogin: s.startAtLogin, args: ["--hidden"] });
+  }
   if ("theme" in patch) {
     for (const w of [mainWin, settingsWin]) if (w && !w.isDestroyed()) setTitleBarColors(w);
   }
@@ -5446,7 +5505,7 @@ function registerIpc() {
     const running = chat.runningIds().size;
     if (running && force !== true) return { ok: false, running };
     log("app", `switching to workspace ${id}`);
-    unmarkOpen(currentWorkspace().id);
+    closeMark();
     prepareSwitch(id);
     restart({ into: id, others: false });
     return { ok: true };
@@ -5513,7 +5572,7 @@ function registerIpc() {
     if (!next) return { ok: false, err: "Add another workspace first: Conversations needs one to show" };
     if (id === "main" && !fs25.existsSync(path23.join(appRepoDir(), ".git"))) return { ok: false, err: "This PC still gets the app's updates through this workspace: it can be disconnected after its next update" };
     if (id !== currentWorkspace().id) {
-      if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first (its tray icon, Quit Conversations).` };
+      if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first: right-click its tray icon, then Quit ${target.name}.` };
       setDisconnected(id, true);
       log("app", `disconnected workspace ${id}`);
       broadcast("workspaces-changed", null);
@@ -5522,7 +5581,7 @@ function registerIpc() {
     const running = chat.runningIds().size;
     if (running && force !== true) return { ok: false, running };
     setDisconnected(id, true);
-    unmarkOpen(id);
+    closeMark();
     if (openElsewhere(next.id)) {
       log("app", `disconnected workspace ${id}; ${next.id} is open in its own window`);
       openWorkspaceWindow(next.id);
@@ -5804,7 +5863,9 @@ var secondInstances = new StartupQueue((argv) => handleSecondInstance(argv));
 function handleSecondInstance(argv) {
   if (argv.includes("--restart-for-update")) {
     void checkForUpdate().then(() => {
-      if (updateReady && !chat.runningIds().size) restart({ others: false });
+      const inUse = !!mainWin && !mainWin.isDestroyed() && mainWin.isFocused();
+      if (updateReady && !chat.runningIds().size && !signingIn() && !inUse) restart({ others: false });
+      else if (updateReady) log("app", `version ${updateReady} is ready; this window restarts for it when you choose`);
     });
     return;
   }
@@ -5844,8 +5905,10 @@ void app2.whenReady().then(async () => {
   nativeTheme2.on("updated", () => {
     for (const w of [mainWin, settingsWin]) if (w && !w.isDestroyed()) setTitleBarColors(w);
   });
+  const loginChoice = sharedStartAtLogin();
+  if (loginChoice !== null && loginChoice !== s.startAtLogin) settings.set({ startAtLogin: loginChoice });
   settings.on("change", applySettings);
-  if (app2.isPackaged) app2.setLoginItemSettings({ openAtLogin: s.startAtLogin, args: ["--hidden"] });
+  if (app2.isPackaged && !askedFor(process.argv)) app2.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin, args: ["--hidden"] });
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   electronSession.defaultSession.setPermissionCheckHandler(() => false);
   void refreshClaude();
@@ -5884,7 +5947,8 @@ void app2.whenReady().then(async () => {
   const mainHere = listWorkspaces().workspaces[0];
   if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs25.existsSync(path23.join(mainHere.syncHome, "config.json"))) {
     const keepMainCurrent = () => {
-      if (openElsewhere("main")) return;
+      const open = openNow();
+      if (open.includes("main") || open.some((id) => id < currentWorkspace().id)) return;
       const child = spawn9(process.execPath, [baseEngine(), "pull-all", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
       child.on("error", (e) => log("sync", `main workspace sync could not start: ${e.message}`));
     };
@@ -5946,7 +6010,6 @@ void app2.whenReady().then(async () => {
   const hidden = process.argv.includes("--hidden");
   if (!settings.get().welcomed && !hidden) showWelcome();
   else ensureMain(!hidden);
-  markOpen(currentWorkspace().id);
   if (!askedFor(process.argv)) {
     const here = workspacesForWindow().workspaces;
     for (const id of leftOpen()) {
@@ -5973,6 +6036,11 @@ void app2.whenReady().then(async () => {
     }
   }
   secondInstances.finish();
+  powerMonitor.on("resume", () => markingOpen && markOpen(currentWorkspace().id));
+  fs25.watchFile(registryPath(), { interval: 2e3 }, () => {
+    broadcast("workspaces-changed", null);
+    refreshLabels();
+  });
   if (process.argv.includes("--restart-others")) restartOthers();
 });
 //# sourceMappingURL=main.mjs.map

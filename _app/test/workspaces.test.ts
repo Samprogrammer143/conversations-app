@@ -136,3 +136,27 @@ describe("a workspace in a window of its own", () => {
     expect(ow.leftOpen(dir, alive)).toEqual([]);
   });
 });
+
+describe("open windows, kept honest", () => {
+  it("a record not written lately, or from before the PC started, is not a running window (Windows reuses process numbers)", async () => {
+    const ow = await import("../src/main/open-windows");
+    const dir = fs.mkdtempSync(path.join(process.env.CONVERSATIONS_DATA_DIR!, "open-"));
+    const alive = () => true; // some process has each number now
+    fs.writeFileSync(path.join(dir, "work.json"), JSON.stringify({ pid: 222, at: new Date(Date.now() - 10 * 60_000).toISOString() }));
+    expect(ow.openElsewhere("work", 111, dir, alive)).toBe(false);
+    expect(ow.leftOpen(dir, alive)).toEqual(["work"]);
+    // Written just now, but the PC started after it (passed in here): from before a restart.
+    ow.markOpen("ycs", 333, dir);
+    expect(ow.openElsewhere("ycs", 111, dir, alive, Date.now() + 5 * 60_000)).toBe(false);
+    expect(ow.openElsewhere("ycs", 111, dir, alive)).toBe(true);
+    expect(ow.openNow(111, dir, alive)).toEqual(["ycs"]);
+  });
+
+  it("a new window starts with this one's arguments, less what only applied to this start", async () => {
+    const { startArgs } = await import("../src/main/open-windows");
+    // Development: the app's folder stays; the installed app has none.
+    expect(startArgs(["electron.exe", "C:\\app", "--hidden", "--workspace=main"], "work")).toEqual(["C:\\app", "--workspace=work"]);
+    expect(startArgs(["Conversations.exe"], "work", ["--hidden"])).toEqual(["--workspace=work", "--hidden"]);
+    expect(startArgs(["Conversations.exe", "conversations://review/x?ws=main", "--restart-for-update", "--restart-others"], "main", ["--restart-others"])).toEqual(["--workspace=main", "--restart-others"]);
+  });
+});

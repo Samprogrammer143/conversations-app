@@ -319,7 +319,7 @@ export function WorkspaceSwitcher() {
                   </span>
                   <span className="ws-item-text">
                     <span className="ellipsis">{w.name}</span>
-                    {!w.setUp ? <span className="ws-sub">On another PC · set up here</span> : w.openElsewhere ? <span className="ws-sub">Open in another window</span> : !w.signedIn ? <span className="ws-sub">Not signed in</span> : w.account ? <span className="ws-sub ellipsis">{w.account}</span> : null}
+                    {!w.setUp ? <span className="ws-sub">On another PC · set up here</span> : w.openElsewhere ? <span className="ws-sub">Already open in another window</span> : !w.signedIn ? <span className="ws-sub">Not signed in</span> : w.account ? <span className="ws-sub ellipsis">{w.account}</span> : null}
                   </span>
                   {w.id === ws?.current ? <Icon name="check" /> : w.setUp ? <span className="shortcut">Ctrl+Shift+{setUp.indexOf(w) + 1}</span> : null}
                 </button>
@@ -437,11 +437,11 @@ export function AddWorkspaceSheet() {
     signInWorkspace({ id, name });
     setWaitingSignIn(true);
   };
-  const switchNow = async () => {
+  const switchNow = async (ownWindow = false) => {
     const list = await api.workspace.list();
     const w = list.workspaces.find((x) => x.id === id);
     close();
-    if (w) void switchWorkspace(w);
+    if (w) void (ownWindow ? openWorkspaceWindow(w) : switchWorkspace(w));
   };
   return (
     <div className="scrim">
@@ -483,15 +483,20 @@ export function AddWorkspaceSheet() {
             <h1 id="ws-title">{signedIn ? `${name} is ready` : `Sign in to ${name}'s Claude account`}</h1>
             <p className="lede">
               {signedIn
-                ? "Its Claude account is signed in on this PC. Switching restarts the app in it; switch back the same way."
+                ? "Its Claude account is signed in on this PC. Switch this window to it, or open it in a window of its own beside this one."
                 : "Claude's sign-in opens in your browser. Sign in with the account for this workspace, then paste the code it shows."}
             </p>
             {error && <p className="ws-error" role="alert">{error}</p>}
             <div className="row-actions">
               {signedIn ? (
-                <Button kind="primary" onClick={() => void switchNow()}>
-                  Switch to {name}
-                </Button>
+                <>
+                  <Button kind="primary" onClick={() => void switchNow()}>
+                    Switch to {name}
+                  </Button>
+                  <Button kind="plain" onClick={() => void switchNow(true)}>
+                    Open in a new window
+                  </Button>
+                </>
               ) : (
                 <>
                   <Button kind="primary" icon="square-terminal" onClick={() => void signIn()}>

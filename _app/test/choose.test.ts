@@ -72,6 +72,20 @@ describe("the app code a start runs", () => {
   it("an old shell (the forwarder runs under it) still runs an app that allows shell 1", () => {
     expect(path.basename(choose([repo({ version: "0.6.4", minShell: "1.0.0" })], "1.0.0"))).toMatch(/^0\.6\.4-/);
   });
+  it("a half-made copy (a start that stopped while copying) is replaced; a checked one is used as it is", () => {
+    const r = repo({ version: "0.6.5", minShell: "1.0.0" });
+    const first = choose([r]);
+    // Another workspace's window runs from the checked copy: a later start uses it, untouched.
+    const marker = path.join(first, "in-use.txt");
+    fs.writeFileSync(marker, "running");
+    expect(choose([r])).toBe(first);
+    expect(fs.existsSync(marker)).toBe(true);
+    // A copy without its check mark is redone.
+    fs.rmSync(path.join(first, VERIFIED_MARK));
+    expect(choose([r])).toBe(first);
+    expect(fs.existsSync(path.join(first, VERIFIED_MARK))).toBe(true);
+    expect(fs.existsSync(marker)).toBe(false);
+  });
 });
 
 describe("where Claude's Agent SDK is found", () => {

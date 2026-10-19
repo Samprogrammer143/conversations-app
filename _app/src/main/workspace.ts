@@ -174,11 +174,16 @@ export function askedFor(argv: string[]): string | null {
     if (m) return m[1];
   }
   const url = argv.find((a) => a.startsWith("conversations://"));
-  return (url && /[?&]ws=([a-z0-9][a-z0-9-]{0,39})(?:[&#]|$)/.exec(url)?.[1]) || null;
+  // (Windows sometimes ends a link it hands over with a slash.)
+  return (url && /[?&]ws=([a-z0-9][a-z0-9-]{0,39})(?:[&#/]|$)/.exec(url)?.[1]) || null;
 }
 
 /** Where each open copy of the app records the workspace it is in (see open-windows.ts). */
 export const openMarksDir = () => path.join(baseDataDir(), "open");
+/** A file every workspace's copy of the app shares (in the first workspace's app data). */
+export const sharedDataFile = (name: string) => path.join(baseDataDir(), name);
+/** The list of workspaces, which another window may change. */
+export const registryPath = () => registryFile();
 
 /** A short id from a name ("Work" -> "work"), not one already used. */
 export function newWorkspaceId(name: string): string {

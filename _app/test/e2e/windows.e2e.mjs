@@ -46,10 +46,22 @@ fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ welcomed:
 const sandboxRepo = launchEnv().CLAUDE_SYNC_HOME ? path.join(launchEnv().CLAUDE_SYNC_HOME, "repo") : null;
 fs.mkdirSync(syncHome, { recursive: true });
 fs.writeFileSync(path.join(syncHome, "config.json"), JSON.stringify({ remote: path.join(T, "main.git"), machine: "Test PC" }));
-if (sandboxRepo && fs.existsSync(sandboxRepo)) spawnSync("git", ["clone", "-q", "--no-checkout", sandboxRepo, path.join(syncHome, "repo")]);
+// The installed app (an older shell) finds the forwarder in the first workspace's repository,
+// as on a PC installed before the move; the forwarder runs this checkout's committed code.
+const exe = process.env.CONVERSATIONS_E2E_EXE || null;
+if (exe) {
+  const repo = path.join(syncHome, "repo");
+  const git = (args) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd: repo, encoding: "utf8" });
+  fs.mkdirSync(path.join(repo, "_app", "dist", "main"), { recursive: true });
+  fs.copyFileSync(path.join(root, "dist-forwarder", "app.json"), path.join(repo, "_app", "dist", "app.json"));
+  fs.copyFileSync(path.join(root, "dist-forwarder", "main", "main.mjs"), path.join(repo, "_app", "dist", "main", "main.mjs"));
+  fs.writeFileSync(path.join(repo, ".gitattributes"), "* -text\n");
+  git(["init", "-q"]);
+  git(["add", "-A"]);
+  git(["commit", "-q", "-m", "forwarder"]);
+} else if (sandboxRepo && fs.existsSync(sandboxRepo)) spawnSync("git", ["clone", "-q", "--no-checkout", sandboxRepo, path.join(syncHome, "repo")]);
 
 // CONVERSATIONS_E2E_EXE: run the installed app instead (its shell runs the code committed in this checkout).
-const exe = process.env.CONVERSATIONS_E2E_EXE || null;
 const env = launchEnv({ CLAUDE_CONFIG_DIR: claudeDir, CONVERSATIONS_DATA_DIR: dataDir, CLAUDE_SYNC_HOME: syncHome, CONVERSATIONS_LAUNCHER_DIR: path.join(T, "bin"), CONVERSATIONS_TEST_NO_RELAUNCH: "1", ...(exe ? { CONVERSATIONS_APP_HOME: path.resolve(root, "..") } : {}) });
 const appArgs = exe ? [] : [root];
 const openDir = path.join(dataDir, "open");
@@ -124,7 +136,7 @@ try {
 
   // The menu now says it's open elsewhere; choosing it brings that window forward.
   await win.click(".ws-button");
-  const sub = await until(() => win.evaluate(() => [...document.querySelectorAll(".ws-row")].find((r) => r.textContent.includes("Test WS"))?.querySelector(".ws-sub")?.textContent ?? null).then((t) => (t === "Open in another window" ? t : null)), 10_000);
+  const sub = await until(() => win.evaluate(() => [...document.querySelectorAll(".ws-row")].find((r) => r.textContent.includes("Test WS"))?.querySelector(".ws-sub")?.textContent ?? null).then((t) => (t === "Already open in another window" ? t : null)), 10_000);
   check("the menu says it is open in another window", !!sub, sub ?? "");
   await win.screenshot({ path: path.join(out, "windows-menu-open.png") });
   const before = fs.existsSync(wsLog) ? fs.readFileSync(wsLog, "utf8").length : 0;
