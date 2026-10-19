@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cleanStages, readRunningMark, RUNNING_MARK, stagesToRemove, writeRunningMark } from "../src/shell/stages";
+import { cleanStages, readRunningMark, readRunningMarks, RUNNING_MARK, stagesToRemove, writeRunningMark } from "../src/shell/stages";
 
 let root: string;
 const stage = (name: string, ageMs: number) => {
@@ -38,6 +38,39 @@ describe("old app copies", () => {
     expect(fs.existsSync(v1)).toBe(true);
     expect(fs.existsSync(v3)).toBe(true);
     expect(fs.existsSync(v4)).toBe(true);
+  });
+
+  it("keeps every live instance's copy when two workspaces each run one (the last to start overwrites the shared mark)", () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), "stages-two-"));
+    try {
+      const at = (name: string, ageMs: number) => {
+        const p = path.join(r, name);
+        fs.mkdirSync(p, { recursive: true });
+        const t = new Date(Date.now() - ageMs);
+        fs.utimesSync(p, t, t);
+        return p;
+      };
+      const a = at("0.1.0-aaaaaaaaaaaa", 5_000_000); // the first workspace's window runs from this one
+      const b = at("0.2.0-bbbbbbbbbbbb", 4_000_000); // the second workspace's window, from this one
+      const c = at("0.3.0-cccccccccccc", 3_000_000);
+      const d = at("0.4.0-dddddddddddd", 2_000_000);
+      const now = at("0.5.0-eeeeeeeeeeee", 1_000_000);
+      writeRunningMark(r, a, 111);
+      writeRunningMark(r, b, 222);
+      const alive = (pid: number) => pid === 111 || pid === 222;
+      expect(readRunningMarks(r, alive).map((m) => m.stage).sort()).toEqual([a, b].sort());
+      // The shared mark names only the last one; the first is kept by its own.
+      expect(readRunningMark(r, alive)?.stage).toBe(b);
+      expect(stagesToRemove(r, now, alive).sort()).toEqual([c].sort());
+      // Once the first window is gone, its copy and its marker can go.
+      const gone = cleanStages(r, now, (pid) => pid === 222);
+      expect(gone.sort()).toEqual([a, c].sort());
+      expect(fs.existsSync(path.join(r, "running-111.json"))).toBe(false);
+      expect(fs.existsSync(path.join(r, "running-222.json"))).toBe(true);
+      expect(fs.existsSync(b) && fs.existsSync(d) && fs.existsSync(now)).toBe(true);
+    } finally {
+      fs.rmSync(r, { recursive: true, force: true });
+    }
   });
 
   it("ignores a damaged or stale mark", () => {

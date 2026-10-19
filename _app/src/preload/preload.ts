@@ -76,6 +76,7 @@ const api: ConversationsApi = {
   workspace: {
     list: () => invoke("workspace:list"),
     switch: (id, force) => invoke("workspace:switch", id, force === true),
+    openWindow: (id) => invoke("workspace:openWindow", id),
     add: (input) => invoke("workspace:add", input),
     signIn: (id) => invoke("workspace:signIn", id),
     rename: (id, name) => invoke("workspace:rename", id, name),

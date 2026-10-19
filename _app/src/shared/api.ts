@@ -112,7 +112,9 @@ export interface ConversationsApi {
   workspace: {
     list(): Promise<{ current: string; workspaces: WorkspaceInfo[] }>;
     /** `running`: chats still running here, which a switch would stop (switch again with force). */
-    switch(id: string, force?: boolean): Promise<{ ok: boolean; err?: string; running?: number }>;
+    switch(id: string, force?: boolean): Promise<{ ok: boolean; err?: string; running?: number; elsewhere?: boolean }>;
+    /** Opens a workspace in a window of its own, beside this one (`already`: it had one; it comes forward). */
+    openWindow(id: string): Promise<{ ok: boolean; err?: string; already?: boolean }>;
     /** Sets up a workspace on this PC (a new one, or one another PC has: pass its id). */
     add(input: { id?: string; name: string; remote: string }): Promise<{ ok: boolean; id?: string; err?: string }>;
     /** (Signing in: signIn below, with the Sign in sheet.) */
@@ -193,6 +195,7 @@ export const CHANNELS = [
   "settings:set",
   "workspace:list",
   "workspace:switch",
+  "workspace:openWindow",
   "workspace:add",
   "workspace:signIn",
   "workspace:rename",

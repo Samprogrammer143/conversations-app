@@ -13,7 +13,9 @@
 // conversations. (A PC still on the old layout runs them from the first
 // workspace's repository until it moves.)
 // Switching restarts the app into the other workspace, so nothing from one can
-// mix with the other.
+// mix with the other. Another workspace can also open in a window of its own: a
+// second copy of the app, started for that workspace (`--workspace=<id>`), with its own
+// tray icon and sync. Each copy keeps to the workspace it started in.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -151,10 +153,32 @@ export function setDisconnected(id: string, on: boolean) {
   writeRegistry(r);
 }
 
+/** The workspace this copy of the app is in: chosen once, when it starts (see the end of this file). */
+let thisId: string | null = null;
+
 export const currentWorkspace = (): Workspace => {
   const { current, workspaces } = listWorkspaces();
-  return workspaces.find((w) => w.id === current) ?? workspaces[0];
+  return workspaces.find((w) => w.id === thisId) ?? workspaces.find((w) => w.id === current) ?? workspaces[0];
 };
+
+/** The workspace a plain start of the app opens: the one last switched to. */
+export const defaultWorkspaceId = () => listWorkspaces().current;
+
+/**
+ * The workspace a start asks for: `--workspace=<id>` (a window of its own, or a restart
+ * that stays where it was), or the one a notification's button names (`conversations://…?ws=<id>`).
+ */
+export function askedFor(argv: string[]): string | null {
+  for (const a of argv) {
+    const m = /^--workspace=([a-z0-9][a-z0-9-]{0,39})$/.exec(a);
+    if (m) return m[1];
+  }
+  const url = argv.find((a) => a.startsWith("conversations://"));
+  return (url && /[?&]ws=([a-z0-9][a-z0-9-]{0,39})(?:[&#]|$)/.exec(url)?.[1]) || null;
+}
+
+/** Where each open copy of the app records the workspace it is in (see open-windows.ts). */
+export const openMarksDir = () => path.join(baseDataDir(), "open");
 
 /** A short id from a name ("Work" -> "work"), not one already used. */
 export function newWorkspaceId(name: string): string {
@@ -231,7 +255,10 @@ export function workspaceEnv(w: Workspace): Record<string, string> {
 
 // Applied once, now: everything imported after this module sees the workspace's folders.
 (() => {
-  const w = currentWorkspace();
+  // The one this start asked for, when it is here and connected; otherwise the default.
+  const asked = askedFor(process.argv);
+  const w = listWorkspaces().workspaces.find((x) => x.id === asked && !x.disconnected) ?? currentWorkspace();
+  thisId = w.id;
   // Always from the launch environment: a start from a terminal another workspace opened
   // must not keep that workspace's folders.
   restoreBaseEnv();

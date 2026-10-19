@@ -86,3 +86,53 @@ describe("workspace registry", () => {
     expect(ws.newWorkspaceId("Work")).toBe("work-2");
   });
 });
+
+describe("a workspace in a window of its own", () => {
+  it("is asked for by --workspace, or by the workspace a notification's link names", () => {
+    expect(ws.askedFor(["electron.exe", ".", "--workspace=work"])).toBe("work");
+    expect(ws.askedFor(["Conversations.exe", "--hidden", "--workspace=ycs-2"])).toBe("ycs-2");
+    expect(ws.askedFor(["Conversations.exe", "conversations://review/abc%3A1?ws=work"])).toBe("work");
+    expect(ws.askedFor(["Conversations.exe", "conversations://deny/abc?x=1&ws=main"])).toBe("main");
+    // Nothing asked: the default (the one last switched to).
+    expect(ws.askedFor(["Conversations.exe", "--hidden"])).toBeNull();
+    expect(ws.askedFor(["Conversations.exe", "conversations://review/abc"])).toBeNull();
+    // Only plain workspace names.
+    expect(ws.askedFor(["x", "--workspace=../etc"])).toBeNull();
+    expect(ws.askedFor(["x", "--workspace=Work"])).toBeNull();
+  });
+
+  it("each copy keeps to the workspace it started in, whatever the default becomes", () => {
+    ws.addWorkspace({ id: "work", name: "Work", remote: "https://github.com/me/work" });
+    const mine = ws.currentWorkspace().id;
+    ws.prepareSwitch("work");
+    // Another window switched: the default changes, this copy's workspace doesn't.
+    expect(ws.defaultWorkspaceId()).toBe("work");
+    expect(ws.currentWorkspace().id).toBe(mine);
+    ws.prepareSwitch("main");
+  });
+
+  it("records which workspaces are open, and which were left open when the app stopped", async () => {
+    const ow = await import("../src/main/open-windows");
+    const dir = fs.mkdtempSync(path.join(process.env.CONVERSATIONS_DATA_DIR!, "open-"));
+    const alive = (pid: number) => pid === 111 || pid === 222;
+    ow.markOpen("main", 111, dir);
+    ow.markOpen("work", 222, dir);
+    ow.markOpen("ycs", 333, dir); // its copy is gone: still open when the PC shut down
+    expect(ow.openElsewhere("work", 111, dir, alive)).toBe(true);
+    expect(ow.openElsewhere("main", 111, dir, alive)).toBe(false); // that one is this copy
+    expect(ow.openElsewhere("ycs", 111, dir, alive)).toBe(false);
+    expect(ow.leftOpen(dir, alive)).toEqual(["ycs"]);
+    // Quitting from the tray takes the record away; another copy's record stays.
+    ow.unmarkOpen("work", 111, dir);
+    expect(ow.openElsewhere("work", 111, dir, alive)).toBe(true);
+    ow.unmarkOpen("work", 222, dir);
+    expect(ow.openElsewhere("work", 111, dir, alive)).toBe(false);
+    expect(ow.leftOpen(dir, alive)).toEqual(["ycs"]);
+    ow.dropMark("ycs", dir);
+    expect(ow.leftOpen(dir, alive)).toEqual([]);
+    // Damaged records are ignored.
+    fs.writeFileSync(path.join(dir, "bad.json"), "{");
+    fs.writeFileSync(path.join(dir, "Not An Id.json"), JSON.stringify({ pid: 1, at: "" }));
+    expect(ow.leftOpen(dir, alive)).toEqual([]);
+  });
+});

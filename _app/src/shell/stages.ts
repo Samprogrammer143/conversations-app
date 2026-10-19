@@ -1,8 +1,9 @@
 // Which staged copies of the app can be deleted. The app is run from a private
 // copy under <data>/app/<version>-<tree>, and old copies are tidied away. Only the
 // running app (the primary instance, once it holds the single-instance lock) may
-// tidy, and it never removes the copy it runs from, nor the copy another live
-// instance recorded in the marker file.
+// tidy, and it never removes the copy it runs from, nor the copy any other live
+// instance recorded (one copy of the app runs per open workspace: each records its
+// own marker, running-<pid>.json, beside the older single running.json).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -35,12 +36,45 @@ export function readRunningMark(root: string, alive: (pid: number) => boolean = 
   }
 }
 
-/** Written by the primary instance once it holds the single-instance lock. */
+const ownMark = (pid: number) => `running-${pid}.json`;
+
+/**
+ * Written by the primary instance once it holds the single-instance lock: its own
+ * marker, and the shared one (which an older copy of the app, still running, reads).
+ */
 export function writeRunningMark(root: string, stage: string, pid = process.pid) {
   fs.mkdirSync(root, { recursive: true });
-  const tmp = path.join(root, `${RUNNING_MARK}.${pid}.tmp`);
-  fs.writeFileSync(tmp, JSON.stringify({ pid, stage, at: new Date().toISOString() } satisfies RunningMark));
-  fs.renameSync(tmp, path.join(root, RUNNING_MARK));
+  const body = JSON.stringify({ pid, stage, at: new Date().toISOString() } satisfies RunningMark);
+  for (const name of [ownMark(pid), RUNNING_MARK]) {
+    const tmp = path.join(root, `${name}.${pid}.tmp`);
+    fs.writeFileSync(tmp, body);
+    fs.renameSync(tmp, path.join(root, name));
+  }
+}
+
+const markerNames = (root: string) => {
+  try {
+    return fs.readdirSync(root).filter((f) => f === RUNNING_MARK || /^running-\d+\.json$/.test(f));
+  } catch {
+    return [];
+  }
+};
+const readMarker = (root: string, f: string): RunningMark | null => {
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(root, f), "utf8"));
+    return typeof m?.pid === "number" && typeof m?.stage === "string" ? m : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Every live instance's stage, from all the markers in `root`. */
+export function readRunningMarks(root: string, alive: (pid: number) => boolean = processAlive): RunningMark[] {
+  const live = markerNames(root)
+    .map((f) => readMarker(root, f))
+    .filter((m): m is RunningMark => !!m && alive(m.pid));
+  // The shared marker repeats one instance's own: each instance once.
+  return [...new Map(live.map((m) => [m.pid, m])).values()];
 }
 
 /**
@@ -61,8 +95,7 @@ export function stagesToRemove(root: string, inUse: string, alive: (pid: number)
     return [];
   }
   const keep = new Set<string>([path.basename(inUse)]);
-  const mark = readRunningMark(root, alive);
-  if (mark) keep.add(path.basename(mark.stage));
+  for (const mark of readRunningMarks(root, alive)) keep.add(path.basename(mark.stage));
   // The forwarder an older shell runs first (see forwarder.ts) stays as well: it starts every time.
   for (const k of keepAlso) keep.add(path.basename(k));
   const older = names
@@ -76,6 +109,11 @@ export function stagesToRemove(root: string, inUse: string, alive: (pid: number)
 /** Tidies old stages. Only the primary instance calls this, after it holds the lock. */
 export function cleanStages(root: string, inUse: string, alive: (pid: number) => boolean = processAlive, keepAlso: string[] = []): string[] {
   const gone: string[] = [];
+  // The markers of instances that are gone go too (the shared one is only ever overwritten).
+  for (const f of markerNames(root)) {
+    const m = readMarker(root, f);
+    if (f !== RUNNING_MARK && (!m || !alive(m.pid))) fs.rmSync(path.join(root, f), { force: true });
+  }
   for (const p of stagesToRemove(root, inUse, alive, keepAlso)) {
     try {
       fs.rmSync(p, { recursive: true, force: true });

@@ -9,8 +9,9 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import type { WorkspaceInfo } from "../shared/types";
-import { addWorkspace, baseEngine, baseEnv, baseRepoDir, isWorkspaceId, listWorkspaces, mainAccountRecord, mainRemote, newWorkspaceId, removeWorkspace, folders as folderOf, type Workspace } from "./workspace";
+import { addWorkspace, baseEngine, baseEnv, baseRepoDir, currentWorkspace, isWorkspaceId, listWorkspaces, mainAccountRecord, mainRemote, newWorkspaceId, removeWorkspace, folders as folderOf, type Workspace } from "./workspace";
 import { log } from "./log";
+import { openElsewhere } from "./open-windows";
 
 const local = () => process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
 
@@ -28,8 +29,10 @@ export function signedIn(w: Workspace): boolean {
 
 /** The workspaces the window shows: this PC's, then those other PCs have that are not set up here. */
 export function workspacesForWindow(): { current: string; workspaces: WorkspaceInfo[] } {
-  const { current, workspaces } = listWorkspaces();
-  const here: WorkspaceInfo[] = workspaces.map((w) => ({ id: w.id, name: w.name, remote: w.remote, setUp: w.id === "main" || fs.existsSync(path.join(w.syncHome, "repo", ".git")), signedIn: signedIn(w), disconnected: w.disconnected }));
+  const { workspaces } = listWorkspaces();
+  // "current": the workspace this window is in (another window can be in another one).
+  const current = currentWorkspace().id;
+  const here: WorkspaceInfo[] = workspaces.map((w) => ({ id: w.id, name: w.name, remote: w.remote, setUp: w.id === "main" || fs.existsSync(path.join(w.syncHome, "repo", ".git")), signedIn: signedIn(w), disconnected: w.disconnected, openElsewhere: w.id !== current && openElsewhere(w.id) }));
   const elsewhere = readShared().filter((s) => !here.some((h) => h.id === s.id)).map((s) => ({ ...s, setUp: false, signedIn: false, disconnected: false }));
   return { current, workspaces: [...here, ...elsewhere] };
 }

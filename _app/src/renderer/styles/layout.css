@@ -612,6 +612,42 @@ body.solid .sidebar,
 .ws-name {
   min-width: 0;
 }
+/* A workspace row: the workspace, and beside it a button that opens it in a new window. */
+.ws-row {
+  position: relative;
+}
+.menu-item.ws-item[data-window] {
+  padding-right: 38px;
+}
+.ws-window {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  margin-top: -12px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--icon-secondary);
+  cursor: pointer;
+}
+.ws-window:hover {
+  background: var(--fill-tertiary);
+  color: var(--label-primary);
+}
+.ws-row[data-active="true"] .ws-window {
+  color: var(--label-on-accent);
+}
+.ws-row[data-active="true"] .ws-window:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--label-on-accent);
+}
+.ws-window .icon {
+  color: inherit;
+}
 .ws-item .ws-item-text {
   display: flex;
   flex-direction: column;

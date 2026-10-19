@@ -330,6 +330,8 @@ export interface WorkspaceInfo {
   disconnected: boolean;
   /** The Claude account it is signed in with, when Claude Code says. */
   account?: string | null;
+  /** Open in another window on this PC (its own copy of the app). */
+  openElsewhere?: boolean;
 }
 
 /** One MCP server as Claude Code reports it, for the /mcp panel. */

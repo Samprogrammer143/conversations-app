@@ -16,6 +16,8 @@ export async function switchWorkspace(w: WorkspaceInfo, force = false) {
     return;
   }
   const r = await api.workspace.switch(w.id, force);
+  // Open in a window of its own already: that window came forward, this one stays.
+  if (r.ok && r.elsewhere) return;
   if (r.ok) {
     useStore.setState({ switchingTo: w.name });
     return;
@@ -23,6 +25,18 @@ export async function switchWorkspace(w: WorkspaceInfo, force = false) {
   if (r.running) {
     s.toast({ text: `${r.running} chat${r.running === 1 ? " is" : "s are"} running here; switching stops ${r.running === 1 ? "it" : "them"}.`, icon: "alert", actionLabel: "Switch anyway", onAction: () => void switchWorkspace(w, true), durationMs: 10_000 });
   } else s.toast({ text: r.err ?? "Couldn't switch", icon: "alert" });
+}
+
+/** Opens a workspace in a window of its own, beside this one (or brings its window forward). */
+export async function openWorkspaceWindow(w: WorkspaceInfo) {
+  const s = useStore.getState();
+  if (!w.setUp) {
+    s.openAddWorkspace(w);
+    return;
+  }
+  const r = await api.workspace.openWindow(w.id);
+  if (!r.ok) s.toast({ text: r.err ?? "Its window didn't open", icon: "alert" });
+  else if (!r.already) s.toast({ text: `Opening ${w.name}…`, icon: "check", durationMs: 4000 });
 }
 
 const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";
@@ -261,6 +275,8 @@ export function WorkspaceSwitcher() {
         title="Switch workspace (Ctrl+Shift+1, 2, …)"
         onClick={() => {
           setActive(Math.max(0, list.findIndex((w) => w.id === ws?.current)));
+          // Which ones are open in other windows may have changed since.
+          if (!open) void useStore.getState().loadWorkspaces();
           setOpen(!open);
         }}
       >
@@ -280,21 +296,51 @@ export function WorkspaceSwitcher() {
             if (e.key === "Escape") setOpen(false);
             if (e.key === "ArrowDown") setActive((a) => (a + 1) % items.length);
             if (e.key === "ArrowUp") setActive((a) => (a - 1 + items.length) % items.length);
+            // Shift+Enter on a workspace: in a window of its own.
+            if (e.key === "Enter" && e.shiftKey) {
+              const it = items[active];
+              if (it && "w" in it && it.w.id !== ws?.current) {
+                setOpen(false);
+                void openWorkspaceWindow(it.w);
+                return;
+              }
+            }
             if (e.key === "Enter") run(active);
           }}
         >
-          {list.map((w, i) => (
-            <button key={w.id} type="button" role="menuitemradio" aria-checked={w.id === ws?.current} className="menu-item ws-item" data-active={active === i} onMouseEnter={() => setActive(i)} onClick={() => run(i)}>
-              <span className="app-icon ws-badge small" aria-hidden>
-                {initial(w.name)}
-              </span>
-              <span className="ws-item-text">
-                <span className="ellipsis">{w.name}</span>
-                {!w.setUp ? <span className="ws-sub">On another PC · set up here</span> : !w.signedIn ? <span className="ws-sub">Not signed in</span> : w.account ? <span className="ws-sub ellipsis">{w.account}</span> : null}
-              </span>
-              {w.id === ws?.current ? <Icon name="check" /> : w.setUp ? <span className="shortcut">Ctrl+Shift+{setUp.indexOf(w) + 1}</span> : null}
-            </button>
-          ))}
+          {list.map((w, i) => {
+            // Another set-up workspace can open in a window of its own, beside this one.
+            const ownWindow = w.id !== ws?.current && w.setUp && !w.openElsewhere;
+            return (
+              <div key={w.id} className="ws-row" data-active={active === i} onMouseEnter={() => setActive(i)}>
+                <button type="button" role="menuitemradio" aria-checked={w.id === ws?.current} className="menu-item ws-item" data-active={active === i} data-window={ownWindow || undefined} onClick={() => run(i)}>
+                  <span className="app-icon ws-badge small" aria-hidden>
+                    {initial(w.name)}
+                  </span>
+                  <span className="ws-item-text">
+                    <span className="ellipsis">{w.name}</span>
+                    {!w.setUp ? <span className="ws-sub">On another PC · set up here</span> : w.openElsewhere ? <span className="ws-sub">Open in another window</span> : !w.signedIn ? <span className="ws-sub">Not signed in</span> : w.account ? <span className="ws-sub ellipsis">{w.account}</span> : null}
+                  </span>
+                  {w.id === ws?.current ? <Icon name="check" /> : w.setUp ? <span className="shortcut">Ctrl+Shift+{setUp.indexOf(w) + 1}</span> : null}
+                </button>
+                {ownWindow && (
+                  <button
+                    type="button"
+                    className="ws-window"
+                    tabIndex={-1}
+                    aria-label={`Open ${w.name} in a new window`}
+                    title="Open in a new window (Shift+Enter)"
+                    onClick={() => {
+                      setOpen(false);
+                      void openWorkspaceWindow(w);
+                    }}
+                  >
+                    <Icon name="square-arrow-out-up-right" size={14} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
           <div className="menu-sep" role="separator" />
           {([
             ["signin", "lock", current?.signedIn ? `Change ${current.name}'s Claude account…` : `Sign in to ${current?.name ?? "this workspace"}…`],

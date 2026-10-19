@@ -91,9 +91,19 @@ export function chooseApp(o: ChooseOptions): string {
         return o.bundled;
       }
       fs.writeFileSync(path.join(tmp, VERIFIED_MARK), `${tree}\n`);
-      fs.rmSync(stage, { recursive: true, force: true });
-      fs.renameSync(tmp, stage);
-      o.log(`staged app ${repoM.version} (${tree.slice(0, 12)}) from ${repo}`);
+      // Another start (another workspace's window) may have set it up meanwhile, and may
+      // be running from it: then that copy is used, never replaced.
+      if (fs.existsSync(path.join(stage, VERIFIED_MARK))) fs.rmSync(tmp, { recursive: true, force: true });
+      else {
+        fs.rmSync(stage, { recursive: true, force: true });
+        try {
+          fs.renameSync(tmp, stage);
+        } catch (e) {
+          if (!fs.existsSync(path.join(stage, VERIFIED_MARK))) throw e;
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+        o.log(`staged app ${repoM.version} (${tree.slice(0, 12)}) from ${repo}`);
+      }
     }
     // Old copies are tidied by the running app once it holds the single-instance
     // lock (see main.ts), never here: a second instance must not delete the stage

@@ -27,9 +27,13 @@ export function parseProtocolArgs(argv: string[]): { action: "review" | "deny"; 
 
 const shown = new Map<string, Notification>();
 
-export function notifyApproval(p: PermissionRequest, conversationTitle: string, onClick: () => void) {
+/**
+ * `workspace`: the one this copy of the app is in. A button starts the app with the link,
+ * and the link names the workspace, so it reaches the window where Claude is waiting.
+ */
+export function notifyApproval(p: PermissionRequest, conversationTitle: string, onClick: () => void, workspace = "main") {
   if (shown.has(p.requestId) || !Notification.isSupported()) return;
-  const id = encodeURIComponent(p.requestId);
+  const id = `${encodeURIComponent(p.requestId)}?ws=${encodeURIComponent(workspace)}`;
   const what = p.body ? ` (${p.body.split("\n")[0].slice(0, 80)})` : "";
   const body = `“${conversationTitle}” is waiting for you${what}.`;
   const n = new Notification({
