@@ -8,6 +8,7 @@ import { SEP, rowTime } from "../lib/format";
 
 /** "Allow a command that permanently deletes files?" -> "wants to delete files". */
 function wants(p: PermissionRequest): string {
+  if (p.questions) return "has a question";
   if (p.destructive) return "wants to delete files";
   const m = p.title.match(/^Allow Claude to (.+?)\??$/);
   if (m) return `wants to ${m[1]}`;
@@ -91,11 +92,13 @@ export function FlyoutApp() {
                 <div className="t2">{[p.context.split("  ·  ").pop(), wants(p), waiting(p.createdAt)].filter(Boolean).join(SEP)}</div>
                 <div className="fly-need-actions">
                   <button type="button" className="btn btn-primary" onClick={() => void api.app.showMain(p.conversationId)}>
-                    Review
+                    {p.questions ? "Answer" : "Review"}
                   </button>
-                  <button type="button" className="btn btn-secondary" onClick={() => void api.chat.respond(p.requestId, "deny")}>
-                    Deny
-                  </button>
+                  {!p.questions && (
+                    <button type="button" className="btn btn-secondary" onClick={() => void api.chat.respond(p.requestId, "deny")}>
+                      Deny
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

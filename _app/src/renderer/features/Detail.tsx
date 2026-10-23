@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { Attachment, ChatStatus, ComposerPrefs, Effort, ModelChoice, PermissionRequest, SlashCommandInfo } from "../../shared/types";
+import type { Attachment, ChatStatus, ClaudeQuestion, ComposerPrefs, Effort, ModelChoice, PermissionRequest, SlashCommandInfo } from "../../shared/types";
 import { Icon } from "../components/Icon";
-import { Button, GlassCircle, IconButton, ToolbarButton } from "../components/controls";
+import { Button, GlassCircle, IconButton, Spinner, ToolbarButton } from "../components/controls";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import { SEP, modelLabel } from "../lib/format";
@@ -189,6 +189,145 @@ function PermissionCard({ p }: { p: PermissionRequest }) {
   );
 }
 
+/**
+ * Claude's questions (AskUserQuestion), as Claude Code's own prompt asks them: pick an
+ * option (or several), or write your own answer; then Send. Skip lets Claude carry on.
+ */
+function QuestionCard({ p }: { p: PermissionRequest }) {
+  const questions = p.questions ?? [];
+  const ref = useRef<HTMLDivElement>(null);
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const [other, setOther] = useState<Record<string, string>>({});
+  const [sending, setSending] = useState(false);
+  useEffect(() => {
+    setPicked({});
+    setOther({});
+    setSending(false);
+    focusCard(ref.current, false);
+  }, [p.requestId]);
+  const answerOf = (q: ClaudeQuestion) => [...(picked[q.question] ?? []), ...(other[q.question]?.trim() ? [other[q.question].trim()] : [])].join(", ");
+  const ready = questions.every((q) => answerOf(q));
+  const pick = (q: ClaudeQuestion, label: string) => {
+    // One answer to a pick-one question: choosing an option replaces anything written.
+    if (!q.multiSelect) setOther((s) => ({ ...s, [q.question]: "" }));
+    setPicked((s) => {
+      const now = s[q.question] ?? [];
+      if (!q.multiSelect) return { ...s, [q.question]: now[0] === label ? [] : [label] };
+      return { ...s, [q.question]: now.includes(label) ? now.filter((x) => x !== label) : [...now, label] };
+    });
+  };
+  const touched = questions.some((q) => answerOf(q));
+  const send = async () => {
+    if (sending) return;
+    if (!ready) {
+      // Something is still unanswered: go to it.
+      const i = questions.findIndex((q) => !answerOf(q));
+      ref.current?.querySelectorAll<HTMLElement>(".q")[i]?.querySelector<HTMLElement>(".q-option, .q-other")?.focus();
+      return;
+    }
+    setSending(true);
+    const ok = await api.chat.answer(p.requestId, Object.fromEntries(questions.map((q) => [q.question, answerOf(q)])));
+    if (!ok) {
+      setSending(false);
+      useStore.getState().toast({ text: "Claude stopped waiting for that answer", icon: "alert" });
+    }
+  };
+  const skip = () => void api.chat.respond(p.requestId, "deny");
+  return (
+    <div
+      ref={ref}
+      className="permission question"
+      role="dialog"
+      aria-label={p.title}
+      onKeyDown={(e) => {
+        // Esc skips only before anything is chosen: a stray key never throws answers away.
+        if (e.key === "Escape" && !(e.target instanceof HTMLInputElement) && !touched) skip();
+        if (e.key === "Enter" && e.ctrlKey) {
+          e.preventDefault();
+          void send();
+        }
+      }}
+    >
+      <div className="head">
+        <span className="lead">
+          <Icon name="message-square" />
+        </span>
+        <div>
+          <div className="title">{p.title}</div>
+          <div className="context">{p.context.split("  ·  ").join(SEP)}</div>
+        </div>
+      </div>
+      {questions.map((q, qi) => {
+        const mine = picked[q.question] ?? [];
+        const labelId = `${p.requestId}-q${qi}`;
+        const preview = q.options.find((o) => mine.includes(o.label) && o.preview)?.preview;
+        return (
+          <fieldset className="q" key={q.question}>
+            <legend>
+              {q.header && <span className="q-chip">{q.header}</span>}
+              <span className="q-text" id={labelId}>
+                {q.question.trim()}
+              </span>
+              {q.multiSelect && <span className="q-hint">Pick any that apply</span>}
+            </legend>
+            <div className="q-options" role={q.multiSelect ? "group" : "radiogroup"} aria-labelledby={labelId}>
+              {q.options.map((o, oi) => (
+                <button
+                  key={o.label}
+                  type="button"
+                  role={q.multiSelect ? "checkbox" : "radio"}
+                  aria-checked={mine.includes(o.label)}
+                  className="q-option"
+                  data-allow={qi === 0 && oi === 0 ? "" : undefined}
+                  onClick={() => pick(q, o.label)}
+                >
+                  <span className={`q-mark${q.multiSelect ? " box" : ""}`} aria-hidden>
+                    {mine.includes(o.label) && <Icon name="check" size={11} strokeWidth={2.5} />}
+                  </span>
+                  <span className="q-option-text">
+                    <span className="q-label">{o.label}</span>
+                    {o.description && <span className="q-desc">{o.description}</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <input
+                className="q-other"
+                type="text"
+                placeholder={q.options.length ? "Or write your own answer" : "Your answer"}
+                aria-label={`Your own answer to: ${q.question}`}
+                value={other[q.question] ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setOther((s) => ({ ...s, [q.question]: v }));
+                  // A written answer replaces a single choice.
+                  if (!q.multiSelect && v.trim()) setPicked((s) => ({ ...s, [q.question]: [] }));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.ctrlKey) {
+                    e.preventDefault();
+                    void send();
+                  }
+                }}
+              />
+            {preview && <pre className="command">{preview}</pre>}
+          </fieldset>
+        );
+      })}
+      <div className="actions">
+        <span className="hint">{touched ? "Ctrl+Enter to send" : `Ctrl+Enter to send${SEP}Esc to skip`}</span>
+        <Button kind="plain" onClick={skip}>
+          Skip
+        </Button>
+        <button type="button" className="btn btn-primary" disabled={!ready || sending} onClick={() => void send()}>
+          {sending ? <Spinner size={14} /> : null}
+          {questions.length > 1 ? "Send answers" : "Send answer"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Activity({ s }: { s: ChatStatus }) {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -212,8 +351,8 @@ function Activity({ s }: { s: ChatStatus }) {
           focusCard(tail?.querySelector<HTMLElement>(".permission") ?? null, !!s.permission?.destructive);
         }}
       >
-        <Icon name="shield-alert" size={14} className="warn" />
-        <span className="label">Waiting for your approval</span>
+        <Icon name={s.permission?.questions ? "message-square" : "shield-alert"} size={14} className="warn" />
+        <span className="label">{s.permission?.questions ? "Waiting for your answer" : "Waiting for your approval"}</span>
       </button>
     );
   if (!["thinking", "running-tool", "writing", "starting"].includes(s.state)) return null;
@@ -952,7 +1091,7 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
         liveText={status?.streamingText ?? ""}
         sent={sent ?? []}
         running={running}
-        tail={status?.permission ? <PermissionCard p={status.permission} /> : null}
+        tail={status?.permission ? status.permission.questions ? <QuestionCard p={status.permission} /> : <PermissionCard p={status.permission} /> : null}
         tailKey={status?.permission?.requestId ?? null}
       />
       <div className="composer-wrap" ref={footer}>

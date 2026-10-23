@@ -942,6 +942,17 @@ function registerIpc() {
   handle("chat:stop", (id: unknown) => (isUuid(id) ? chat.stop(id) : undefined));
   // A "!" command in a new chat has no conversation id yet: it is stopped by the composer's key.
   handle("chat:stopShell", (key: unknown) => (isComposerKey(key) ? chat.stopDraftShell(key) : undefined));
+  // Answers to Claude's questions: question text -> answer, strings only.
+  handle("chat:answer", (requestId: unknown, answers: unknown) => {
+    if (!isRequestId(requestId) || !answers || typeof answers !== "object" || Array.isArray(answers)) return false;
+    const clean: Record<string, string> = {};
+    // Keys stay exactly as sent (they must match Claude's question); too long ones are left out.
+    for (const [q, a] of Object.entries(answers as Record<string, unknown>).slice(0, 8)) if (typeof a === "string" && q.length <= 8000) clean[q] = a.slice(0, 4000);
+    clearApproval(requestId);
+    const ok = chat.answer(requestId, clean);
+    updateTrayBadge();
+    return ok;
+  });
   handle("chat:respond", (requestId: unknown, decision: unknown) => {
     if (!isRequestId(requestId)) return;
     clearApproval(requestId);
@@ -1061,7 +1072,7 @@ function updateTrayBadge(onlyIfChanged = false) {
   pruneApprovals(new Set(waiting.map((p) => p.requestId)));
   if (!tray) return;
   tray.setImage(appIcon(waiting.length ? "tray-badge.ico" : "tray.ico"));
-  tray.setToolTip(waiting.length ? `${appLabel()} · Claude needs your approval` : appLabel());
+  tray.setToolTip(waiting.length ? `${appLabel()} · ${waiting.every((p) => p.questions) ? "Claude has a question" : "Claude needs your approval"}` : appLabel());
   broadcast("chat-pending", waiting);
 }
 

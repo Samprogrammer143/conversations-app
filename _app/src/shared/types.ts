@@ -296,6 +296,18 @@ export interface PermissionRequest {
   destructive: boolean;
   allowAlways: boolean;
   createdAt: string;
+  /** Claude asks you something (AskUserQuestion): answered with the question card, not Allow/Deny. */
+  questions?: ClaudeQuestion[];
+}
+
+/** One of Claude's questions: pick an option (or several), or write your own answer. */
+export interface ClaudeQuestion {
+  /** Exactly as Claude asked it: the answer is filed under this text. */
+  question: string;
+  /** A short label, e.g. "Approach". */
+  header: string;
+  multiSelect: boolean;
+  options: { label: string; description: string; preview: string | null }[];
 }
 
 export type ChatState = "idle" | "starting" | "thinking" | "running-tool" | "writing" | "waiting-approval" | "stopped" | "error";

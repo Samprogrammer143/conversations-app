@@ -7,7 +7,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import type { CanUseTool, Query, SDKMessage, SDKUserMessage, PermissionResult, PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "./sdk";
-import type { Attachment, ChatStatus, McpServerInfo, PermissionRequest } from "../../shared/types";
+import type { Attachment, ChatStatus, ClaudeQuestion, McpServerInfo, PermissionRequest } from "../../shared/types";
 import { toMcpInfo } from "./mcp";
 import { log } from "../log";
 import { isDecision, type Decision, type EffortLevel, type PermissionMode } from "../validate";
@@ -122,6 +122,24 @@ export function systemPrompt(resuming: boolean) {
 
 /** How long an MCP sign-in may take in the browser before an unused session can close. */
 const SIGN_IN_WAIT_MS = 10 * 60 * 1000;
+
+/** Claude's questions from AskUserQuestion's input, checked and trimmed; null when there are none usable. */
+export function readQuestions(input: Record<string, unknown>): ClaudeQuestion[] | null {
+  const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const list = Array.isArray(input.questions) ? input.questions : [];
+  const out: ClaudeQuestion[] = [];
+  for (const q of list.slice(0, 4) as Record<string, unknown>[]) {
+    // Kept exactly as Claude wrote it: Claude Code files each answer under this text.
+    const question = typeof q?.question === "string" && q.question.trim() && q.question.length <= 8000 ? q.question : "";
+    if (!question || out.some((x) => x.question === question)) continue;
+    const options = (Array.isArray(q.options) ? q.options : [])
+      .slice(0, 8)
+      .map((o: Record<string, unknown>) => ({ label: str(o?.label, 200), description: str(o?.description, 600), preview: str(o?.preview, 4000) || null }))
+      .filter((o) => o.label);
+    out.push({ question, header: str(q.header, 40), multiSelect: q.multiSelect === true, options });
+  }
+  return out.length ? out : null;
+}
 
 /** What the Agent SDK's session offers for MCP sign-in (the requests /mcp uses; not in its published types). */
 interface McpAuthApi {
@@ -454,6 +472,33 @@ export class ChatSession extends EventEmitter {
 
   private askPermission(toolName: string, input: Record<string, unknown>, o: Parameters<CanUseTool>[2]): Promise<PermissionResult> {
     const requestId = o.toolUseID || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // Claude asks you something: a question card, answered with your choices (not Allow/Deny).
+    const questions = toolName === "AskUserQuestion" ? readQuestions(input) : null;
+    if (toolName === "AskUserQuestion" && !questions) {
+      log("chat", "AskUserQuestion with no question the app can show");
+      return Promise.resolve({ behavior: "deny", message: "The Conversations app couldn't show these questions. Ask them in plain text instead.", decisionClassification: "user_reject" });
+    }
+    if (questions) {
+      const request: PermissionRequest = {
+        requestId,
+        conversationId: this.id ?? "",
+        toolName,
+        title: questions.length === 1 ? "Claude has a question" : `Claude has ${questions.length} questions`,
+        context: [`in ${path.basename(this.cwd)}`, this.opts.machine].join("  ·  "),
+        body: questions[0].question.trim().slice(0, 1000),
+        consequence: null,
+        destructive: false,
+        allowAlways: false,
+        createdAt: new Date().toISOString(),
+        questions,
+      };
+      return new Promise<PermissionResult>((resolve) => {
+        this.pending.set(requestId, { request, input, suggestions: [], resolve });
+        this.permissionQueue.push(requestId);
+        o.signal.addEventListener("abort", () => this.respond(requestId, "deny", true));
+        this.showNextPermission();
+      });
+    }
     const command = typeof input.command === "string" ? input.command : null;
     // Destructive: what the command or tool would destroy can be read from it, or
     // Claude Code itself asks for a prompt that opens on No (defaultToNo).
@@ -528,9 +573,42 @@ export class ChatSession extends EventEmitter {
     return [...this.pending.values()].map((p) => p.request);
   }
 
+  /**
+   * Your answers to Claude's questions (question -> answer; several choices joined with ", "),
+   * handed back as Claude Code's own question prompt does. Only questions on the card count.
+   */
+  answer(requestId: string, answers: Record<string, string>): boolean {
+    const p = this.pending.get(requestId);
+    if (!p?.request.questions) return false;
+    const given: Record<string, string> = {};
+    const annotations: Record<string, { preview: string }> = {};
+    for (const q of p.request.questions) {
+      const a = answers[q.question];
+      if (typeof a !== "string" || !a.trim()) continue;
+      given[q.question] = a.trim().slice(0, 4000);
+      // The picked option's preview goes with it, as Claude Code's own prompt sends it.
+      const preview = q.options.find((o) => o.label === given[q.question])?.preview;
+      if (preview) annotations[q.question] = { preview };
+    }
+    if (!Object.keys(given).length) return this.respond(requestId, "deny");
+    this.pending.delete(requestId);
+    this.permissionQueue = this.permissionQueue.filter((id) => id !== requestId);
+    p.resolve({ behavior: "allow", updatedInput: { ...p.input, answers: given, ...(Object.keys(annotations).length ? { annotations } : {}) }, decisionClassification: "user_temporary" });
+    this.showNextPermission();
+    return true;
+  }
+
   respond(requestId: string, answer: Decision, aborted = false): boolean {
     const p = this.pending.get(requestId);
     if (!p) return false;
+    // A question is answered with answer(); Allow (or anything else) here skips it.
+    if (p.request.questions) {
+      this.pending.delete(requestId);
+      this.permissionQueue = this.permissionQueue.filter((id) => id !== requestId);
+      p.resolve({ behavior: "deny", message: aborted ? "Cancelled." : "The user chose not to answer in the Conversations app. Carry on with your best judgement, or ask in plain text.", decisionClassification: "user_reject" });
+      this.showNextPermission();
+      return true;
+    }
     // The window can only ask for what the card offered: "Always allow" exists only
     // where it was shown (never on a destructive request); anything else is a No.
     let decision: Decision = isDecision(answer) ? answer : "deny";
@@ -562,7 +640,7 @@ export class ChatSession extends EventEmitter {
     this.clearStream();
     this.set({ queued: this.followUps.map(followLabel) });
     try {
-      for (const id of [...this.pending.keys()]) this.respond(id, "deny");
+      for (const [id, p] of [...this.pending.entries()]) this.respond(id, "deny", !!p.request.questions);
       await this.q?.interrupt();
       this.set({ state: "idle", activity: null, streamingText: "", queued: this.followUps.map(followLabel) });
     } catch (e) {

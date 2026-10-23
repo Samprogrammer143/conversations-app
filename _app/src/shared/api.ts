@@ -93,6 +93,8 @@ export interface ConversationsApi {
     mcpAction(id: string, name: string, action: "reconnect" | "enable" | "disable" | "signin" | "callback" | "signout", opts?: { model?: string | null; effort?: Effort | null; permissionMode?: string; url?: string }): Promise<McpActionResult>;
     stop(id: string): Promise<void>;
     respond(requestId: string, decision: "allow" | "allow-always" | "deny"): Promise<void>;
+    /** Answers to Claude's questions (question -> answer; several choices joined with ", "). */
+    answer(requestId: string, answers: Record<string, string>): Promise<boolean>;
     setModel(id: string, model: string): Promise<void>;
     setEffort(id: string, level: Effort): Promise<void>;
     /** Slash commands and skills for a conversation's folder, or a new chat's project. */
@@ -183,6 +185,7 @@ export const CHANNELS = [
   "chat:mcp",
   "chat:mcpAction",
   "chat:respond",
+  "chat:answer",
   "chat:setModel",
   "chat:setEffort",
   "chat:commands",

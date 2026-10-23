@@ -35,18 +35,21 @@ export function notifyApproval(p: PermissionRequest, conversationTitle: string, 
   if (shown.has(p.requestId) || !Notification.isSupported()) return;
   const id = `${encodeURIComponent(p.requestId)}?ws=${encodeURIComponent(workspace)}`;
   const what = p.body ? ` (${p.body.split("\n")[0].slice(0, 80)})` : "";
-  const body = `“${conversationTitle}” is waiting for you${what}.`;
+  // A question is answered in the window: its notification only opens it.
+  const asking = !!p.questions;
+  const heading = asking ? "Claude has a question" : "Claude needs your approval";
+  const body = asking ? `“${conversationTitle}”: ${p.body?.split("\n")[0].slice(0, 120) ?? "Claude is asking you something"}` : `“${conversationTitle}” is waiting for you${what}.`;
   const n = new Notification({
-    title: "Claude needs your approval",
+    title: heading,
     body,
     silent: false,
     toastXml:
       process.platform === "win32"
         ? `<toast launch="${PROTOCOL}://review/${id}" activationType="protocol">
-  <visual><binding template="ToastGeneric"><text>Claude needs your approval</text><text>${xmlEscape(body)}</text></binding></visual>
+  <visual><binding template="ToastGeneric"><text>${heading}</text><text>${xmlEscape(body)}</text></binding></visual>
   <actions>
-    <action content="Review" activationType="protocol" arguments="${PROTOCOL}://review/${id}"/>
-    <action content="Deny" activationType="protocol" arguments="${PROTOCOL}://deny/${id}"/>
+    <action content="${asking ? "Answer" : "Review"}" activationType="protocol" arguments="${PROTOCOL}://review/${id}"/>
+    ${asking ? "" : `<action content="Deny" activationType="protocol" arguments="${PROTOCOL}://deny/${id}"/>`}
   </actions>
 </toast>`
         : undefined,

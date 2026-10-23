@@ -60,6 +60,7 @@ const api: ConversationsApi = {
     mcp: (id, projectId, folder, opts) => invoke("chat:mcp", id, projectId, folder, opts ?? {}),
     mcpAction: (id, name, action, opts) => invoke("chat:mcpAction", id, name, action, opts ?? {}),
     respond: (requestId, decision) => invoke("chat:respond", requestId, decision),
+    answer: (requestId, answers) => invoke("chat:answer", requestId, answers),
     setModel: (id, model) => invoke("chat:setModel", id, model),
     setEffort: (id, level) => invoke("chat:setEffort", id, level),
     commands: (id, projectId, folder) => invoke("chat:commands", id, projectId, folder ?? null),

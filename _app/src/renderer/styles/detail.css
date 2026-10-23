@@ -870,6 +870,112 @@
   color: var(--label-secondary);
 }
 
+/* Claude's questions: options to pick, or your own answer. */
+.permission.question .q {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.permission.question legend {
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
+}
+.q-chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--fill-tertiary);
+  font: 600 11px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.q-text {
+  font: 500 13px/18px var(--font-ui);
+  color: var(--label-primary);
+}
+.q-hint {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.q-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.q-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--separator-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  text-align: left;
+  cursor: pointer;
+}
+.q-option:hover {
+  background: var(--fill-quaternary);
+}
+.q-option[aria-checked="true"] {
+  border-color: var(--icon-accent);
+  background: color-mix(in srgb, var(--icon-accent) 8%, var(--bg-elevated));
+}
+.q-option:focus-visible {
+  outline: 2px solid var(--icon-accent);
+  outline-offset: 1px;
+}
+.q-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--label-tertiary);
+  color: var(--label-on-accent);
+}
+.q-mark.box {
+  border-radius: 4px;
+}
+.q-option[aria-checked="true"] .q-mark {
+  border-color: var(--icon-accent);
+  background: var(--icon-accent);
+}
+.q-option-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.q-label {
+  font: 500 13px/18px var(--font-ui);
+  color: var(--label-primary);
+}
+.q-desc {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.q-other {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--separator-default);
+  background: var(--bg-elevated);
+  font: 400 13px/18px var(--font-ui);
+  color: var(--label-primary);
+  outline: none;
+}
+.q-other:focus {
+  border-color: var(--icon-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--icon-accent) 22%, transparent);
+}
+
 .menu.choice {
   top: auto;
   overflow-y: auto;

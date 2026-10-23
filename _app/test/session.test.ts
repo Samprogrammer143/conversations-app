@@ -117,3 +117,74 @@ describe("approvals", () => {
     s.respond("toolu_r", "deny");
   });
 });
+
+describe("Claude's questions (AskUserQuestion)", () => {
+  const input = {
+    questions: [
+      { question: "Which layout?", header: "Layout", multiSelect: false, options: [{ label: "Grid", description: "Cards in rows" }, { label: "List", description: "One per line" }] },
+      { question: "Which pages?", header: "Pages", multiSelect: true, options: [{ label: "Home", description: "" }, { label: "Fleet", description: "" }] },
+    ],
+  };
+
+  it("shows a question card, not Allow/Deny, and hands your answers back to Claude", async () => {
+    const { s, x } = session();
+    const pending = x.askPermission("AskUserQuestion", input, option("q1"));
+    const req = s.status.permission!;
+    expect(req.questions?.map((q) => q.question)).toEqual(["Which layout?", "Which pages?"]);
+    expect(req.questions?.[1].multiSelect).toBe(true);
+    expect(req.title).toBe("Claude has 2 questions");
+    expect(req.allowAlways).toBe(false);
+    expect(s.status.state).toBe("waiting-approval");
+    // Only questions on the card count.
+    expect(s.answer("q1", { "Which layout?": "Grid", "Which pages?": "Home, Fleet", "Something else?": "x" })).toBe(true);
+    const r = (await pending) as unknown as { behavior: string; updatedInput: { answers: Record<string, string>; questions: unknown[] } };
+    expect(r.behavior).toBe("allow");
+    expect(r.updatedInput.answers).toEqual({ "Which layout?": "Grid", "Which pages?": "Home, Fleet" });
+    expect(r.updatedInput.questions).toHaveLength(2);
+    expect(s.status.permission).toBeNull();
+  });
+
+  it("Skip (or Allow, or nothing answered) lets Claude carry on without answers", async () => {
+    const { s, x } = session();
+    const a = x.askPermission("AskUserQuestion", input, option("q2"));
+    expect(s.respond("q2", "allow")).toBe(true);
+    expect(((await a) as unknown as { behavior: string }).behavior).toBe("deny");
+    const b = x.askPermission("AskUserQuestion", input, option("q3"));
+    expect(s.answer("q3", { "Which layout?": "  " })).toBe(true);
+    expect(((await b) as unknown as { behavior: string; message: string }).message).toMatch(/chose not to answer/);
+  });
+
+  it("files each answer under the question exactly as Claude wrote it, with the picked option's preview", async () => {
+    const { s, x } = session();
+    const q = "Which layout? \n";
+    const pending = x.askPermission("AskUserQuestion", { questions: [{ question: q, header: "Layout", multiSelect: false, options: [{ label: "Grid", description: "", preview: "[ ][ ]" }, { label: "List", description: "" }] }] }, option("q4"));
+    expect(s.status.permission?.questions?.[0].question).toBe(q);
+    expect(s.status.permission?.body).toBe("Which layout?");
+    s.answer("q4", { [q]: "Grid" });
+    const r = (await pending) as unknown as { updatedInput: { answers: Record<string, string>; annotations?: Record<string, { preview: string }> } };
+    expect(r.updatedInput.answers).toEqual({ [q]: "Grid" });
+    expect(r.updatedInput.annotations).toEqual({ [q]: { preview: "[ ][ ]" } });
+  });
+
+  it("questions it can't show never become an Allow/Deny card (Allow would answer nothing)", async () => {
+    const { s, x } = session();
+    const r = (await x.askPermission("AskUserQuestion", { questions: "?" }, option("q5"))) as unknown as { behavior: string; message: string };
+    expect(r.behavior).toBe("deny");
+    expect(r.message).toMatch(/plain text/);
+    expect(s.status.permission).toBeNull();
+  });
+
+  it("Stop cancels a question rather than saying you chose not to answer", async () => {
+    const { s, x } = session();
+    const pending = x.askPermission("AskUserQuestion", input, option("q6"));
+    await s.interrupt();
+    expect(((await pending) as unknown as { message: string }).message).toBe("Cancelled.");
+  });
+
+  it("ignores questions it can't read", async () => {
+    const { readQuestions } = await import("../src/main/chat/session");
+    expect(readQuestions({})).toBeNull();
+    expect(readQuestions({ questions: [{ question: " " }, { header: "x" }] })).toBeNull();
+    expect(readQuestions({ questions: [{ question: "Why?", options: [{ label: "" }, { label: "Because", description: 3 }] }] })).toEqual([{ question: "Why?", header: "", multiSelect: false, options: [{ label: "Because", description: "", preview: null }] }]);
+  });
+});

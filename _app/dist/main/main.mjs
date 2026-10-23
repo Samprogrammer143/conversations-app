@@ -3268,6 +3268,18 @@ function systemPrompt(resuming) {
   return { type: "preset", preset: "claude_code", append: IN_APP_NOTE, snapshot: !resuming };
 }
 var SIGN_IN_WAIT_MS = 10 * 60 * 1e3;
+function readQuestions(input) {
+  const str2 = (v, max) => typeof v === "string" ? v.trim().slice(0, max) : "";
+  const list = Array.isArray(input.questions) ? input.questions : [];
+  const out = [];
+  for (const q of list.slice(0, 4)) {
+    const question = typeof q?.question === "string" && q.question.trim() && q.question.length <= 8e3 ? q.question : "";
+    if (!question || out.some((x) => x.question === question)) continue;
+    const options = (Array.isArray(q.options) ? q.options : []).slice(0, 8).map((o) => ({ label: str2(o?.label, 200), description: str2(o?.description, 600), preview: str2(o?.preview, 4e3) || null })).filter((o) => o.label);
+    out.push({ question, header: str2(q.header, 40), multiSelect: q.multiSelect === true, options });
+  }
+  return out.length ? out : null;
+}
 var ChatSession = class extends EventEmitter4 {
   constructor(opts) {
     super();
@@ -3561,6 +3573,32 @@ var ChatSession = class extends EventEmitter4 {
   // ------------------------------------------------------------ permissions
   askPermission(toolName, input, o) {
     const requestId = o.toolUseID || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const questions = toolName === "AskUserQuestion" ? readQuestions(input) : null;
+    if (toolName === "AskUserQuestion" && !questions) {
+      log("chat", "AskUserQuestion with no question the app can show");
+      return Promise.resolve({ behavior: "deny", message: "The Conversations app couldn't show these questions. Ask them in plain text instead.", decisionClassification: "user_reject" });
+    }
+    if (questions) {
+      const request2 = {
+        requestId,
+        conversationId: this.id ?? "",
+        toolName,
+        title: questions.length === 1 ? "Claude has a question" : `Claude has ${questions.length} questions`,
+        context: [`in ${path17.basename(this.cwd)}`, this.opts.machine].join("  \xB7  "),
+        body: questions[0].question.trim().slice(0, 1e3),
+        consequence: null,
+        destructive: false,
+        allowAlways: false,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+        questions
+      };
+      return new Promise((resolve) => {
+        this.pending.set(requestId, { request: request2, input, suggestions: [], resolve });
+        this.permissionQueue.push(requestId);
+        o.signal.addEventListener("abort", () => this.respond(requestId, "deny", true));
+        this.showNextPermission();
+      });
+    }
     const command = typeof input.command === "string" ? input.command : null;
     const verdict = classifyTool(toolName, input, this.cwd, { exists: (p) => fs19.existsSync(p) });
     const destructive = verdict.destructive || !!o.defaultToNo;
@@ -3628,9 +3666,39 @@ ${JSON.stringify(input, null, 2).slice(0, 1200)}`;
   pendingRequests() {
     return [...this.pending.values()].map((p) => p.request);
   }
+  /**
+   * Your answers to Claude's questions (question -> answer; several choices joined with ", "),
+   * handed back as Claude Code's own question prompt does. Only questions on the card count.
+   */
+  answer(requestId, answers) {
+    const p = this.pending.get(requestId);
+    if (!p?.request.questions) return false;
+    const given = {};
+    const annotations = {};
+    for (const q of p.request.questions) {
+      const a = answers[q.question];
+      if (typeof a !== "string" || !a.trim()) continue;
+      given[q.question] = a.trim().slice(0, 4e3);
+      const preview = q.options.find((o) => o.label === given[q.question])?.preview;
+      if (preview) annotations[q.question] = { preview };
+    }
+    if (!Object.keys(given).length) return this.respond(requestId, "deny");
+    this.pending.delete(requestId);
+    this.permissionQueue = this.permissionQueue.filter((id) => id !== requestId);
+    p.resolve({ behavior: "allow", updatedInput: { ...p.input, answers: given, ...Object.keys(annotations).length ? { annotations } : {} }, decisionClassification: "user_temporary" });
+    this.showNextPermission();
+    return true;
+  }
   respond(requestId, answer, aborted = false) {
     const p = this.pending.get(requestId);
     if (!p) return false;
+    if (p.request.questions) {
+      this.pending.delete(requestId);
+      this.permissionQueue = this.permissionQueue.filter((id) => id !== requestId);
+      p.resolve({ behavior: "deny", message: aborted ? "Cancelled." : "The user chose not to answer in the Conversations app. Carry on with your best judgement, or ask in plain text.", decisionClassification: "user_reject" });
+      this.showNextPermission();
+      return true;
+    }
     let decision = isDecision(answer) ? answer : "deny";
     if (decision === "allow-always" && (!p.request.allowAlways || p.request.destructive)) {
       log("chat", `"Always allow" was not offered for ${p.request.toolName}; treated as Deny`);
@@ -3655,7 +3723,7 @@ ${JSON.stringify(input, null, 2).slice(0, 1200)}`;
     this.clearStream();
     this.set({ queued: this.followUps.map(followLabel) });
     try {
-      for (const id of [...this.pending.keys()]) this.respond(id, "deny");
+      for (const [id, p] of [...this.pending.entries()]) this.respond(id, "deny", !!p.request.questions);
       await this.q?.interrupt();
       this.set({ state: "idle", activity: null, streamingText: "", queued: this.followUps.map(followLabel) });
     } catch (e) {
@@ -4434,6 +4502,11 @@ var ChatManager = class extends EventEmitter5 {
     for (const d of this.drafts.values()) if (d.session.respond(requestId, decision)) return true;
     return false;
   }
+  /** Your answers to Claude's questions, to the session that asked. */
+  answer(requestId, answers) {
+    for (const s of [...this.sessions.values(), ...[...this.drafts.values()].map((d) => d.session)]) if (s.answer?.(requestId, answers)) return true;
+    return false;
+  }
   async setModel(id, model) {
     await this.sessions.get(id)?.setModel(model);
   }
@@ -4675,16 +4748,18 @@ function notifyApproval(p, conversationTitle, onClick, workspace = "main") {
   if (shown.has(p.requestId) || !Notification.isSupported()) return;
   const id = `${encodeURIComponent(p.requestId)}?ws=${encodeURIComponent(workspace)}`;
   const what = p.body ? ` (${p.body.split("\n")[0].slice(0, 80)})` : "";
-  const body = `\u201C${conversationTitle}\u201D is waiting for you${what}.`;
+  const asking = !!p.questions;
+  const heading = asking ? "Claude has a question" : "Claude needs your approval";
+  const body = asking ? `\u201C${conversationTitle}\u201D: ${p.body?.split("\n")[0].slice(0, 120) ?? "Claude is asking you something"}` : `\u201C${conversationTitle}\u201D is waiting for you${what}.`;
   const n = new Notification({
-    title: "Claude needs your approval",
+    title: heading,
     body,
     silent: false,
     toastXml: process.platform === "win32" ? `<toast launch="${PROTOCOL}://review/${id}" activationType="protocol">
-  <visual><binding template="ToastGeneric"><text>Claude needs your approval</text><text>${xmlEscape(body)}</text></binding></visual>
+  <visual><binding template="ToastGeneric"><text>${heading}</text><text>${xmlEscape(body)}</text></binding></visual>
   <actions>
-    <action content="Review" activationType="protocol" arguments="${PROTOCOL}://review/${id}"/>
-    <action content="Deny" activationType="protocol" arguments="${PROTOCOL}://deny/${id}"/>
+    <action content="${asking ? "Answer" : "Review"}" activationType="protocol" arguments="${PROTOCOL}://review/${id}"/>
+    ${asking ? "" : `<action content="Deny" activationType="protocol" arguments="${PROTOCOL}://deny/${id}"/>`}
   </actions>
 </toast>` : void 0
   });
@@ -5756,6 +5831,15 @@ function registerIpc() {
   });
   handle("chat:stop", (id) => isUuid(id) ? chat.stop(id) : void 0);
   handle("chat:stopShell", (key) => isComposerKey(key) ? chat.stopDraftShell(key) : void 0);
+  handle("chat:answer", (requestId, answers) => {
+    if (!isRequestId(requestId) || !answers || typeof answers !== "object" || Array.isArray(answers)) return false;
+    const clean = {};
+    for (const [q, a] of Object.entries(answers).slice(0, 8)) if (typeof a === "string" && q.length <= 8e3) clean[q] = a.slice(0, 4e3);
+    clearApproval(requestId);
+    const ok = chat.answer(requestId, clean);
+    updateTrayBadge();
+    return ok;
+  });
   handle("chat:respond", (requestId, decision) => {
     if (!isRequestId(requestId)) return;
     clearApproval(requestId);
@@ -5860,7 +5944,7 @@ function updateTrayBadge(onlyIfChanged = false) {
   pruneApprovals(new Set(waiting.map((p) => p.requestId)));
   if (!tray) return;
   tray.setImage(appIcon(waiting.length ? "tray-badge.ico" : "tray.ico"));
-  tray.setToolTip(waiting.length ? `${appLabel()} \xB7 Claude needs your approval` : appLabel());
+  tray.setToolTip(waiting.length ? `${appLabel()} \xB7 ${waiting.every((p) => p.questions) ? "Claude has a question" : "Claude needs your approval"}` : appLabel());
   broadcast("chat-pending", waiting);
 }
 var secondInstances = new StartupQueue((argv) => handleSecondInstance(argv));

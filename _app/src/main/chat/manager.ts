@@ -69,6 +69,7 @@ export interface SessionLike extends EventEmitter {
   mcpToggle?(name: string, enabled: boolean): Promise<void>;
   pendingRequests(): PermissionRequest[];
   respond(requestId: string, decision: Decision): boolean;
+  answer?(requestId: string, answers: Record<string, string>): boolean;
   interrupt(): Promise<void>;
   setModel(model: string): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
@@ -650,6 +651,12 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
   respond(requestId: string, decision: Decision): boolean {
     for (const s of this.sessions.values()) if (s.respond(requestId, decision)) return true;
     for (const d of this.drafts.values()) if (d.session.respond(requestId, decision)) return true;
+    return false;
+  }
+
+  /** Your answers to Claude's questions, to the session that asked. */
+  answer(requestId: string, answers: Record<string, string>): boolean {
+    for (const s of [...this.sessions.values(), ...[...this.drafts.values()].map((d) => d.session)]) if (s.answer?.(requestId, answers)) return true;
     return false;
   }
 
