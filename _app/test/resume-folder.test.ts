@@ -53,6 +53,24 @@ describe("the folder to resume in", () => {
     expect(recordedCwds(t)).toEqual(["C:\\Users\\jordan\\Documents\\site"]);
   });
 
+  it("is found when this PC's folder only shows near the end of a long chat (carried on from another PC)", () => {
+    const dir = path.join(projects, encodeCwd(site));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb.jsonl");
+    const other = JSON.stringify({ type: "user", cwd: "C:\\Users\\jordan\\Documents\\site", sessionId: "x", message: { content: "y".repeat(2000) } });
+    fs.writeFileSync(file, `${Array(400).fill(other).join("\n")}\n${JSON.stringify({ type: "user", cwd: site, sessionId: "x" })}\n`);
+    expect(fs.statSync(file).size).toBeGreaterThan(512 * 1024);
+    expect(recordedCwds(file)).toContain(site);
+    expect(folderForTranscript(file, [null, clone])).toBe(site);
+  });
+
+  it("is the folder a chat started in when Claude moved into a subfolder of it", () => {
+    const sub = path.join(site, "prototype");
+    fs.mkdirSync(sub, { recursive: true });
+    const t = transcriptFor(site, sub);
+    expect(folderForTranscript(t, [sub, clone])).toBe(site);
+  });
+
   it("is nothing when no folder on this PC maps to the transcript", () => {
     const gone = path.join(base, "Web Development", "deleted-clone");
     const t = transcriptFor(gone, gone);

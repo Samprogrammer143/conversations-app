@@ -2161,8 +2161,13 @@ function recordedCwds(transcript, bytes = 256 * 1024) {
   try {
     const fd = fs14.openSync(transcript, "r");
     try {
-      const buf = Buffer.alloc(bytes);
-      text = buf.toString("utf8", 0, fs14.readSync(fd, buf, 0, bytes, 0));
+      const size = fs14.fstatSync(fd).size;
+      const head = Buffer.alloc(Math.min(bytes, size));
+      text = head.toString("utf8", 0, fs14.readSync(fd, head, 0, head.length, 0));
+      if (size > bytes) {
+        const tail = Buffer.alloc(Math.min(bytes, size - head.length));
+        text += "\n" + tail.toString("utf8", 0, fs14.readSync(fd, tail, 0, tail.length, size - tail.length));
+      }
     } finally {
       fs14.closeSync(fd);
     }
@@ -2183,8 +2188,16 @@ function folderForTranscript(transcript, candidates, exists2 = isDir) {
   const name = path12.basename(path12.dirname(transcript));
   const fits = (c) => !!c && cwdMatchesFolder(c, name) && exists2(c);
   for (const c of candidates) if (fits(c)) return c;
-  for (const c of recordedCwds(transcript)) if (fits(c)) return c;
+  const all = [...candidates, ...recordedCwds(transcript)];
+  for (const c of all) if (fits(c)) return c;
+  for (const c of all) for (const up of ancestors(c)) if (fits(up)) return up;
   return null;
+}
+function ancestors(p) {
+  if (!p || !path12.isAbsolute(p)) return [];
+  const out = [];
+  for (let dir = path12.dirname(path12.resolve(p)); dir !== path12.dirname(dir); dir = path12.dirname(dir)) out.push(dir);
+  return out;
 }
 
 // src/main/chat/terminals.ts
