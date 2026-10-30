@@ -261,22 +261,53 @@ body.solid .sidebar,
   background: var(--bg-content);
   box-shadow: inset 1px 0 0 var(--separator-default);
 }
-/* Focus mode (Ctrl+F): only the chat, with the usage meters in a strip under it. */
+/* Focus mode (Ctrl+F): only the chat, with the usage meters small and quiet at the bottom left. */
 .app.focus {
   grid-template-rows: minmax(0, 1fr) auto;
 }
 .focus-usage {
-  background: var(--bg-content);
+  position: fixed;
+  z-index: 9;
+  left: 20px;
+  bottom: 20px;
+  width: 150px;
+  opacity: 0.6;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.focus-usage:hover {
+  opacity: 1;
 }
 .focus-usage .sb-usage {
-  flex-direction: row;
-  gap: 24px;
-  justify-content: center;
-  padding: 6px 24px 10px;
+  gap: 7px;
+  padding: 0;
 }
-.focus-usage .usage-meter {
-  flex: 0 1 240px;
-  min-width: 0;
+.focus-usage .usage-label,
+.focus-usage .usage-pct {
+  font-size: 11px;
+  line-height: 14px;
+}
+.focus-usage .usage-row {
+  margin-bottom: 3px;
+}
+.focus-usage .usage-track {
+  height: 3px;
+}
+/* No room beside the chat in a narrower window: a thin line under it instead. */
+@media (max-width: 1099px) {
+  .focus-usage {
+    position: static;
+    width: auto;
+    background: var(--bg-content);
+  }
+  .focus-usage .sb-usage {
+    flex-direction: row;
+    gap: 16px;
+    padding: 4px 24px 8px;
+  }
+  .focus-usage .usage-meter {
+    flex: 0 1 150px;
+    min-width: 0;
+  }
 }
 .app.collapsed .content {
   box-shadow: none;

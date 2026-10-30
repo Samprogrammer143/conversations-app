@@ -34,7 +34,25 @@ try {
   await win.waitForTimeout(400);
   const focused = await state();
   check("Ctrl+F: only the chat, full width, with the usage strip", !focused.sidebar && !focused.list && focused.strip && focused.meters === before.meters && focused.detailWidth === focused.width, JSON.stringify(focused));
+  // Small and to the left, clear of the message box, in a wide window and a narrow one.
+  const place = () =>
+    win.evaluate(() => {
+      const u = document.querySelector(".focus-usage")?.getBoundingClientRect();
+      const c = document.querySelector(".composer")?.getBoundingClientRect();
+      return { left: Math.round(u?.left ?? -1), right: Math.round(u?.right ?? -1), top: Math.round(u?.top ?? -1), bottom: Math.round(u?.bottom ?? -1), composerLeft: Math.round(c?.left ?? -1), composerBottom: Math.round(c?.bottom ?? -1) };
+    });
+  await win.keyboard.press("Control+N");
+  await win.waitForTimeout(500);
+  const wide = await place();
+  check("the meters sit at the bottom left, clear of the message box", wide.left === 20 && wide.composerLeft > 0 && wide.right < wide.composerLeft, JSON.stringify(wide));
   await win.screenshot({ path: path.join(out, "focus-mode.png") });
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1000, 700));
+  await win.waitForTimeout(500);
+  const small = await place();
+  check("in a narrower window they drop under the message box", small.composerLeft > 0 && small.top >= small.composerBottom, JSON.stringify(small));
+  await win.screenshot({ path: path.join(out, "focus-mode-narrow.png") });
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1320, 860));
+  await win.waitForTimeout(500);
   await win.keyboard.press("Control+F");
   await win.waitForTimeout(400);
   const back = await state();
