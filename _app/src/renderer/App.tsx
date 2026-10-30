@@ -157,6 +157,13 @@ export function App() {
     };
   }, [wide, stacked, showDetail]);
 
+  // Alert mode brought a chat forward: a narrow window shows the chat, not the list.
+  useEffect(() => {
+    const show = () => setShowDetail(true);
+    window.addEventListener("app:show-chat", show);
+    return () => window.removeEventListener("app:show-chat", show);
+  }, []);
+
   // Stacked layout: choosing a conversation moves to it.
   const selectedId = useStore((s) => s.selectedId);
   useEffect(() => {

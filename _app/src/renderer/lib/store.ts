@@ -30,6 +30,11 @@ interface State {
   sync: SyncStatus | null;
   /** The plan usage meters under the sidebar. */
   usage: PlanUsage | null;
+  /**
+   * Until when Enter and Esc do nothing, and no card takes the keyboard: alert mode has just
+   * brought a chat forward and you may still be typing what you meant for another program.
+   */
+  alertGuardUntil: number;
   /** Focus mode (Ctrl+F): only the chat, with the usage meters under it. */
   focus: boolean;
   /** Workspaces (one Claude account each), and which one this window is. */
@@ -124,6 +129,7 @@ export const useStore = create<State>((set, get) => ({
   workspaces: null,
   addWorkspace: null,
   switchingTo: null,
+  alertGuardUntil: 0,
   focus: false,
   renamingWorkspace: false,
   disconnectingWorkspace: null,
@@ -231,6 +237,36 @@ export const useStore = create<State>((set, get) => ({
     });
     api.on("settings-changed", (s) => set({ settings: s }));
     api.on("open-conversation", (id) => void get().select(id));
+    // Keys in the first moments after alert mode took the window change nothing that matters.
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        if ((e.key === "Enter" || e.key === "Escape") && Date.now() < get().alertGuardUntil) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+      },
+      true,
+    );
+    window.addEventListener("focus", () => {
+      if (Date.now() < get().alertGuardUntil) set({ alertGuardUntil: Date.now() + 3000 });
+    });
+    api.on("alert", ({ id, raised, text, why }) => {
+      const tell = () => get().toast({ text, icon: why === "finished" ? "check" : "alert", actionLabel: "Open", onAction: () => void get().select(id), durationMs: 15_000 });
+      // A sheet is open, or a chat is being renamed: that isn't taken away from you.
+      const busy = !!document.querySelector(".scrim") || !!get().renaming;
+      // Into the message box, never onto a card's Allow button: a stray key must not approve anything.
+      if (raised) set({ alertGuardUntil: Date.now() + 20_000 });
+      if (!raised || busy) {
+        if (get().selectedId !== id) tell();
+        return;
+      }
+      (document.activeElement as HTMLElement | null)?.blur();
+      void Promise.resolve(get().select(id)).finally(() => {
+        window.dispatchEvent(new Event("app:show-chat"));
+        for (const ms of [0, 300, 900]) window.setTimeout(() => window.dispatchEvent(new Event("app:focus-composer")), ms);
+      });
+    });
     api.on("toast", (t) => void get().toast({ text: t.text }));
     // An update stays on screen until you act on it.
     const offerUpdate = (v: string | null) => {

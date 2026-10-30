@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Attachment, ChatStatus, ClaudeQuestion, ComposerPrefs, Effort, ModelChoice, PermissionRequest, SlashCommandInfo } from "../../shared/types";
 import { Icon } from "../components/Icon";
-import { Button, GlassCircle, IconButton, Spinner, ToolbarButton } from "../components/controls";
+import { Button, GlassCircle, IconButton, Spinner, Toggle, ToolbarButton } from "../components/controls";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import { SEP, modelLabel } from "../lib/format";
@@ -116,7 +116,8 @@ function useChatStatus(id: string | null) {
  */
 function focusCard(card: HTMLElement | null, destructive: boolean) {
   const typing = document.activeElement?.closest("textarea, input, [contenteditable]");
-  if (!card || typing) return;
+  // Alert mode just brought this chat forward: you may still be typing, so no button gets the keys.
+  if (!card || typing || Date.now() < useStore.getState().alertGuardUntil) return;
   const r = card.getBoundingClientRect();
   const composerTop = document.querySelector(".detail .composer-wrap")?.getBoundingClientRect().top ?? window.innerHeight;
   if (r.top < 0 || r.bottom > composerTop + 24) return;
@@ -480,6 +481,7 @@ function Composer({
   const key = composerKey(id, projectId ?? null, folder);
   const [text, setTextState] = useState(() => useStore.getState().composer.drafts[key] ?? "");
   const defaultMode = useStore((s) => s.settings?.defaultPermissionMode ?? "default");
+  const alertMode = useStore((s) => s.settings?.alertMode ?? false);
   const prefs = useStore((s) => s.composer.prefs[key]);
   const setPrefs = useStore((s) => s.setPrefs);
   const setDraft = useStore((s) => s.setDraft);
@@ -841,6 +843,10 @@ function Composer({
           </button>
         )}
         <span className="spacer" />
+        <span className="alert-switch" title="Alert mode: a chat that finishes or needs you comes to the front of your screen">
+          <span aria-hidden>Alert</span>
+          <Toggle label="Alert mode: bring a chat to the front when it finishes or needs you" checked={alertMode} onChange={(v) => void api.settings.set({ alertMode: v })} />
+        </span>
         {offline ? <span className="context">{`Offline${SEP}Send is off until you reconnect`}</span> : contextPercent != null ? <ContextRing percent={contextPercent} /> : null}
         {(running && id) || (shellRunning && !id) ? (
           <button type="button" className="send stop" aria-label="Stop (Esc)" title="Stop (Esc)" onClick={() => void (id ? api.chat.stop(id) : api.chat.stopShell(key))}>

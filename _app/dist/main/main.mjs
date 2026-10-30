@@ -498,6 +498,51 @@ import fs25 from "node:fs";
 import { execFile, spawn as spawn9 } from "node:child_process";
 import path23 from "node:path";
 import { fileURLToPath } from "node:url";
+
+// src/main/alert.ts
+var WORKING = /* @__PURE__ */ new Set(["thinking", "running-tool", "writing", "waiting-approval"]);
+var SETTLE_MS = 1500;
+var AlertWatcher = class {
+  constructor(fire) {
+    this.fire = fire;
+  }
+  fire;
+  states = /* @__PURE__ */ new Map();
+  asked = /* @__PURE__ */ new Map();
+  timers = /* @__PURE__ */ new Map();
+  note(st) {
+    const id = st.conversationId;
+    if (!id) return;
+    const before = this.states.get(id);
+    this.states.set(id, st.state);
+    const request = st.state === "waiting-approval" ? st.permission?.requestId : void 0;
+    if (request && this.asked.get(id) !== request) {
+      this.asked.set(id, request);
+      this.cancel(id);
+      this.fire(id, "needs-you");
+      return;
+    }
+    if (WORKING.has(st.state)) {
+      this.cancel(id);
+    } else if (st.state === "idle" && before && WORKING.has(before) || st.state === "error" && before && (WORKING.has(before) || before === "starting")) {
+      this.cancel(id);
+      const why = st.state === "error" ? "stopped" : "finished";
+      const timer = setTimeout(() => {
+        this.timers.delete(id);
+        if (this.states.get(id) === st.state) this.fire(id, why);
+      }, SETTLE_MS);
+      timer.unref?.();
+      this.timers.set(id, timer);
+    }
+  }
+  cancel(id) {
+    const t = this.timers.get(id);
+    if (t) clearTimeout(t);
+    this.timers.delete(id);
+  }
+};
+
+// src/main/main.ts
 import { app as app2, BrowserWindow as BrowserWindow2, clipboard, dialog as dialog2, ipcMain, Menu, nativeImage, nativeTheme as nativeTheme2, powerMonitor, session as electronSession, shell as shell2, Tray } from "electron";
 
 // src/main/index/service.ts
@@ -1255,6 +1300,7 @@ var DEFAULT_SETTINGS = {
   theme: "system",
   windowMaterial: "mica",
   syncAutomatically: true,
+  alertMode: false,
   checkWhileOpenSeconds: 30,
   checkFromTraySeconds: 300,
   uploadDelay: "after-quiet",
@@ -1281,6 +1327,7 @@ var CHECKS = {
   checkFromTraySeconds: (v) => isInt(v, 30, 86400),
   uploadDelay: (v) => v === "after-quiet" || v === "fast",
   keepResumeUpToDate: isBool,
+  alertMode: isBool,
   startAtLogin: isBool,
   showArchived: isBool,
   defaultModel: (v) => v === null || isModelName(v),
@@ -5979,6 +6026,63 @@ function registerIpc() {
     if (w) setTitleBarColors(w, colors);
   });
 }
+var lastRaisedAt = 0;
+var keyboardWait = null;
+function takeKeyboardWhenIdle(w, minimized) {
+  if (keyboardWait) clearInterval(keyboardWait);
+  const t0 = Date.now();
+  if (minimized) w.flashFrame(true);
+  keyboardWait = setInterval(() => {
+    const gone = w.isDestroyed() || !w.isVisible() || w.isMinimized() && !minimized || !!BrowserWindow2.getFocusedWindow() && !w.isFocused();
+    const over = gone || w.isFocused() || Date.now() - t0 > 15e3;
+    if (!over && powerMonitor.getSystemIdleTime() < 2) return;
+    clearInterval(keyboardWait);
+    keyboardWait = null;
+    if (gone || w.isFocused()) return;
+    if (Date.now() - t0 > 15e3) {
+      w.flashFrame(true);
+      w.once("focus", () => w.flashFrame(false));
+    } else {
+      if (w.isMinimized()) w.restore();
+      w.flashFrame(false);
+      w.focus();
+      setTimeout(() => {
+        if (w.isDestroyed() || w.isFocused()) return;
+        w.flashFrame(true);
+        w.once("focus", () => w.flashFrame(false));
+      }, 500);
+    }
+  }, 500);
+}
+var RAISE_GAP_MS = 8e3;
+var lastRaisedId = null;
+function alertChat(id, why, again = false) {
+  if (!settings.get().alertMode || quitting) return;
+  if (again && (why === "needs-you" ? !chat.pendingPermissions().some((p) => p.conversationId === id) : chat.isRunning(id))) return;
+  const title = index.ready ? index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(id)?.title ?? "A chat" : "A chat";
+  const text = `\u201C${title}\u201D ${why === "finished" ? "finished" : why === "stopped" ? "stopped" : "needs you"}`;
+  const w = ensureMain(false);
+  const here = w.isVisible() && !w.isMinimized() && w.isFocused();
+  const sinceRaised = Date.now() - lastRaisedAt;
+  if (here || sinceRaised < RAISE_GAP_MS) {
+    if (!again) w.webContents.send("event:alert", { id, raised: false, text, why });
+    if (!here && !again) setTimeout(() => !w.isDestroyed() && !w.isFocused() && alertChat(id, why, true), RAISE_GAP_MS - sinceRaised + 100).unref();
+    return;
+  }
+  lastRaisedAt = Date.now();
+  lastRaisedId = id;
+  log("app", `alert mode: bringing ${id.slice(0, 8)} forward (${why})`);
+  const minimized = w.isMinimized();
+  if (!w.isVisible()) w.showInactive();
+  if (!minimized) {
+    w.setAlwaysOnTop(true);
+    w.moveTop();
+    w.setAlwaysOnTop(false);
+  }
+  w.webContents.send("event:alert", { id, raised: true, text, why });
+  if (!BrowserWindow2.getFocusedWindow()) takeKeyboardWhenIdle(w, minimized);
+}
+var alerts = new AlertWatcher(alertChat);
 function openConversation(id) {
   flyout?.hide();
   showMain();
@@ -6106,6 +6210,7 @@ void app2.whenReady().then(async () => {
   let usageAfterReply = null;
   chat.on("status", (st) => {
     broadcast("chat-status", st);
+    alerts.note(st);
     const busy = chat.runningIds();
     if ([...lastBusy].some((x) => !busy.has(x))) {
       if (usageAfterReply) clearTimeout(usageAfterReply);
@@ -6138,7 +6243,8 @@ void app2.whenReady().then(async () => {
   chat.on("permission", (p) => {
     updateTrayBadge();
     const watching = !!mainWin && mainWin.isVisible() && !mainWin.isMinimized() && mainWin.isFocused();
-    if (!watching) {
+    const raisedNow = settings.get().alertMode && lastRaisedId === p.conversationId && Date.now() - lastRaisedAt < 2e3;
+    if (!watching && !raisedNow) {
       const title = index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(p.conversationId)?.title ?? "A conversation";
       notifyApproval(p, title, () => openConversation(p.conversationId), currentWorkspace().id);
     }

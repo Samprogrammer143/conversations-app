@@ -11,6 +11,7 @@ import fs from "node:fs";
 import { execFile, spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { AlertWatcher, type AlertWhy } from "./alert";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, session as electronSession, shell, Tray, type IpcMainInvokeEvent } from "electron";
 import type { EditField } from "../shared/api";
 import type { AppInfo, Attachment, ListQuery, Settings } from "../shared/types";
@@ -1056,6 +1057,75 @@ function registerIpc() {
   });
 }
 
+// Alert mode. The window comes forward at once, but takes the keyboard only once you've
+// paused: what you are typing in another program must not land in the chat (or send it).
+let lastRaisedAt = 0;
+let keyboardWait: NodeJS.Timeout | null = null;
+function takeKeyboardWhenIdle(w: BrowserWindow, minimized: boolean) {
+  if (keyboardWait) clearInterval(keyboardWait);
+  const t0 = Date.now();
+  // A minimized window can only come back with the keyboard: until then the taskbar says so.
+  if (minimized) w.flashFrame(true);
+  keyboardWait = setInterval(() => {
+    // (Hidden or minimized by you meanwhile: you've seen it.)
+    const gone = w.isDestroyed() || !w.isVisible() || (w.isMinimized() && !minimized) || (!!BrowserWindow.getFocusedWindow() && !w.isFocused());
+    const over = gone || w.isFocused() || Date.now() - t0 > 15_000;
+    if (!over && powerMonitor.getSystemIdleTime() < 2) return;
+    clearInterval(keyboardWait!);
+    keyboardWait = null;
+    if (gone || w.isFocused()) return;
+    if (Date.now() - t0 > 15_000) {
+      // Busy elsewhere all this time: the taskbar says so, and the window stays in view.
+      w.flashFrame(true);
+      w.once("focus", () => w.flashFrame(false));
+    } else {
+      if (w.isMinimized()) w.restore();
+      w.flashFrame(false);
+      w.focus();
+      // Windows can refuse a program the front while you use another: then the taskbar says so.
+      setTimeout(() => {
+        if (w.isDestroyed() || w.isFocused()) return;
+        w.flashFrame(true);
+        w.once("focus", () => w.flashFrame(false));
+      }, 500);
+    }
+  }, 500);
+}
+const RAISE_GAP_MS = 8000;
+let lastRaisedId: string | null = null;
+function alertChat(id: string, why: AlertWhy, again = false) {
+  if (!settings.get().alertMode || quitting) return;
+  // Come back to after a gap: only if it is still what it was (answered, or carried on, meanwhile: nothing to do).
+  if (again && (why === "needs-you" ? !chat.pendingPermissions().some((p) => p.conversationId === id) : chat.isRunning(id))) return;
+  const title = index.ready ? ((index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(id) as { title?: string } | undefined)?.title ?? "A chat") : "A chat";
+  const text = `“${title}” ${why === "finished" ? "finished" : why === "stopped" ? "stopped" : "needs you"}`;
+  const w = ensureMain(false);
+  const here = w.isVisible() && !w.isMinimized() && w.isFocused();
+  const sinceRaised = Date.now() - lastRaisedAt;
+  // In the window already (the window drops this if it is the chat on screen), or it just came
+  // forward for another chat: you stay where you are, and are told. Out of the window by the
+  // time that gap is over, this chat comes forward then.
+  if (here || sinceRaised < RAISE_GAP_MS) {
+    if (!again) w.webContents.send("event:alert", { id, raised: false, text, why });
+    if (!here && !again) setTimeout(() => !w.isDestroyed() && !w.isFocused() && alertChat(id, why, true), RAISE_GAP_MS - sinceRaised + 100).unref();
+    return;
+  }
+  lastRaisedAt = Date.now();
+  lastRaisedId = id;
+  log("app", `alert mode: bringing ${id.slice(0, 8)} forward (${why})`);
+  const minimized = w.isMinimized();
+  if (!w.isVisible()) w.showInactive();
+  if (!minimized) {
+    w.setAlwaysOnTop(true);
+    w.moveTop();
+    w.setAlwaysOnTop(false);
+  }
+  w.webContents.send("event:alert", { id, raised: true, text, why });
+  // Settings or the tray popup in use: the chat comes into view, but the keyboard stays there.
+  if (!BrowserWindow.getFocusedWindow()) takeKeyboardWhenIdle(w, minimized);
+}
+const alerts = new AlertWatcher(alertChat);
+
 function openConversation(id: string) {
   flyout?.hide();
   showMain();
@@ -1218,6 +1288,7 @@ void app.whenReady().then(async () => {
   let usageAfterReply: NodeJS.Timeout | null = null;
   chat.on("status", (st) => {
     broadcast("chat-status", st);
+    alerts.note(st);
     // The list's Live marks follow the app's own running chats.
     const busy = chat.runningIds();
     // A reply just finished: the meters moved.
@@ -1256,7 +1327,9 @@ void app.whenReady().then(async () => {
   chat.on("permission", (p) => {
     updateTrayBadge();
     const watching = !!mainWin && mainWin.isVisible() && !mainWin.isMinimized() && mainWin.isFocused();
-    if (!watching) {
+    // (Not when alert mode has just brought this very chat forward.)
+    const raisedNow = settings.get().alertMode && lastRaisedId === p.conversationId && Date.now() - lastRaisedAt < 2000;
+    if (!watching && !raisedNow) {
       const title = (index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(p.conversationId) as { title?: string } | undefined)?.title ?? "A conversation";
       notifyApproval(p, title, () => openConversation(p.conversationId), currentWorkspace().id);
     }

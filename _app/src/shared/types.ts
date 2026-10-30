@@ -260,6 +260,8 @@ export interface Settings {
   theme: Theme;
   windowMaterial: "mica" | "solid";
   syncAutomatically: boolean;
+  /** Alert mode: a chat that finishes, or needs you, comes to the front of the screen. */
+  alertMode: boolean;
   checkWhileOpenSeconds: number;
   checkFromTraySeconds: number;
   uploadDelay: "after-quiet" | "fast";

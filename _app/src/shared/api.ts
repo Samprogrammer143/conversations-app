@@ -144,6 +144,8 @@ export interface ConversationsApi {
   on(event: "signin-finished", cb: (r: { id: string; ok: boolean; email?: string | null; err?: string | null }) => void): () => void;
   on(event: "chat-status", cb: (s: ChatStatus) => void): () => void;
   on(event: "open-conversation", cb: (id: string) => void): () => void;
+  /** Alert mode: `raised`, the window came forward for this chat; otherwise you are in another chat here. */
+  on(event: "alert", cb: (a: { id: string; raised: boolean; text: string; why: "finished" | "stopped" | "needs-you" }) => void): () => void;
   on(event: "settings-changed", cb: (s: Settings) => void): () => void;
   on(event: "toast", cb: (t: { text: string; action?: string }) => void): () => void;
   on(event: "window-state", cb: (s: { maximized: boolean; focused: boolean }) => void): () => void;
@@ -212,4 +214,4 @@ export const CHANNELS = [
 
 export type Channel = (typeof CHANNELS)[number];
 
-export const EVENTS = ["index-changed", "sync-status", "chat-status", "open-conversation", "settings-changed", "toast", "window-state", "chat-pending", "update-ready", "usage", "workspaces-changed", "signin-finished"] as const;
+export const EVENTS = ["index-changed", "sync-status", "chat-status", "open-conversation", "settings-changed", "toast", "window-state", "chat-pending", "update-ready", "usage", "workspaces-changed", "signin-finished", "alert"] as const;
