@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Sidebar } from "./features/Sidebar";
+import { Sidebar, UsageMeters } from "./features/Sidebar";
 import { ConversationList } from "./features/ConversationList";
 import { Detail } from "./features/Detail";
 import { ContextMenu, SearchResults, ShortcutOverlay, SyncPopover, Toasts, Welcome, copyResumeCommand } from "./features/Overlays";
@@ -22,6 +22,8 @@ export function App() {
   const width = useWidth();
   const init = useStore((s) => s.init);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
+  const focus = useStore((s) => s.focus);
+  const usage = useStore((s) => s.usage);
   const settings = useStore((s) => s.settings);
   const [hidden, setHidden] = useState(false); // sidebar hidden by choice at full width
   const [showDetail, setShowDetail] = useState(false); // stacked layout: which pane
@@ -62,8 +64,20 @@ export function App() {
       if (s().showShortcuts) useStore.setState({ showShortcuts: false });
       const id = s().selectedId;
       const key = e.key.toLowerCase();
-      if (e.ctrlKey && !e.shiftKey && key === "k") {
+      if (e.ctrlKey && !e.shiftKey && key === "f") {
+        // Focus mode: only the chat, and the usage meters. The same key comes back.
         e.preventDefault();
+        if (e.repeat) return;
+        // What floats over the sidebar closes with it; a narrow window comes back to the chat.
+        useStore.setState({ focus: !s().focus, sidebarOpen: false, popover: null, search: { ...s().search, open: false } });
+        if (stacked && id) setShowDetail(true);
+      } else if (e.ctrlKey && !e.shiftKey && key === "k") {
+        e.preventDefault();
+        // Search lives in the sidebar: it comes back for it.
+        if (s().focus) {
+          useStore.setState({ focus: false });
+          setHidden(false);
+        }
         if (!wide && !s().sidebarOpen) useStore.setState({ sidebarOpen: true });
         window.setTimeout(() => window.dispatchEvent(new Event("app:focus-search")), 0);
       } else if (e.ctrlKey && !e.shiftKey && key === "n") {
@@ -71,14 +85,17 @@ export function App() {
         s().startDraft(s().detail?.row.projectId ?? null);
       } else if (e.ctrlKey && key === "b") {
         e.preventDefault();
-        window.dispatchEvent(new Event("app:toggle-sidebar"));
+        if (s().focus) {
+          useStore.setState({ focus: false, sidebarOpen: !wide });
+          setHidden(false);
+        } else window.dispatchEvent(new Event("app:toggle-sidebar"));
       } else if (e.ctrlKey && e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
         // Ctrl+Shift+1, 2, …: the workspaces set up on this PC, in the switcher's order.
         e.preventDefault();
         const ws = s().workspaces;
         const w = ws?.workspaces.filter((x) => x.setUp && !x.disconnected)[Number(e.code.slice(5)) - 1];
         if (w && w.id !== ws?.current) void switchWorkspace(w);
-      } else if (e.ctrlKey && ["1", "2", "3"].includes(e.key)) {
+      } else if (e.ctrlKey && ["1", "2", "3"].includes(e.key) && !s().focus) {
         e.preventDefault();
         s().setFilter((["all", "updated", "live"] as const)[Number(e.key) - 1]);
       } else if (e.ctrlKey && !e.shiftKey && key === "d" && id) {
@@ -105,9 +122,9 @@ export function App() {
       } else if (!typing && e.key === "Delete" && id) {
         e.preventDefault();
         s().remove(id);
-      } else if ((e.altKey && e.key === "ArrowLeft") || (!typing && e.key === "Escape" && stacked && showDetail)) {
+      } else if (!s().focus && ((e.altKey && e.key === "ArrowLeft") || (!typing && e.key === "Escape" && stacked && showDetail))) {
         if (stacked) setShowDetail(false);
-      } else if (!typing && (e.key === "ArrowDown" || e.key === "ArrowUp") && !e.ctrlKey) {
+      } else if (!typing && !s().focus && (e.key === "ArrowDown" || e.key === "ArrowUp") && !e.ctrlKey) {
         const rows = s().list?.rows.filter((r) => !s().hidden.has(r.id)) ?? [];
         const i = rows.findIndex((r) => r.id === id);
         const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
@@ -148,13 +165,18 @@ export function App() {
 
   return (
     <>
-      <div className={`app${sidebarInline ? "" : " collapsed"}`}>
-        {sidebarInline && <Sidebar />}
-        <main className={`content${stacked ? " stacked" : ""}`}>
-          {(!stacked || !showDetail) && <ConversationList showSidebarToggle={!sidebarInline} onOpen={() => stacked && setShowDetail(true)} />}
-          {(!stacked || showDetail) && <Detail narrow={!wide} onBack={stacked ? () => setShowDetail(false) : undefined} />}
+      <div className={`app${sidebarInline && !focus ? "" : " collapsed"}${focus ? " focus" : ""}`}>
+        {sidebarInline && !focus && <Sidebar />}
+        <main className={`content${stacked || focus ? " stacked" : ""}`}>
+          {!focus && (!stacked || !showDetail) && <ConversationList showSidebarToggle={!sidebarInline} onOpen={() => stacked && setShowDetail(true)} />}
+          {(focus || !stacked || showDetail) && <Detail narrow={!wide && !focus} onBack={stacked && !focus ? () => setShowDetail(false) : undefined} />}
         </main>
-        {!sidebarInline && sidebarOpen && (
+        {focus && (
+          <div className="focus-usage">
+            <UsageMeters usage={usage} />
+          </div>
+        )}
+        {!focus && !sidebarInline && sidebarOpen && (
           <>
             <div style={{ position: "fixed", inset: 0, zIndex: 39 }} onMouseDown={() => useStore.setState({ sidebarOpen: false })} />
             <Sidebar overlay />

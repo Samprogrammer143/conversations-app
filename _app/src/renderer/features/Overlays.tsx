@@ -475,6 +475,7 @@ type Place = "left" | "right" | "below-right" | "above" | "above-right";
 const BADGES: { selector: string; keys: string; label: string; place: Place }[] = [
   { selector: '.sb-titlebar [aria-label^="Hide sidebar"], .list-toolbar [aria-label^="Show sidebar"]', keys: "Ctrl+B", label: "Sidebar", place: "left" },
   { selector: ".search-field", keys: "Ctrl+K", label: "Search", place: "below-right" },
+  { selector: ".focus-usage", keys: "Ctrl+F", label: "Leave focus", place: "above" },
   { selector: '.list-toolbar [aria-label^="New chat"]', keys: "Ctrl+N", label: "New chat", place: "left" },
   { selector: ".filters .segmented", keys: "Ctrl+1 2 3", label: "Filters", place: "right" },
   { selector: ".detail-title .title-text", keys: "Ctrl+D", label: "Pin", place: "right" },

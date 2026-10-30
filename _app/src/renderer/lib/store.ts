@@ -30,6 +30,8 @@ interface State {
   sync: SyncStatus | null;
   /** The plan usage meters under the sidebar. */
   usage: PlanUsage | null;
+  /** Focus mode (Ctrl+F): only the chat, with the usage meters under it. */
+  focus: boolean;
   /** Workspaces (one Claude account each), and which one this window is. */
   workspaces: { current: string; workspaces: WorkspaceInfo[] } | null;
   loadWorkspaces(): Promise<void>;
@@ -122,6 +124,7 @@ export const useStore = create<State>((set, get) => ({
   workspaces: null,
   addWorkspace: null,
   switchingTo: null,
+  focus: false,
   renamingWorkspace: false,
   disconnectingWorkspace: null,
   signingIn: null,

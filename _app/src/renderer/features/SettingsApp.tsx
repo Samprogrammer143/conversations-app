@@ -253,6 +253,7 @@ export function SettingsApp() {
                 ["Search", "Ctrl+K"],
                 ["New chat", "Ctrl+N"],
                 ["Show or hide the sidebar", "Ctrl+B"],
+                ["Focus mode: only the chat and usage", "Ctrl+F"],
                 ["All · Updated · Live", "Ctrl+1 2 3"],
                 ["Pin", "Ctrl+D"],
                 ["Archive", "Ctrl+E"],

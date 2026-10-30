@@ -1026,7 +1026,7 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
         <div className="detail-toolbar drag" />
         <div className="empty">
           <div className="title">No conversation selected</div>
-          <div className="line">Pick one from the list, or press Ctrl+K.</div>
+          <div className="line">{useStore.getState().focus ? "Press Ctrl+F to leave focus mode, or Ctrl+N for a new chat." : "Pick one from the list, or press Ctrl+K."}</div>
         </div>
       </section>
     );

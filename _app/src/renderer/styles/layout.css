@@ -261,6 +261,23 @@ body.solid .sidebar,
   background: var(--bg-content);
   box-shadow: inset 1px 0 0 var(--separator-default);
 }
+/* Focus mode (Ctrl+F): only the chat, with the usage meters in a strip under it. */
+.app.focus {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.focus-usage {
+  background: var(--bg-content);
+}
+.focus-usage .sb-usage {
+  flex-direction: row;
+  gap: 24px;
+  justify-content: center;
+  padding: 6px 24px 10px;
+}
+.focus-usage .usage-meter {
+  flex: 0 1 240px;
+  min-width: 0;
+}
 .app.collapsed .content {
   box-shadow: none;
 }
