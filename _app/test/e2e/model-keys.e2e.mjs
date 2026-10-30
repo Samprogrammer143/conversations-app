@@ -62,6 +62,18 @@ try {
   await win.waitForTimeout(200);
   check("a /command being typed keeps its arrows", (await chip()) === slash, `${slash} -> ${await chip()}`);
 
+  // Outside the message box too: the model, not the chat list.
+  await win.fill(box, "");
+  await win.evaluate(() => (document.activeElement)?.blur());
+  await win.click(".detail-toolbar, .detail", { position: { x: 400, y: 120 } }).catch(() => {});
+  const outside = await chip();
+  const selectedBefore = await win.evaluate(() => window.__store?.selectedId ?? document.querySelector(".row[aria-selected=true]")?.getAttribute("data-id") ?? null);
+  await win.keyboard.press("ArrowDown");
+  await win.waitForTimeout(200);
+  const selectedAfter = await win.evaluate(() => window.__store?.selectedId ?? document.querySelector(".row[aria-selected=true]")?.getAttribute("data-id") ?? null);
+  check("outside the message box, Down switches the model and not the chat", (await chip()) !== outside && selectedAfter === selectedBefore, `${outside} -> ${await chip()}`);
+
+  await win.click(box);
   await win.fill(box, "");
   await win.click('button[aria-label="Model"]');
   // (Opening the menu refreshes the list, which can rename the chip.)

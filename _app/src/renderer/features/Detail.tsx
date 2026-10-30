@@ -722,8 +722,9 @@ function Composer({
   const chosen = model ?? status?.model ?? lastModel;
   // The menu's own name for it ("Fable 5.1"); for a full id from a transcript, its short form.
   const shownModel = (chosen && models.find((m) => m.value === chosen)?.label) ?? modelLabel(chosen) ?? "Default model";
-  // Up and Down in the message box go round the current models, while typing too; Ctrl+M does
-  // at any time. A message over several lines keeps its cursor keys, and the slash menu its own.
+  // Up and Down go round the current models, in the message box (while typing too) and anywhere
+  // else in the window; Ctrl+M does at any time. A message over several lines keeps its cursor
+  // keys, and a menu, a card or a list with its own arrows keeps them.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.altKey || e.shiftKey || e.metaKey) return;
@@ -732,13 +733,15 @@ function Composer({
       if ((!ctrlM && !arrow) || e.defaultPrevented) return;
       if (arrow) {
         const el = ref.current;
-        if (!el || document.activeElement !== el) return;
-        if (document.querySelector(".scrim, .menu, .popover, .mcp-panel, .slash-menu")) return;
-        // A /command being typed (its menu may still be on its way).
-        if (/^\/\S*$/.test(el.value)) return;
-        const css = getComputedStyle(el);
-        const lines = (el.scrollHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom)) / parseFloat(css.lineHeight);
-        if (lines > 1.5) return;
+        const a = document.activeElement as HTMLElement | null;
+        if (document.querySelector(".scrim, .menu, .popover, .mcp-panel, .slash-menu, .permission")) return;
+        if (a === el && el) {
+          // A /command being typed (its menu may still be on its way).
+          if (/^\/\S*$/.test(el.value)) return;
+          const css = getComputedStyle(el);
+          const lines = (el.scrollHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom)) / parseFloat(css.lineHeight);
+          if (lines > 1.5) return;
+        } else if (a?.closest("input, select, textarea, [contenteditable], .rows, .sb-content, [role=listbox], [role=menu]")) return;
       }
       const list = models.filter((m) => m.current);
       if (list.length < 2) return;

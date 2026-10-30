@@ -124,14 +124,16 @@ export function App() {
         s().remove(id);
       } else if (!s().focus && ((e.altKey && e.key === "ArrowLeft") || (!typing && e.key === "Escape" && stacked && showDetail))) {
         if (stacked) setShowDetail(false);
-      } else if (!typing && !s().focus && (e.key === "ArrowDown" || e.key === "ArrowUp") && !e.ctrlKey) {
-        const rows = s().list?.rows.filter((r) => !s().hidden.has(r.id)) ?? [];
-        const i = rows.findIndex((r) => r.id === id);
-        const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
-        if (next && !(e.target as HTMLElement)?.closest(".transcript, .menu, .popover") && !document.querySelector(".menu.choice")) {
-          e.preventDefault();
-          void s().select(next.id);
-        }
+      } else if (!typing && (e.key === "ArrowLeft" || e.key === "ArrowRight") && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+        // Left and Right, with nothing being typed: the workspace before or after this one.
+        if ((e.target as HTMLElement)?.closest(".menu, .popover, .sheet, [role=dialog]") || document.querySelector(".scrim, .menu")) return;
+        const ws = s().workspaces;
+        const setUp = ws?.workspaces.filter((x) => x.setUp && !x.disconnected) ?? [];
+        const i = setUp.findIndex((x) => x.id === ws?.current);
+        if (setUp.length < 2 || i < 0) return;
+        e.preventDefault();
+        if (e.repeat) return;
+        void switchWorkspace(setUp[(i + (e.key === "ArrowRight" ? 1 : setUp.length - 1)) % setUp.length]);
       } else if (!typing && e.key === "Enter" && id && !(e.target as HTMLElement)?.closest("button, .menu")) {
         if (stacked) setShowDetail(true);
         window.dispatchEvent(new Event("app:focus-composer"));
