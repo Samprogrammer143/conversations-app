@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { claudeDir } from "./paths";
+import { log } from "./log";
 
 export interface ClaudeInstall {
   found: boolean;
@@ -106,12 +107,42 @@ export function claudeInstall(): ClaudeInstall {
   return { found: !!exe, path: exe, version: null, signedIn: signedInNow() };
 }
 
+/**
+ * An npm install of Claude Code whose update stopped halfway: its package is there
+ * but bin/claude.exe isn't (npm can block the install step that puts the program in
+ * place, leaving only claude.exe.old.*). Its own install step is run again, at most
+ * every ten minutes. Returns whether the program is there afterwards.
+ */
+let repairedAt = 0;
+export async function repairNpmInstall(pkg = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@anthropic-ai", "claude-code"), node = process.execPath): Promise<boolean> {
+  const exe = path.join(pkg, "bin", "claude.exe");
+  const step = path.join(pkg, "install.cjs");
+  if (isFile(exe) || !isFile(step) || Date.now() - repairedAt < 10 * 60_000) return isFile(exe);
+  repairedAt = Date.now();
+  log("app", "Claude Code's program is missing after an update; running its install step again");
+  await new Promise<void>((done) => {
+    // Electron runs the script as plain Node (needs the RunAsNode fuse, on in this app's builds).
+    const child = spawn(node, [step], { cwd: pkg, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
+    const timer = setTimeout(() => child.kill(), 120_000);
+    child.on("error", () => done());
+    child.on("exit", () => {
+      clearTimeout(timer);
+      done();
+    });
+  });
+  const ok = isFile(exe);
+  log("app", ok ? "Claude Code repaired" : "Claude Code could not be repaired: reinstall it");
+  return ok;
+}
+
 /** Looks again (PATH and version) in the background; kept for a minute unless forced. */
 export function refreshClaude(force = false): Promise<ClaudeInstall> {
   if (!force && cached && Date.now() - cached.at < KEEP_MS) return Promise.resolve(cached.value);
   refreshing ??= (async () => {
     let exe = knownCandidates().find(isFile) ?? null;
     if (!exe) exe = (await pathCandidates()).find(isFile) ?? null;
+    // Half way through an update: repaired in the background (never holding up this look), then looked at again.
+    if (!exe) void repairNpmInstall().then((ok) => ok && void refreshClaude(true));
     const version = exe ? ((await run(exe, ["--version"], 15_000)).match(/(\d+\.\d+\.\d+)/)?.[1] ?? null) : null;
     const value: ClaudeInstall = { found: !!exe, path: exe, version, signedIn: signedInNow() };
     cached = { at: Date.now(), value };

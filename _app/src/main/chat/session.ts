@@ -365,7 +365,7 @@ export class ChatSession extends EventEmitter {
     this.pending.clear();
     if (err) {
       log("chat", `session ${this.id} ended with an error: ${err.message}`);
-      this.set({ state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { title: "Claude Code stopped", body: plainError(err.message) } });
+      this.set({ state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { ...errorFor(err.message), title: isAuthError(err.message) ? "Claude Code's sign-in has expired" : "Claude Code stopped" } });
     } else this.set({ state: this.status.state === "error" ? "error" : "idle", activity: null, permission: null, streamingText: "", queued: [] });
     this.emit("ended");
   }
@@ -423,7 +423,7 @@ export class ChatSession extends EventEmitter {
         this.clearStream();
         if (this.status.streamingText) this.set({ streamingText: "" });
         if (m.context_usage?.percentage != null) this.set({ contextPercent: Math.round(m.context_usage.percentage) });
-        if (m.error) this.set({ error: { title: assistantErrorTitle(m.error), body: assistantErrorBody(m.error) } });
+        if (m.error) this.set({ error: { title: assistantErrorTitle(m.error), body: assistantErrorBody(m.error), ...(m.error === "authentication_failed" ? { kind: "auth" as const } : {}) } });
         const blocks = (m.message?.content ?? []) as { type: string; name?: string; input?: Record<string, unknown> }[];
         const tool = [...blocks].reverse().find((b) => b.type === "tool_use");
         if (tool?.name) this.set({ state: "running-tool", activity: describeActivity(tool.name, tool.input ?? {}) });
@@ -449,7 +449,9 @@ export class ChatSession extends EventEmitter {
         if (m.subtype === "success") this.set({ state: "idle", activity: null, streamingText: "" });
         else {
           const errors = "errors" in m && Array.isArray(m.errors) ? m.errors.join(" ") : "";
-          this.set({ state: "error", activity: null, streamingText: "", error: { title: "Claude stopped before finishing", body: plainError(errors || m.subtype) } });
+          // The reason Claude gave on its way out (a sign-in that expired) says more than the turn's end does.
+          const said = this.status.error;
+          this.set({ state: "error", activity: null, streamingText: "", error: said?.kind === "auth" ? said : errorFor(errors || m.subtype) });
         }
         // The turn is over: the next follow-up, if any, goes to Claude Code now.
         this.nextFollowUp();
@@ -768,7 +770,7 @@ export class ChatSession extends EventEmitter {
 function assistantErrorTitle(e: string): string {
   return (
     {
-      authentication_failed: "Claude Code isn't signed in on this PC",
+      authentication_failed: "Claude Code's sign-in has expired",
       rate_limit: "You've reached your usage limit for now",
       overloaded: "Claude stopped before running anything",
       server_error: "Claude stopped before finishing",
@@ -780,7 +782,7 @@ function assistantErrorTitle(e: string): string {
 function assistantErrorBody(e: string): string {
   return (
     {
-      authentication_failed: "Open a terminal, run claude and sign in, then try again. The conversation is saved up to here.",
+      authentication_failed: "Sign in again (or type /login), then press Retry. The conversation is saved up to here.",
       rate_limit: "The conversation is saved up to here. Try again when your limit resets.",
       overloaded: "Anthropic's API was overloaded and Claude Code's automatic retries ran out. The conversation is saved up to here.",
       server_error: "Anthropic's API returned an error. The conversation is saved up to here.",
@@ -788,9 +790,19 @@ function assistantErrorBody(e: string): string {
   );
 }
 
+/** Claude Code's sign-in has expired, been revoked, or is missing. */
+export const isAuthError = (msg: string) =>
+  // An MCP server's own sign-in is a different thing (the /mcp panel signs those in).
+  !/\bmcp\b/i.test(msg) && /failed to authenticate|oauth (session|token)[^.]*(expired|revoked|invalid)|\bnot logged in\b|please run \/login|authentication_failed|invalid api key|\b401\b/i.test(msg);
+
+/** A turn that ended badly, as the card shows it. */
+function errorFor(msg: string): { title: string; body: string; kind?: "auth" } {
+  if (isAuthError(msg)) return { title: "Claude Code's sign-in has expired", body: "Sign in again (or type /login), then press Retry. The conversation is saved up to here.", kind: "auth" };
+  return { title: "Claude stopped before finishing", body: plainError(msg) };
+}
+
 function plainError(msg: string): string {
   const m = msg.trim();
   if (/ENOENT|not found|spawn/i.test(m)) return "Claude Code could not be started on this PC. Check that it is installed, then try again.";
-  if (/auth|login|401/i.test(m)) return "Claude Code isn't signed in. Open a terminal, run claude and sign in.";
   return `${m.slice(0, 280)}${m.length > 280 ? "…" : ""} The conversation is saved up to here.`;
 }

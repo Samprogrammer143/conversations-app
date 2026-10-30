@@ -321,7 +321,8 @@ export interface ChatStatus {
   permissionMode: string;
   contextPercent: number | null;
   queued: string[];
-  error: { title: string; body: string } | null;
+  /** kind "auth": Claude Code's sign-in has expired or is missing (the card offers Sign in). */
+  error: { title: string; body: string; kind?: "auth" } | null;
   permission: PermissionRequest | null;
   /** Text Claude is writing right now (streamed). */
   streamingText: string;

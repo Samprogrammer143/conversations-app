@@ -1860,11 +1860,32 @@ function claudeInstall() {
   const exe = knownCandidates().find(isFile) ?? null;
   return { found: !!exe, path: exe, version: null, signedIn: signedInNow() };
 }
+var repairedAt = 0;
+async function repairNpmInstall(pkg = path10.join(process.env.APPDATA || path10.join(os7.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@anthropic-ai", "claude-code"), node = process.execPath) {
+  const exe = path10.join(pkg, "bin", "claude.exe");
+  const step = path10.join(pkg, "install.cjs");
+  if (isFile(exe) || !isFile(step) || Date.now() - repairedAt < 10 * 6e4) return isFile(exe);
+  repairedAt = Date.now();
+  log("app", "Claude Code's program is missing after an update; running its install step again");
+  await new Promise((done) => {
+    const child = spawn4(node, [step], { cwd: pkg, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
+    const timer = setTimeout(() => child.kill(), 12e4);
+    child.on("error", () => done());
+    child.on("exit", () => {
+      clearTimeout(timer);
+      done();
+    });
+  });
+  const ok = isFile(exe);
+  log("app", ok ? "Claude Code repaired" : "Claude Code could not be repaired: reinstall it");
+  return ok;
+}
 function refreshClaude(force = false) {
   if (!force && cached && Date.now() - cached.at < KEEP_MS) return Promise.resolve(cached.value);
   refreshing ??= (async () => {
     let exe = knownCandidates().find(isFile) ?? null;
     if (!exe) exe = (await pathCandidates()).find(isFile) ?? null;
+    if (!exe) void repairNpmInstall().then((ok) => ok && void refreshClaude(true));
     const version = exe ? (await run2(exe, ["--version"], 15e3)).match(/(\d+\.\d+\.\d+)/)?.[1] ?? null : null;
     const value = { found: !!exe, path: exe, version, signedIn: signedInNow() };
     cached = { at: Date.now(), value };
@@ -3490,7 +3511,7 @@ var ChatSession = class extends EventEmitter4 {
     this.pending.clear();
     if (err) {
       log("chat", `session ${this.id} ended with an error: ${err.message}`);
-      this.set({ state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { title: "Claude Code stopped", body: plainError(err.message) } });
+      this.set({ state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { ...errorFor(err.message), title: isAuthError(err.message) ? "Claude Code's sign-in has expired" : "Claude Code stopped" } });
     } else this.set({ state: this.status.state === "error" ? "error" : "idle", activity: null, permission: null, streamingText: "", queued: [] });
     this.emit("ended");
   }
@@ -3544,7 +3565,7 @@ var ChatSession = class extends EventEmitter4 {
         this.clearStream();
         if (this.status.streamingText) this.set({ streamingText: "" });
         if (m.context_usage?.percentage != null) this.set({ contextPercent: Math.round(m.context_usage.percentage) });
-        if (m.error) this.set({ error: { title: assistantErrorTitle(m.error), body: assistantErrorBody(m.error) } });
+        if (m.error) this.set({ error: { title: assistantErrorTitle(m.error), body: assistantErrorBody(m.error), ...m.error === "authentication_failed" ? { kind: "auth" } : {} } });
         const blocks = m.message?.content ?? [];
         const tool = [...blocks].reverse().find((b) => b.type === "tool_use");
         if (tool?.name) this.set({ state: "running-tool", activity: describeActivity(tool.name, tool.input ?? {}) });
@@ -3566,7 +3587,8 @@ var ChatSession = class extends EventEmitter4 {
         if (m.subtype === "success") this.set({ state: "idle", activity: null, streamingText: "" });
         else {
           const errors = "errors" in m && Array.isArray(m.errors) ? m.errors.join(" ") : "";
-          this.set({ state: "error", activity: null, streamingText: "", error: { title: "Claude stopped before finishing", body: plainError(errors || m.subtype) } });
+          const said = this.status.error;
+          this.set({ state: "error", activity: null, streamingText: "", error: said?.kind === "auth" ? said : errorFor(errors || m.subtype) });
         }
         this.nextFollowUp();
         void this.refreshContext();
@@ -3847,7 +3869,7 @@ ${JSON.stringify(input, null, 2).slice(0, 1200)}`;
 };
 function assistantErrorTitle(e) {
   return {
-    authentication_failed: "Claude Code isn't signed in on this PC",
+    authentication_failed: "Claude Code's sign-in has expired",
     rate_limit: "You've reached your usage limit for now",
     overloaded: "Claude stopped before running anything",
     server_error: "Claude stopped before finishing",
@@ -3856,16 +3878,23 @@ function assistantErrorTitle(e) {
 }
 function assistantErrorBody(e) {
   return {
-    authentication_failed: "Open a terminal, run claude and sign in, then try again. The conversation is saved up to here.",
+    authentication_failed: "Sign in again (or type /login), then press Retry. The conversation is saved up to here.",
     rate_limit: "The conversation is saved up to here. Try again when your limit resets.",
     overloaded: "Anthropic's API was overloaded and Claude Code's automatic retries ran out. The conversation is saved up to here.",
     server_error: "Anthropic's API returned an error. The conversation is saved up to here."
   }[e] ?? "The conversation is saved up to here.";
 }
+var isAuthError = (msg) => (
+  // An MCP server's own sign-in is a different thing (the /mcp panel signs those in).
+  !/\bmcp\b/i.test(msg) && /failed to authenticate|oauth (session|token)[^.]*(expired|revoked|invalid)|\bnot logged in\b|please run \/login|authentication_failed|invalid api key|\b401\b/i.test(msg)
+);
+function errorFor(msg) {
+  if (isAuthError(msg)) return { title: "Claude Code's sign-in has expired", body: "Sign in again (or type /login), then press Retry. The conversation is saved up to here.", kind: "auth" };
+  return { title: "Claude stopped before finishing", body: plainError(msg) };
+}
 function plainError(msg) {
   const m = msg.trim();
   if (/ENOENT|not found|spawn/i.test(m)) return "Claude Code could not be started on this PC. Check that it is installed, then try again.";
-  if (/auth|login|401/i.test(m)) return "Claude Code isn't signed in. Open a terminal, run claude and sign in.";
   return `${m.slice(0, 280)}${m.length > 280 ? "\u2026" : ""} The conversation is saved up to here.`;
 }
 
@@ -4622,7 +4651,13 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
         log("chat", "usage: this Claude Code has no usage call");
         return lastUsage();
       }
-      const next = toPlanUsage(await ask.call(q, { skipBehaviors: true }));
+      const raw = await ask.call(q, { skipBehaviors: true });
+      const kept = lastUsage();
+      if (!toPlanUsage(raw) && kept && kept.meters.some((m) => m.resetsAt && Date.parse(m.resetsAt) > Date.now())) {
+        log("chat", "usage: no limits in this answer; keeping the last numbers");
+        return lastUsage();
+      }
+      const next = toPlanUsage(raw);
       const words = (u) => u ? u.meters.map((m) => `${m.key} ${m.percent}%`).join(", ") : "no plan limits";
       if (words(next) !== words(lastUsage())) log("chat", `usage: ${words(next)}`);
       last = next;
@@ -4634,6 +4669,7 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
       return next;
     } catch (e) {
       log("chat", `usage: ${e.message}`);
+      if (/binary not found/i.test(e.message)) void refreshClaude(true);
       return lastUsage();
     } finally {
       clearTimeout(timer);

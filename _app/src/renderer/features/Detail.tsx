@@ -1120,7 +1120,20 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
               <div className="title">{status.error.title}</div>
               <div className="body">{status.error.body}</div>
               <div className="actions">
-                <Button kind="primary" icon="refresh-cw" onClick={() => void api.chat.send(row.id, "Please continue where you stopped.", {})}>
+                {status.error.kind === "auth" && (
+                  <Button
+                    kind="primary"
+                    icon="lock"
+                    onClick={() => {
+                      const ws = useStore.getState().workspaces;
+                      const cur = ws?.workspaces.find((w) => w.id === ws.current);
+                      signInWorkspace(cur ?? { id: null, name: "this workspace" });
+                    }}
+                  >
+                    Sign in
+                  </Button>
+                )}
+                <Button kind={status.error.kind === "auth" ? "secondary" : "primary"} icon="refresh-cw" onClick={() => void api.chat.send(row.id, "Please continue where you stopped.", {})}>
                   Retry
                 </Button>
                 <Button icon="square-terminal" onClick={openCli}>

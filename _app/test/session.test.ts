@@ -188,3 +188,33 @@ describe("Claude's questions (AskUserQuestion)", () => {
     expect(readQuestions({ questions: [{ question: "Why?", options: [{ label: "" }, { label: "Because", description: 3 }] }] })).toEqual([{ question: "Why?", header: "", multiSelect: false, options: [{ label: "Because", description: "", preview: null }] }]);
   });
 });
+
+describe("an expired sign-in", () => {
+  it("keeps its own card (with Sign in) when the turn then ends in an error", () => {
+    const { s, x } = session();
+    s.send("hi");
+    x.handle({ type: "assistant", error: "authentication_failed", message: { content: [{ type: "text", text: "Failed to authenticate: OAuth session expired and could not be refreshed" }] } });
+    x.handle({ type: "result", subtype: "error_during_execution", errors: ["[ede_diagnostic] result_type=user"] });
+    expect(s.status.state).toBe("error");
+    expect(s.status.error).toMatchObject({ kind: "auth", title: "Claude Code's sign-in has expired" });
+    expect(s.status.error?.body).toMatch(/\/login/);
+  });
+
+  it("is recognised from the error text alone too", () => {
+    const { s, x } = session();
+    s.send("hi");
+    x.handle({ type: "result", subtype: "error_during_execution", errors: ["Failed to authenticate: OAuth session expired"] });
+    expect(s.status.error?.kind).toBe("auth");
+  });
+});
+
+describe("what counts as Claude Code's own sign-in failing", () => {
+  it("not an MCP server's sign-in, nor a stray 401 in a number", async () => {
+    const { isAuthError } = await import("../src/main/chat/session");
+    expect(isAuthError("Failed to authenticate: OAuth session expired and could not be refreshed")).toBe(true);
+    expect(isAuthError("Invalid API key · Please run /login")).toBe(true);
+    expect(isAuthError("API Error: 401 Unauthorized")).toBe(true);
+    expect(isAuthError("MCP server github: OAuth authentication required")).toBe(false);
+    expect(isAuthError("used 4010 tokens on port 8401")).toBe(false);
+  });
+});

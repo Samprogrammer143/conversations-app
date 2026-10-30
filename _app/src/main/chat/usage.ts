@@ -10,6 +10,7 @@ import path from "node:path";
 import { query } from "./sdk";
 import { appDataDir } from "../paths";
 import { log } from "../log";
+import { refreshClaude } from "../claude";
 import type { PlanUsage, UsageMeter } from "../../shared/types";
 
 type Window = { utilization?: number | null; resets_at?: string | null } | null | undefined;
@@ -94,7 +95,16 @@ export function refreshUsage(claudePath: string | null, minGapMs = 60_000): Prom
         log("chat", "usage: this Claude Code has no usage call");
         return lastUsage();
       }
-      const next = toPlanUsage(await ask.call(q, { skipBehaviors: true }));
+      const raw = await ask.call(q, { skipBehaviors: true });
+      // No limits in the answer while there were some before: the check couldn't see the
+      // plan (a sign-in that expired, Claude Code mid-update). The last numbers stay.
+      // (Only while those numbers are current: a plan without limits, or an API key, clears them.)
+      const kept = lastUsage();
+      if (!toPlanUsage(raw) && kept && kept.meters.some((m) => m.resetsAt && Date.parse(m.resetsAt) > Date.now())) {
+        log("chat", "usage: no limits in this answer; keeping the last numbers");
+        return lastUsage();
+      }
+      const next = toPlanUsage(raw);
       // Logged only when the numbers move, not every five minutes.
       const words = (u: PlanUsage | null | undefined) => (u ? u.meters.map((m) => `${m.key} ${m.percent}%`).join(", ") : "no plan limits");
       if (words(next) !== words(lastUsage())) log("chat", `usage: ${words(next)}`);
@@ -106,6 +116,8 @@ export function refreshUsage(claudePath: string | null, minGapMs = 60_000): Prom
       return next;
     } catch (e) {
       log("chat", `usage: ${(e as Error).message}`);
+      // Claude Code halfway through an update: put it back, then the next check works.
+      if (/binary not found/i.test((e as Error).message)) void refreshClaude(true);
       return lastUsage();
     } finally {
       clearTimeout(timer);

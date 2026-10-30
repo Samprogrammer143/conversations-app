@@ -67,3 +67,20 @@ describe("reset wording", () => {
     expect(resetText("soon", now)).toBe("");
   });
 });
+
+describe("repairing a Claude Code update that stopped half way", () => {
+  it("runs the package's own install step when its program is missing, and says whether it is back", async () => {
+    const fsx = await import("node:fs");
+    const osx = await import("node:os");
+    const px = await import("node:path");
+    const { repairNpmInstall } = await import("../src/main/claude");
+    const pkg = fsx.mkdtempSync(px.join(osx.tmpdir(), "claude-pkg-"));
+    fsx.mkdirSync(px.join(pkg, "bin"));
+    fsx.writeFileSync(px.join(pkg, "bin", "claude.exe.old.123"), "old");
+    // A stand-in for install.cjs: it puts the program in place.
+    fsx.writeFileSync(px.join(pkg, "install.cjs"), 'require("fs").writeFileSync(require("path").join(__dirname, "bin", "claude.exe"), "new");');
+    expect(await repairNpmInstall(pkg, process.execPath)).toBe(true);
+    expect(fsx.readFileSync(px.join(pkg, "bin", "claude.exe"), "utf8")).toBe("new");
+    fsx.rmSync(pkg, { recursive: true, force: true });
+  });
+});
