@@ -481,7 +481,6 @@ function Composer({
   const key = composerKey(id, projectId ?? null, folder);
   const [text, setTextState] = useState(() => useStore.getState().composer.drafts[key] ?? "");
   const defaultMode = useStore((s) => s.settings?.defaultPermissionMode ?? "default");
-  const alertMode = useStore((s) => s.settings?.alertMode ?? false);
   const prefs = useStore((s) => s.composer.prefs[key]);
   const setPrefs = useStore((s) => s.setPrefs);
   const setDraft = useStore((s) => s.setDraft);
@@ -843,9 +842,9 @@ function Composer({
           </button>
         )}
         <span className="spacer" />
-        <span className="alert-switch" title="Alert mode: a chat that finishes or needs you comes to the front of your screen">
+        <span className="alert-switch" title="Alert mode: this chat comes to the front of your screen when it finishes or needs you. Only on this PC.">
           <span aria-hidden>Alert</span>
-          <Toggle label="Alert mode: bring a chat to the front when it finishes or needs you" checked={alertMode} onChange={(v) => void api.settings.set({ alertMode: v })} />
+          <Toggle label="Alert mode: bring this chat to the front when it finishes or needs you" checked={!!prefs?.alert} onChange={(v) => setPrefs(key, { alert: v })} />
         </span>
         {offline ? <span className="context">{`Offline${SEP}Send is off until you reconnect`}</span> : contextPercent != null ? <ContextRing percent={contextPercent} /> : null}
         {(running && id) || (shellRunning && !id) ? (

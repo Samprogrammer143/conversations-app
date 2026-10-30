@@ -36,7 +36,7 @@ try {
   });
   await win.waitForTimeout(2500);
   const projectId = "folder:alert-e2e";
-  await win.evaluate(({ projectId, scratch }) => window.conversations.settings.get().then((s) => window.conversations.settings.set({ alertMode: false, folders: { ...s.folders, [projectId]: scratch } })), { projectId, scratch });
+  await win.evaluate(({ projectId, scratch }) => window.conversations.settings.get().then((s) => window.conversations.settings.set({ folders: { ...s.folders, [projectId]: scratch } })), { projectId, scratch });
   const focused = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((w) => w.isFocused()));
   const until = async (fn, ms = 60_000) => {
     const t0 = Date.now();
@@ -115,8 +115,23 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus());
   await sleep(500);
   await win.click(sw);
-  await until(() => win.evaluate(() => window.conversations.settings.get().then((s) => s.alertMode)), 5000);
   check("the switch turns it on", (await win.getAttribute(sw, "aria-checked")) === "true");
+
+  // Only for that chat: another one finishing moves nothing.
+  await open(b);
+  check("another chat's switch stays off", (await win.getAttribute(sw, "aria-checked")) === "false");
+  await win.evaluate((cid) => window.conversations.chat.send(cid, "Reply with just the word AGAIN.", { permissionMode: "default" }), b);
+  await until(() => win.evaluate((cid) => window.conversations.chat.status(cid).then((s) => s?.state !== "idle"), b), 15_000);
+  await otherFront();
+  await idle(b);
+  await sleep(3500);
+  check("a chat with its switch off doesn't come forward", !(await focused()));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].focus());
+  await sleep(500);
+  await open(a);
+  check("the chat's switch is still on when you come back to it", (await win.getAttribute(sw, "aria-checked")) === "true");
+  const saved = await win.evaluate(() => window.conversations.composer.load());
+  check("it is kept in this PC's own file, for that chat only", saved.prefs[a]?.alert === true && !saved.prefs[b]?.alert);
   await win.fill(box, "Count from 1 to 40, one number per line, nothing else.");
   await win.press(box, "Enter");
   await until(() => win.evaluate((cid) => window.conversations.chat.status(cid).then((s) => s?.state !== "idle"), a), 15_000);

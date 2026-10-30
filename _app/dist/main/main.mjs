@@ -1300,7 +1300,6 @@ var DEFAULT_SETTINGS = {
   theme: "system",
   windowMaterial: "mica",
   syncAutomatically: true,
-  alertMode: false,
   checkWhileOpenSeconds: 30,
   checkFromTraySeconds: 300,
   uploadDelay: "after-quiet",
@@ -1327,7 +1326,6 @@ var CHECKS = {
   checkFromTraySeconds: (v) => isInt(v, 30, 86400),
   uploadDelay: (v) => v === "after-quiet" || v === "fast",
   keepResumeUpToDate: isBool,
-  alertMode: isBool,
   startAtLogin: isBool,
   showArchived: isBool,
   defaultModel: (v) => v === null || isModelName(v),
@@ -4741,6 +4739,7 @@ function cleanPrefs(v) {
   if (isModelName(o.model)) out.model = o.model;
   if (isEffort(o.effort)) out.effort = o.effort;
   if (isPermissionMode(o.mode)) out.mode = o.mode;
+  if (o.alert === true) out.alert = true;
   return Object.keys(out).length ? out : null;
 }
 function put(map, key, value) {
@@ -6057,7 +6056,7 @@ function takeKeyboardWhenIdle(w, minimized) {
 var RAISE_GAP_MS = 8e3;
 var lastRaisedId = null;
 function alertChat(id, why, again = false) {
-  if (!settings.get().alertMode || quitting) return;
+  if (!composer.get().prefs[id]?.alert || quitting) return;
   if (again && (why === "needs-you" ? !chat.pendingPermissions().some((p) => p.conversationId === id) : chat.isRunning(id))) return;
   const title = index.ready ? index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(id)?.title ?? "A chat" : "A chat";
   const text = `\u201C${title}\u201D ${why === "finished" ? "finished" : why === "stopped" ? "stopped" : "needs you"}`;
@@ -6243,7 +6242,7 @@ void app2.whenReady().then(async () => {
   chat.on("permission", (p) => {
     updateTrayBadge();
     const watching = !!mainWin && mainWin.isVisible() && !mainWin.isMinimized() && mainWin.isFocused();
-    const raisedNow = settings.get().alertMode && lastRaisedId === p.conversationId && Date.now() - lastRaisedAt < 2e3;
+    const raisedNow = lastRaisedId === p.conversationId && Date.now() - lastRaisedAt < 2e3;
     if (!watching && !raisedNow) {
       const title = index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(p.conversationId)?.title ?? "A conversation";
       notifyApproval(p, title, () => openConversation(p.conversationId), currentWorkspace().id);

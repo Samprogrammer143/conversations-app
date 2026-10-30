@@ -26,6 +26,7 @@ export function cleanPrefs(v: unknown): ComposerPrefs | null {
   if (isModelName(o.model)) out.model = o.model;
   if (isEffort(o.effort)) out.effort = o.effort;
   if (isPermissionMode(o.mode)) out.mode = o.mode;
+  if (o.alert === true) out.alert = true;
   return Object.keys(out).length ? out : null;
 }
 

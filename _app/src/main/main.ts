@@ -1094,7 +1094,8 @@ function takeKeyboardWhenIdle(w: BrowserWindow, minimized: boolean) {
 const RAISE_GAP_MS = 8000;
 let lastRaisedId: string | null = null;
 function alertChat(id: string, why: AlertWhy, again = false) {
-  if (!settings.get().alertMode || quitting) return;
+  // Only chats you turned it on for, on this PC (composer.json never syncs).
+  if (!composer.get().prefs[id]?.alert || quitting) return;
   // Come back to after a gap: only if it is still what it was (answered, or carried on, meanwhile: nothing to do).
   if (again && (why === "needs-you" ? !chat.pendingPermissions().some((p) => p.conversationId === id) : chat.isRunning(id))) return;
   const title = index.ready ? ((index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(id) as { title?: string } | undefined)?.title ?? "A chat") : "A chat";
@@ -1328,7 +1329,7 @@ void app.whenReady().then(async () => {
     updateTrayBadge();
     const watching = !!mainWin && mainWin.isVisible() && !mainWin.isMinimized() && mainWin.isFocused();
     // (Not when alert mode has just brought this very chat forward.)
-    const raisedNow = settings.get().alertMode && lastRaisedId === p.conversationId && Date.now() - lastRaisedAt < 2000;
+    const raisedNow = lastRaisedId === p.conversationId && Date.now() - lastRaisedAt < 2000;
     if (!watching && !raisedNow) {
       const title = (index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(p.conversationId) as { title?: string } | undefined)?.title ?? "A conversation";
       notifyApproval(p, title, () => openConversation(p.conversationId), currentWorkspace().id);

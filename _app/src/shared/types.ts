@@ -260,8 +260,6 @@ export interface Settings {
   theme: Theme;
   windowMaterial: "mica" | "solid";
   syncAutomatically: boolean;
-  /** Alert mode: a chat that finishes, or needs you, comes to the front of the screen. */
-  alertMode: boolean;
   checkWhileOpenSeconds: number;
   checkFromTraySeconds: number;
   uploadDelay: "after-quiet" | "fast";
@@ -389,6 +387,8 @@ export interface ComposerPrefs {
   model?: string;
   effort?: Effort;
   mode?: "default" | "acceptEdits" | "plan" | "auto";
+  /** Alert mode: this chat comes to the front of the screen when it finishes or needs you (on this PC). */
+  alert?: boolean;
 }
 
 /** What the composer keeps per chat (conversation id, or "new:<folder or project>"). */
