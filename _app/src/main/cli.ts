@@ -4,20 +4,58 @@
 
 import fs from "node:fs";
 import { spawn } from "node:child_process";
-import { dialog, type BrowserWindow } from "electron";
+import path from "node:path";
+import { app, dialog, type BrowserWindow } from "electron";
 import { hasWindowsTerminal, refreshClaude } from "./claude";
 import { encodePowerShell, focusScript, terminalCommand } from "./launch";
 import { handOver, type PullOutcome } from "./handover";
-import { folderForTranscript } from "./resume-folder";
+import { folderForTranscript, safeFolderName } from "./resume-folder";
 import { sessionProcesses } from "./chat/terminals";
 import { detectEngineVersion, runEngineSerial } from "./sync/engine-bridge";
 import { settings } from "./settings";
 import { log } from "./log";
 
-export async function chooseFolder(win: BrowserWindow | null, projectLabel: string): Promise<string | null> {
-  const opts = { title: `Where is ${projectLabel} on this PC?`, properties: ["openDirectory" as const], buttonLabel: "Use this folder" };
+/**
+ * A chat from another PC, whose folder isn't known here: says what is being asked first
+ * (Windows' folder picker shows no explanation), then your copy of the project or a new folder.
+ */
+export async function chooseFolder(win: BrowserWindow | null, projectLabel: string, fromOtherPc = true): Promise<string | null> {
+  const ask: Electron.MessageBoxOptions = {
+    type: "question",
+    title: "Conversations",
+    message: `Where should Claude work on this PC?`,
+    detail: fromOtherPc
+      ? `This chat ran in ${projectLabel} on another PC, and this PC doesn't know that folder. Pick your copy of the project, or start with a new empty folder. The whole conversation comes along, but files that are only on the other PC don't.`
+      : `This PC doesn't know where ${projectLabel} is yet. Pick your copy of the project, or start with a new empty folder.`,
+    buttons: ["Pick my copy", "New empty folder", "Cancel"],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  };
+  const { response } = win ? await dialog.showMessageBox(win, ask) : await dialog.showMessageBox(ask);
+  if (response === 2) return null;
+  if (response === 1) {
+    // New and empty, as it says: one that already has files gets a number.
+    const base = path.join(app.getPath("documents"), safeFolderName(projectLabel));
+    let dir = base;
+    try {
+      for (let i = 2; fs.existsSync(dir) && (!fs.statSync(dir).isDirectory() || fs.readdirSync(dir).length); i++) dir = `${base} ${i}`;
+      fs.mkdirSync(dir, { recursive: true });
+      return dir;
+    } catch (e) {
+      log("cli", `could not make ${dir}: ${(e as Error).message}`);
+      return null;
+    }
+  }
+  const opts = { title: `Your copy of ${projectLabel}`, properties: ["openDirectory" as const], buttonLabel: "Use this folder" };
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
   return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+}
+
+/** Downloads, the Desktop or the home folder: fine for one chat, never remembered as a project's folder. */
+export function isGenericFolder(p: string): boolean {
+  const same = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  return (["downloads", "desktop", "home"] as const).some((n) => same(p, app.getPath(n)));
 }
 
 export function launchInTerminal(folder: string, exe: string, args: string[]): void {
@@ -54,9 +92,9 @@ const isDir = (p: string | null | undefined): p is string => {
  * Brings the newest copy of a conversation into cwd's Claude Code folder.
  * null when this PC's sync engine can't (version 2).
  */
-export async function pullConversation(id: string, cwd: string): Promise<PullOutcome | null> {
+export async function pullConversation(id: string, cwd: string, into = false): Promise<PullOutcome | null> {
   if ((await detectEngineVersion()) < 3) return null;
-  const r = await runEngineSerial<{ ok?: boolean; code?: string; dest?: string; err?: string }>(["pull", id, "--cwd", cwd, "--json"], { timeoutMs: 5 * 60_000 });
+  const r = await runEngineSerial<{ ok?: boolean; code?: string; dest?: string; err?: string }>(["pull", id, "--cwd", cwd, "--json", ...(into ? ["--into-cwd"] : [])], { timeoutMs: 5 * 60_000 });
   if (r.json?.code === "live") return { ok: false, live: true };
   if (r.json?.ok && r.json.dest) return { ok: true, dest: r.json.dest };
   const err = r.json?.err ?? r.stderr.split(/\r?\n/).find((l) => l.trim()) ?? null;
@@ -83,10 +121,11 @@ export async function openInCli(args: {
   const exe = process.env.CONVERSATIONS_CLAUDE_LAUNCHER || claude.path;
   let projectFolder = isDir(args.folder) ? args.folder : null;
   const recordedCwd = isDir(args.recordedCwd) ? args.recordedCwd : null;
+  let picked: string | null = null;
   if (!projectFolder && !recordedCwd) {
-    projectFolder = await chooseFolder(args.win, args.projectLabel);
+    picked = projectFolder = await chooseFolder(args.win, args.projectLabel);
     if (!projectFolder) return { ok: false, message: "Open in CLI needs the project's folder" };
-    settings.set({ folders: { ...settings.get().folders, [args.projectId]: projectFolder } });
+    if (!isGenericFolder(projectFolder)) settings.set({ folders: { ...settings.get().folders, [args.projectId]: projectFolder } });
   }
   try {
     const r = await handOver(
@@ -97,6 +136,8 @@ export async function openInCli(args: {
         processes: (id) => sessionProcesses(id, { anyKind: true }),
         stopAppSession: args.stopAppSession,
         pull: pullConversation,
+        chooseFolder: async () => picked ?? chooseFolder(args.win, args.projectLabel),
+        pullInto: (id, cwd) => pullConversation(id, cwd, true),
         localTranscript: args.localTranscript,
         appLastWriteAt: args.appLastWriteAt,
         mtimeOf: (f) => {

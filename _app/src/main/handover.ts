@@ -16,7 +16,8 @@
 export const OPEN_ON_THIS_PC = "It's open in Claude Code on this PC — switch to that window.";
 export const WRITTEN_JUST_NOW = "It was written to on this PC in the last two minutes. If Claude Code has it open, switch to that window; otherwise try again in a moment.";
 export const NOT_HERE = "That conversation isn't on this PC yet, and it couldn't be downloaded.";
-export const NO_FOLDER = "Claude Code keeps this conversation under a folder that isn't on this PC, so it can't be continued here.";
+export const NO_FOLDER = "This chat couldn't be moved to that folder. It may not have finished uploading from the other PC: try again in a few minutes.";
+export const NEEDS_FOLDER = "This chat needs a folder to work in on this PC.";
 export const CONTINUING = "Continuing in Windows Terminal";
 
 /** What a pull of one conversation said. live: the engine left it alone because it is in use on this PC. */
@@ -37,6 +38,10 @@ export interface HandoverDeps {
   stopAppSession(id: string): Promise<void>;
   /** Brings the newest copy into cwd's Claude Code folder; null when this PC's sync engine can't (version 2). */
   pull(id: string, cwd: string): Promise<PullOutcome | null>;
+  /** The folder you choose for a chat kept under one this PC doesn't use (null: you cancelled). */
+  chooseFolder?(): Promise<string | null>;
+  /** Moves this PC's copy to cwd's Claude Code folder. Only ever for a folder you chose. */
+  pullInto?(id: string, cwd: string): Promise<PullOutcome | null>;
   localTranscript(id: string): string | null;
   /** When the app's own session last wrote it, or stopped (0 if never). */
   appLastWriteAt(id: string): number;
@@ -97,7 +102,13 @@ export async function handOver(id: string, where: { projectFolder: string | null
   if (!transcript) return { ok: false, message: pulled && !pulled.ok && !pulled.live && pulled.err ? `Couldn't bring it to this PC: ${pulled.err}` : NOT_HERE };
 
   // 4. Started where --resume finds it.
-  const folder = deps.folderFor(transcript, [where.recordedCwd, where.projectFolder]);
+  let folder = deps.folderFor(transcript, [where.recordedCwd, where.projectFolder]);
+  if (!folder && deps.chooseFolder && deps.pullInto) {
+    const chosen = await deps.chooseFolder();
+    if (!chosen) return { ok: false, message: NEEDS_FOLDER };
+    const moved = await deps.pullInto(id, chosen);
+    if (moved?.ok && moved.dest) folder = deps.folderFor(moved.dest, [chosen]);
+  }
   if (!folder) return { ok: false, message: NO_FOLDER };
   deps.launch(folder, id);
   return { ok: true, message: CONTINUING, folder };

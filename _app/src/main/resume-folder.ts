@@ -11,6 +11,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
+/** A safe folder name from a project's name, for a new folder on this PC. */
+export function safeFolderName(label: string): string {
+  const name = label.replace(/[^\p{L}\p{N} ._-]/gu, "").trim().replace(/[. ]+$/, "");
+  if (!name || /^\.+$/.test(name) || /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(name)) return "Conversations project";
+  return name;
+}
+
 /** Claude Code's name for a folder's transcript directory. */
 export function encodeCwd(cwd: string): string {
   return path.resolve(cwd).replace(/[^A-Za-z0-9]/g, "-");

@@ -239,7 +239,7 @@ function doPull(args) {
     const choice = pick ?? "1";
     const s = /^\d+$/.test(choice) ? sessions[Number(choice) - 1] : sessions.find((x) => x.sessionId.startsWith(choice));
     if (!s) fail(`No conversation matches "${choice}".`);
-    const r = pullOne(s, targetDir, allow, { known: knownOwnedNames([cwd]) });
+    const r = pullOne(s, targetDir, allow, { known: knownOwnedNames([cwd]), intoTarget: !!args["into-cwd"] });
     if (r.status === "missing") fail(`The GitHub copy of "${s.title}" has no transcript file.`);
     if (r.status === "live") {
       if (args.json) return printJson({ ok: false, code: "live", id: s.sessionId, err: "open in Claude Code on this PC" });

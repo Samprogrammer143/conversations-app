@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cwdMatchesFolder, encodeCwd, folderForTranscript, recordedCwds } from "../src/main/resume-folder";
+import { cwdMatchesFolder, encodeCwd, folderForTranscript, recordedCwds, safeFolderName } from "../src/main/resume-folder";
 
 const ID = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
 let base: string;
@@ -37,6 +37,16 @@ describe("Claude Code's transcript folders", () => {
     expect(cwdMatchesFolder("C:\\Users\\me\\site", "C--Users-me-site-seo")).toBe(false);
     const long = `C:\\${"x".repeat(240)}`;
     expect(cwdMatchesFolder(long, `${encodeCwd(long).slice(0, 200)}-abc123`)).toBe(true);
+  });
+});
+
+describe("a new folder's name", () => {
+  it("is the project's, made safe for Windows", () => {
+    expect(safeFolderName("ycs-development")).toBe("ycs-development");
+    expect(safeFolderName("YCS Development")).toBe("YCS Development");
+    for (const bad of ["..", ".", "", "///", "con", "NUL", "com1", "prn.txt", "  . "]) expect(safeFolderName(bad)).toBe("Conversations project");
+    expect(safeFolderName("site...")).toBe("site");
+    expect(safeFolderName("..\\..\\evil")).not.toMatch(/[\\/]/);
   });
 });
 

@@ -2233,15 +2233,27 @@ const biggest = (copies) => [...copies].sort((a, b) => sizeOf(b) - sizeOf(a) || 
  * opts.allowOpen: how many running Claude Code processes may have it open (1 when the
  * process resuming it right now asks); with it, recent writes do not count as live.
  */
-export function pullOne(s, targetDir, allow, { open = openSessions(), known = knownOwnedNames(), allowOpen = 0 } = {}) {
+export function pullOne(s, targetDir, allow, { open = openSessions(), known = knownOwnedNames(), allowOpen = 0, intoTarget = false } = {}) {
   const remote = readRemoteTranscript(s.dir);
   if (!remote) return { status: "missing" };
   if (!isUuid(s.sessionId)) return { status: "missing" };
   const copies = ownedLocalTranscripts(s.sessionId, known);
-  const live = allowOpen ? (open.get(s.sessionId.toLowerCase()) || 0) > allowOpen : isLive(s.sessionId, copies, open);
+  // (Moving, only a process that has it open counts: the download just before it wrote the file.)
+  const live = allowOpen || intoTarget ? (open.get(s.sessionId.toLowerCase()) || 0) > allowOpen : isLive(s.sessionId, copies, open);
   if (live) return { status: "live" };
   if (!copies.length && !ownsProjectDir(targetDir, known)) return { status: "no-folder" };
-  const dest = copies.find((p) => samePath(path.dirname(p), targetDir)) ?? (copies.length ? biggest(copies) : path.join(targetDir, `${s.sessionId}.jsonl`));
+  // intoTarget: you chose this folder for the chat on this PC, so its copy moves there
+  // (Claude Code only finds a conversation under the folder it starts in). Copies elsewhere
+  // are merged in and retired below, like any duplicate.
+  const inTarget = copies.find((p) => samePath(path.dirname(p), targetDir));
+  const dest = inTarget ?? (intoTarget || !copies.length ? path.join(targetDir, `${s.sessionId}.jsonl`) : biggest(copies));
+  if (intoTarget && !inTarget && copies.length) {
+    fs.mkdirSync(targetDir, { recursive: true });
+    // Complete or not there at all: a stop half way must not leave a cut-off line to upload.
+    const tmp = `${dest}.${process.pid}.tmp`;
+    fs.copyFileSync(biggest(copies), tmp);
+    fs.renameSync(tmp, dest);
+  }
   let status = "same";
   let added = 0;
   for (const other of copies) {

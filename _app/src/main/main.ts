@@ -24,7 +24,7 @@ import { sanitizeSettingsPatch, settings } from "./settings";
 import { appDataDir, appRepoDir, engineScriptPath, readSyncConfig, repoDir, syncDir, thisMachine } from "./paths";
 import { claudeDefaultModel, claudeInstall, hasWindowsTerminal, refreshClaude } from "./claude";
 import { createFlyout, createMainWindow, createSettingsWindow, createWelcomeWindow, placeFlyout, setTitleBarColors, themeColors, type WindowFiles } from "./windows";
-import { chooseFolder, launchInTerminal, newChatInCli, openInCli, pullConversation } from "./cli";
+import { chooseFolder, isGenericFolder, launchInTerminal, newChatInCli, openInCli, pullConversation } from "./cli";
 import { ChatManager, type McpAction, type ResumePrep } from "./chat/manager";
 import { knownModels } from "./chat/models";
 import { lastUsage, refreshUsage } from "./chat/usage";
@@ -32,7 +32,7 @@ import { ComposerStore, isComposerKey } from "./composer-state";
 import { sweepPidFiles } from "./chat/shell";
 import { clearApproval, notifyApproval, parseProtocolArgs, pruneApprovals, registerProtocol } from "./chat/notify";
 import { isOpenInTerminal, readRegistry, sessionProcesses, thisPidDomain } from "./chat/terminals";
-import { NO_FOLDER, NOT_HERE, OPEN_ON_THIS_PC } from "./handover";
+import { NEEDS_FOLDER, NO_FOLDER, NOT_HERE, OPEN_ON_THIS_PC } from "./handover";
 import { folderForTranscript } from "./resume-folder";
 import { displayRemote } from "./remote-display";
 import { checkEdit, isDecision, isEffort, isModelName, isPermissionMode, isRequestId, isUuid } from "./validate";
@@ -115,6 +115,9 @@ function recordedCwdOnThisPc(id: string): string | null {
   }
 }
 
+/** The folder just picked for a chat's message (the download before the move can take minutes). */
+let pickedFolder: { id: string; folder: string; at: number } | null = null;
+
 /**
  * Before the app continues a conversation: the newest copy from GitHub, and the
  * folder Claude Code must start in for --resume to find it (where the conversation
@@ -131,7 +134,19 @@ async function prepareResume(id: string, projectFolder: string): Promise<ResumeP
   }
   const transcript = (pulled?.ok ? pulled.dest : null) ?? localTranscript(id);
   if (!transcript) return { refuse: NOT_HERE };
-  const folder = folderForTranscript(transcript, [recorded, projectFolder]);
+  let folder = folderForTranscript(transcript, [recorded, projectFolder]);
+  if (!folder) {
+    // Kept under a folder this PC doesn't use. It moves, but only to a folder you chose for it:
+    // the one just picked for this message, otherwise you are asked now.
+    const just = pickedFolder?.id === id && Date.now() - pickedFolder.at < 6 * 60_000 ? pickedFolder.folder : null;
+    pickedFolder = null;
+    const label = index.ready ? (conversationDetail(index.db, id, ctx(), folders())?.row.projectLabel ?? "this project") : "this project";
+    const chosen = just ?? (await chooseFolder(mainWin, label));
+    if (!chosen) return { refuse: NEEDS_FOLDER };
+    const moved = await pullConversation(id, chosen, true);
+    if (moved?.ok && moved.dest) folder = folderForTranscript(moved.dest, [chosen]);
+    else log("chat", `moving ${id.slice(0, 8)} to ${chosen} failed: ${moved?.live ? "it is open" : (moved?.err ?? "no engine")}`);
+  }
   return folder ? { cwd: folder } : { refuse: NO_FOLDER };
 }
 
@@ -196,7 +211,10 @@ let scheduler: SyncScheduler;
 
 const ctx = (): QueryContext => ({ thisMachine: thisMachine(), now: Date.now(), running: chat.runningIds(), pending });
 const devices = () => (index.ready ? deviceSummaries(index.db, ctx(), readDevices(repoDir())) : []);
-const folders = (): Record<string, string> => ({ ...inferredFolders(), ...(readSyncConfig()?.folders ?? {}), ...settings.get().folders });
+// (Downloads, the Desktop or home is never a repository's folder, however it got here. Chats
+// grouped by the folder itself, "folder:…", are in that folder.)
+const folders = (): Record<string, string> =>
+  Object.fromEntries(Object.entries({ ...inferredFolders(), ...(readSyncConfig()?.folders ?? {}), ...settings.get().folders }).filter(([id, f]) => id.startsWith("folder:") || !isGenericFolder(f)));
 
 /**
  * Where each project lives on this PC, worked out from its conversations: the
@@ -889,8 +907,8 @@ function registerIpc() {
     const f = folders();
     let folder = pid ? f[pid] : null;
     if (!folder && pid) {
-      folder = await chooseFolder(mainWin, pid.split("/").pop() ?? "the project");
-      if (folder) settings.set({ folders: { ...settings.get().folders, [pid]: folder } });
+      folder = await chooseFolder(mainWin, pid.split("/").pop() ?? "the project", false);
+      if (folder && !isGenericFolder(folder)) settings.set({ folders: { ...settings.get().folders, [pid]: folder } });
     }
     return newChatInCli(folder ?? app.getPath("home"));
   });
@@ -910,8 +928,9 @@ function registerIpc() {
       cwd = d.folder;
       if (!cwd || !fs.existsSync(cwd)) {
         cwd = await chooseFolder(mainWin, d.row.projectLabel);
-        if (!cwd) return { ok: false, err: "Chat needs the project's folder on this PC" };
-        settings.set({ folders: { ...settings.get().folders, [d.row.projectId]: cwd } });
+        if (!cwd) return { ok: false, err: "Chat needs a folder to work in on this PC" };
+        pickedFolder = { id, folder: cwd, at: Date.now() };
+        if (!isGenericFolder(cwd)) settings.set({ folders: { ...settings.get().folders, [d.row.projectId]: cwd } });
       }
     } else if (typeof opts?.folder === "string" && isUsableFolder(opts.folder)) {
       // A folder you picked for this chat.
@@ -921,8 +940,8 @@ function registerIpc() {
       const pid = isProjectId(asked) ? asked : null;
       cwd = pid ? folders()[pid] ?? null : null;
       if (!cwd && pid && pid !== "folder:_home" && !pid.startsWith("folder:")) {
-        cwd = await chooseFolder(mainWin, pid.split("/").pop() ?? "the project");
-        if (cwd) settings.set({ folders: { ...settings.get().folders, [pid]: cwd } });
+        cwd = await chooseFolder(mainWin, pid.split("/").pop() ?? "the project", false);
+        if (cwd && !isGenericFolder(cwd)) settings.set({ folders: { ...settings.get().folders, [pid]: cwd } });
       }
       cwd ??= app.getPath("home");
     }

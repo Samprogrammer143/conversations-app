@@ -1216,5 +1216,49 @@ check("live: a transcript dated hours in the future is not treated as live", has
   check("workspaces: the _shared folder is still never read as a project", !jsonOf(run(A, ["list", "--json"]))?.sessions?.some((s) => s.key === "_shared"));
 }
 
+// ---- a chat kept under a folder this PC doesn't use moves to the one chosen for it
+{
+  const IDM = "99999999-1111-4111-8111-999999999999";
+  const TA = tpath(A, PA, IDM);
+  fs.writeFileSync(TA, line("from the first PC", PA, IDM) + line("a second line", PA, IDM));
+  check("move: the chat is on GitHub", jsonOf(run(A, ["push", "--session", IDM, "--cwd", PA, "--json"]))?.ok);
+  // PC B has a copy under its usual folder, with an entry GitHub doesn't have yet, and a file beside it.
+  const TB = tpath(B, PB, IDM);
+  fs.writeFileSync(TB, fs.readFileSync(TA, "utf8") + line("only on this PC", PB, IDM));
+  fs.mkdirSync(TB.replace(/\.jsonl$/, ""), { recursive: true });
+  fs.writeFileSync(path.join(TB.replace(/\.jsonl$/, ""), "note.txt"), "keep me");
+  const old = Date.now() - 10 * 60_000;
+  fs.utimesSync(TB, old / 1000, old / 1000);
+  const chosen = project("pcB-work/Downloads");
+  const plain = jsonOf(run(B, ["pull", IDM, "--cwd", chosen, "--json"], { CLAUDE_SYNC_LIVE_WINDOW_MS: "1000" }));
+  check("move: without being asked it stays where it is", plain?.ok && plain.dest === TB, JSON.stringify(plain));
+  const r = jsonOf(run(B, ["pull", IDM, "--cwd", chosen, "--json", "--into-cwd"], { CLAUDE_SYNC_LIVE_WINDOW_MS: "1000" }));
+  const dest = r?.dest ?? "";
+  check("move: asked, it lands in the chosen folder's own place", r?.ok && path.basename(path.dirname(dest)) === chosen.replace(/[^A-Za-z0-9]/g, "-"), JSON.stringify(r));
+  const text = dest && fs.existsSync(dest) ? fs.readFileSync(dest, "utf8") : "";
+  check("move: nothing is lost, GitHub's entries and this PC's own", text.includes("from the first PC") && text.includes("a second line") && text.includes("only on this PC"), text.slice(0, 200));
+  check("move: the old copy is gone (one writer)", !fs.existsSync(TB));
+  check("move: the files beside it come along", fs.existsSync(path.join(dest.replace(/\.jsonl$/, ""), "note.txt")));
+  const again = jsonOf(run(B, ["pull", IDM, "--cwd", chosen, "--json", "--into-cwd"], { CLAUDE_SYNC_LIVE_WINDOW_MS: "1000" }));
+  check("move: asking again changes nothing", again?.ok && again.dest === dest && again.status === "same", JSON.stringify(again));
+  // Right after a download: the file was just written, which only stops a move if something has it open.
+  const IDN = "88888888-1111-4111-8111-888888888888";
+  const TA2 = tpath(A, PA, IDN);
+  fs.writeFileSync(TA2, line("first", PA, IDN));
+  run(A, ["push", "--session", IDN, "--cwd", PA, "--json"]);
+  const TB2 = tpath(B, PB, IDN);
+  fs.writeFileSync(TB2, line("first", PA, IDN));
+  const old2 = Date.now() - 10 * 60_000;
+  fs.utimesSync(TB2, old2 / 1000, old2 / 1000);
+  fs.appendFileSync(TA2, line("newer on GitHub", PA, IDN));
+  run(A, ["push", "--session", IDN, "--cwd", PA, "--json"]);
+  const live = { CLAUDE_SYNC_LIVE_WINDOW_MS: "120000" };
+  const first = jsonOf(run(B, ["pull", IDN, "--cwd", chosen, "--json"], live));
+  check("move: the download first writes to the old copy", first?.ok && first.status === "updated" && first.dest === TB2, JSON.stringify(first));
+  const movedNow = jsonOf(run(B, ["pull", IDN, "--cwd", chosen, "--json", "--into-cwd"], live));
+  check("move: straight after that download it still moves", movedNow?.ok && !fs.existsSync(TB2) && fs.readFileSync(movedNow.dest, "utf8").includes("newer on GitHub"), JSON.stringify(movedNow));
+  check("move: no temporary file is left", !fs.readdirSync(path.dirname(movedNow?.dest ?? TB2)).some((f) => f.endsWith(".tmp")));
+}
+
 for (const x of results) console.log(`${x.ok ? "PASS" : "FAIL"}  ${x.name}${x.ok || !x.detail ? "" : `\n      ${String(x.detail).trim().slice(0, 500).replace(/\n/g, "\n      ")}`}`);
 console.log(`\n${results.filter((x) => x.ok).length}/${results.length} passed`);

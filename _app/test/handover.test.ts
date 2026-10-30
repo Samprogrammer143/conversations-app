@@ -173,6 +173,34 @@ class SlowSession extends EventEmitter implements SessionLike {
   }
 }
 
+describe("a chat kept under a folder this PC doesn't use", () => {
+  const FOREIGN = `C:\\Users\\me\\.claude\\projects\\C--Other-PC-site\\${ID}.jsonl`;
+  it("moves to the folder chosen for it, and continues there", async () => {
+    const { d, launched } = deps({ pull: async () => ({ ok: true, dest: FOREIGN }), chooseFolder: async () => PROJECT, pullInto: async () => ({ ok: true, dest: T_PROJECT }) });
+    expect((await handOver(ID, { projectFolder: PROJECT, recordedCwd: null }, d)).ok).toBe(true);
+    expect(launched).toEqual([{ folder: PROJECT, id: ID }]);
+  });
+  it("says so, and starts nothing, when it can't be moved", async () => {
+    const { d, launched } = deps({ pull: async () => ({ ok: true, dest: FOREIGN }), chooseFolder: async () => PROJECT, pullInto: async () => ({ ok: false, err: "x" }) });
+    expect(await handOver(ID, { projectFolder: PROJECT, recordedCwd: null }, d)).toMatchObject({ ok: false, message: NO_FOLDER });
+    expect(launched).toEqual([]);
+  });
+  it("never moves without you choosing: Cancel leaves it where it is", async () => {
+    let moved = false;
+    const { d, launched } = deps({
+      pull: async () => ({ ok: true, dest: FOREIGN }),
+      chooseFolder: async () => null,
+      pullInto: async () => {
+        moved = true;
+        return { ok: true, dest: T_PROJECT };
+      },
+    });
+    expect((await handOver(ID, { projectFolder: PROJECT, recordedCwd: null }, d)).ok).toBe(false);
+    expect(moved).toBe(false);
+    expect(launched).toEqual([]);
+  });
+});
+
 describe("N2 (race R1): Open in CLI while the app is still starting Claude Code", () => {
   it("calls the start off: no app session exists, or is made, once the terminal launches", async () => {
     let finishPull: () => void = () => {};
