@@ -2457,6 +2457,10 @@ async function openInCli(args) {
   const recordedCwd = isDir2(args.recordedCwd) ? args.recordedCwd : null;
   let picked = null;
   if (!projectFolder && !recordedCwd) {
+    const local3 = args.localTranscript(args.id);
+    projectFolder = local3 ? folderForTranscript(local3, []) : null;
+  }
+  if (!projectFolder && !recordedCwd) {
     picked = projectFolder = await chooseFolder(args.win, args.projectLabel);
     if (!projectFolder) return { ok: false, message: "Open in CLI needs the project's folder" };
     if (!isGenericFolder(projectFolder)) settings.set({ folders: { ...settings.get().folders, [args.projectId]: projectFolder } });
@@ -5950,6 +5954,10 @@ function registerIpc() {
       const d = conversationDetail(index.db, id, ctx(), folders2());
       if (!d) return { ok: false, err: "That conversation isn't on this PC yet" };
       cwd = d.folder;
+      if (!cwd || !fs25.existsSync(cwd)) {
+        const local3 = localTranscript(id);
+        cwd = local3 ? folderForTranscript(local3, []) : null;
+      }
       if (!cwd || !fs25.existsSync(cwd)) {
         cwd = await chooseFolder(mainWin, d.row.projectLabel);
         if (!cwd) return { ok: false, err: "Chat needs a folder to work in on this PC" };

@@ -122,6 +122,11 @@ export async function openInCli(args: {
   let projectFolder = isDir(args.folder) ? args.folder : null;
   const recordedCwd = isDir(args.recordedCwd) ? args.recordedCwd : null;
   let picked: string | null = null;
+  // The chat's own file on this PC can say which folder it belongs to here.
+  if (!projectFolder && !recordedCwd) {
+    const local = args.localTranscript(args.id);
+    projectFolder = local ? folderForTranscript(local, []) : null;
+  }
   if (!projectFolder && !recordedCwd) {
     picked = projectFolder = await chooseFolder(args.win, args.projectLabel);
     if (!projectFolder) return { ok: false, message: "Open in CLI needs the project's folder" };

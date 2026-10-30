@@ -926,6 +926,12 @@ function registerIpc() {
       const d = conversationDetail(index.db, id, ctx(), folders());
       if (!d) return { ok: false, err: "That conversation isn't on this PC yet" };
       cwd = d.folder;
+      // Last used in a folder only another PC has (or a project this PC has no folder for):
+      // the chat's own file on this PC says which folder it belongs to here.
+      if (!cwd || !fs.existsSync(cwd)) {
+        const local = localTranscript(id);
+        cwd = local ? folderForTranscript(local, []) : null;
+      }
       if (!cwd || !fs.existsSync(cwd)) {
         cwd = await chooseFolder(mainWin, d.row.projectLabel);
         if (!cwd) return { ok: false, err: "Chat needs a folder to work in on this PC" };
