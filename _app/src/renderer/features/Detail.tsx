@@ -722,6 +722,37 @@ function Composer({
   const chosen = model ?? status?.model ?? lastModel;
   // The menu's own name for it ("Fable 5.1"); for a full id from a transcript, its short form.
   const shownModel = (chosen && models.find((m) => m.value === chosen)?.label) ?? modelLabel(chosen) ?? "Default model";
+  // Up and Down in the message box go round the current models, while typing too; Ctrl+M does
+  // at any time. A message over several lines keeps its cursor keys, and the slash menu its own.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.altKey || e.shiftKey || e.metaKey) return;
+      const ctrlM = e.ctrlKey && e.key.toLowerCase() === "m";
+      const arrow = !e.ctrlKey && (e.key === "ArrowUp" || e.key === "ArrowDown");
+      if ((!ctrlM && !arrow) || e.defaultPrevented) return;
+      if (arrow) {
+        const el = ref.current;
+        if (!el || document.activeElement !== el) return;
+        if (document.querySelector(".scrim, .menu, .popover, .mcp-panel, .slash-menu")) return;
+        // A /command being typed (its menu may still be on its way).
+        if (/^\/\S*$/.test(el.value)) return;
+        const css = getComputedStyle(el);
+        const lines = (el.scrollHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom)) / parseFloat(css.lineHeight);
+        if (lines > 1.5) return;
+      }
+      const list = models.filter((m) => m.current);
+      if (list.length < 2) return;
+      e.preventDefault();
+      const step = e.key === "ArrowUp" ? -1 : 1;
+      const i = list.findIndex((m) => m.value === chosen || m.label === shownModel);
+      const next = list[i < 0 ? (step > 0 ? 0 : list.length - 1) : (i + step + list.length) % list.length];
+      setPrefs(key, { model: next.value });
+      // A live session switches now; otherwise the choice goes with the next message.
+      if (id) void api.chat.setModel(id, next.value);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [models, chosen, shownModel, key, id, setPrefs]);
   // Effort levels this model takes; none for a model without them.
   const modelEfforts = (chosen && models.find((m) => m.value === chosen)?.efforts) ?? null;
   const effortChoices = modelEfforts ? EFFORTS.filter((e) => modelEfforts.includes(e.value)) : EFFORTS;
@@ -822,7 +853,7 @@ function Composer({
           </span>
         ) : (
           <>
-            <button type="button" className="chip" aria-label="Model" aria-haspopup="menu" aria-expanded={menu?.kind === "model"} onClick={(e) => setMenu({ kind: "model", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
+            <button type="button" className="chip" aria-label="Model" title="Switch model: Up and Down in the message box, or Ctrl+M" aria-haspopup="menu" aria-expanded={menu?.kind === "model"} onClick={(e) => setMenu({ kind: "model", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
               <Icon name="sparkle" size={14} />
               {shownModel}
               <Icon name="chevron-down" size={12} />

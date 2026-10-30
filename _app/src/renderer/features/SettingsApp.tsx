@@ -254,6 +254,8 @@ export function SettingsApp() {
                 ["New chat", "Ctrl+N"],
                 ["Show or hide the sidebar", "Ctrl+B"],
                 ["Focus mode: only the chat and usage", "Ctrl+F"],
+                ["Switch model (in the message box)", "Up, Down"],
+                ["Switch model (any time)", "Ctrl+M"],
                 ["All · Updated · Live", "Ctrl+1 2 3"],
                 ["Pin", "Ctrl+D"],
                 ["Archive", "Ctrl+E"],

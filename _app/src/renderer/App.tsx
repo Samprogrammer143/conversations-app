@@ -128,7 +128,7 @@ export function App() {
         const rows = s().list?.rows.filter((r) => !s().hidden.has(r.id)) ?? [];
         const i = rows.findIndex((r) => r.id === id);
         const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
-        if (next && !(e.target as HTMLElement)?.closest(".transcript, .menu, .popover")) {
+        if (next && !(e.target as HTMLElement)?.closest(".transcript, .menu, .popover") && !document.querySelector(".menu.choice")) {
           e.preventDefault();
           void s().select(next.id);
         }
