@@ -5,6 +5,7 @@ import { Button, GlassCircle, IconButton, Spinner, Toggle, ToolbarButton } from 
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import { SEP, modelLabel } from "../lib/format";
+import { fitImage, fromBase64, MAX_BASE64 } from "../lib/images";
 import { Transcript } from "./Transcript";
 import { McpPanel } from "./McpPanel";
 import { signInWorkspace } from "./Workspaces";
@@ -74,14 +75,10 @@ export function composerKey(id: string | null, projectId: string | null, folder:
 const IMAGE_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 /** Reads an image file from a paste, a drop or the picker into an attachment. */
-function readImage(file: File): Promise<Pending | null> {
-  return new Promise((resolve) => {
-    if (!IMAGE_MEDIA.has(file.type) || file.size > 5 * 1024 * 1024) return resolve(null);
-    const r = new FileReader();
-    r.onload = () => resolve({ key: `${Date.now()}-${Math.random()}`, name: file.name || "Pasted image", mediaType: file.type as Attachment["mediaType"], data: String(r.result).split(",")[1] ?? "" });
-    r.onerror = () => resolve(null);
-    r.readAsDataURL(file);
-  });
+async function readImage(file: File): Promise<Pending | null> {
+  if (!IMAGE_MEDIA.has(file.type)) return null;
+  const fit = await fitImage(file, file.type);
+  return fit && { key: `${Date.now()}-${Math.random()}`, name: file.name || "Pasted image", mediaType: fit.mediaType as Attachment["mediaType"], data: fit.data };
 }
 
 // Shown before a session has reported the models this account can use.
@@ -549,11 +546,15 @@ function Composer({
     const ok = read.filter((p): p is Pending => !!p);
     const skipped = list.length - ok.length;
     if (ok.length) setPending((prev) => [...prev, ...ok].slice(0, 10));
-    if (skipped) toast({ text: skipped === list.length ? "Only PNG, JPEG, GIF or WebP images up to 5 MB can be attached" : `${skipped} of them couldn't be attached (images up to 5 MB only)`, icon: "alert" });
+    if (skipped) toast({ text: skipped === list.length ? "Only PNG, JPEG, GIF or WebP images can be attached" : `${skipped} of them couldn't be attached (images only)`, icon: "alert" });
   };
   const pick = async () => {
     const r = await api.app.pickFiles();
-    if (r.images.length) setPending((prev) => [...prev, ...r.images.map((a) => ({ ...a, key: `${Date.now()}-${Math.random()}` }))].slice(0, 10));
+    // A big one is made to fit, as a paste or a drop is.
+    const fitted = await Promise.all(r.images.map(async (a) => (a.data.length <= MAX_BASE64 ? a : { ...a, ...(await fitImage(fromBase64(a.data, a.mediaType), a.mediaType)) })));
+    const usable = fitted.filter((a) => a.data.length <= MAX_BASE64) as Attachment[];
+    if (usable.length < fitted.length) toast({ text: "An image couldn't be made small enough to attach", icon: "alert" });
+    if (usable.length) setPending((prev) => [...prev, ...usable.map((a) => ({ ...a, key: `${Date.now()}-${Math.random()}` }))].slice(0, 10));
     // Other files are handed to Claude by path, which it can read in the project.
     if (r.paths.length) setText((t) => `${t.trimEnd()}${t.trim() ? "\n\n" : ""}${r.paths.map((p) => `Attached file: ${p}`).join("\n")}\n`);
     ref.current?.focus();

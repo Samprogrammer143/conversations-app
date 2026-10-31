@@ -5684,7 +5684,8 @@ function isUsableFolder(p) {
   }
 }
 var IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
-var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+var MAX_IMAGE_BASE64 = 5 * 1024 * 1024;
+var MAX_PICKED_IMAGE_BYTES = 100 * 1024 * 1024;
 var MAX_IMAGES = 10;
 function validAttachments(raw) {
   if (raw === void 0 || raw === null) return [];
@@ -5693,7 +5694,7 @@ function validAttachments(raw) {
   const out = [];
   for (const a of raw) {
     if (!a || typeof a !== "object" || typeof a.data !== "string" || typeof a.mediaType !== "string" || !types.has(a.mediaType)) return null;
-    if (a.data.length > Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 4 || !/^[A-Za-z0-9+/=]+$/.test(a.data)) return null;
+    if (a.data.length > MAX_IMAGE_BASE64 || !/^[A-Za-z0-9+/=]+$/.test(a.data)) return null;
     out.push({ name: String(a.name ?? "image").slice(0, 200), mediaType: a.mediaType, data: a.data });
   }
   return out;
@@ -5859,7 +5860,7 @@ function registerIpc() {
       } catch {
         continue;
       }
-      if (type && size <= MAX_IMAGE_BYTES) images.push({ name: path24.basename(p), mediaType: type, data: fs25.readFileSync(p).toString("base64") });
+      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path24.basename(p), mediaType: type, data: fs25.readFileSync(p).toString("base64") });
       else paths.push(p);
     }
     return { images, paths };
@@ -5946,7 +5947,7 @@ function registerIpc() {
     const id = rawId;
     const value = String(text ?? "").trim();
     const attachments = validAttachments(opts?.attachments);
-    if (attachments === null) return { ok: false, err: "Only PNG, JPEG, GIF or WebP images up to 5 MB can be attached, at most 10 at a time" };
+    if (attachments === null) return { ok: false, err: "Only PNG, JPEG, GIF or WebP images can be attached, at most 10 at a time" };
     if (!value && !attachments.length) return { ok: false, err: "Nothing to send" };
     if (value.length > 2e5) return { ok: false, err: "That message is too long to send" };
     let cwd = null;

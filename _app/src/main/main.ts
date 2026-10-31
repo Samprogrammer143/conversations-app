@@ -623,9 +623,11 @@ function isUsableFolder(p: string): boolean {
   }
 }
 
-// Images a message can carry: the types the API accepts, 5 MB each, ten at a time.
+// Images a message can carry: the types the API accepts, 5 MB each counted as base64 (the
+// window makes bigger ones fit), ten at a time. From the picker, up to 100 MB to make fit.
 const IMAGE_TYPES: Record<string, Attachment["mediaType"]> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BASE64 = 5 * 1024 * 1024;
+const MAX_PICKED_IMAGE_BYTES = 100 * 1024 * 1024;
 const MAX_IMAGES = 10;
 
 /** The attachments from the window, checked; null when any of them is not acceptable. */
@@ -636,7 +638,7 @@ function validAttachments(raw: unknown): Attachment[] | null {
   const out: Attachment[] = [];
   for (const a of raw as Record<string, unknown>[]) {
     if (!a || typeof a !== "object" || typeof a.data !== "string" || typeof a.mediaType !== "string" || !types.has(a.mediaType as Attachment["mediaType"])) return null;
-    if (a.data.length > Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 4 || !/^[A-Za-z0-9+/=]+$/.test(a.data)) return null;
+    if (a.data.length > MAX_IMAGE_BASE64 || !/^[A-Za-z0-9+/=]+$/.test(a.data)) return null;
     out.push({ name: String(a.name ?? "image").slice(0, 200), mediaType: a.mediaType as Attachment["mediaType"], data: a.data });
   }
   return out;
@@ -826,7 +828,7 @@ function registerIpc() {
       } catch {
         continue;
       }
-      if (type && size <= MAX_IMAGE_BYTES) images.push({ name: path.basename(p), mediaType: type, data: fs.readFileSync(p).toString("base64") });
+      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path.basename(p), mediaType: type, data: fs.readFileSync(p).toString("base64") });
       else paths.push(p);
     }
     return { images, paths };
@@ -918,7 +920,7 @@ function registerIpc() {
     const id = rawId as string | null;
     const value = String(text ?? "").trim();
     const attachments = validAttachments(opts?.attachments);
-    if (attachments === null) return { ok: false, err: "Only PNG, JPEG, GIF or WebP images up to 5 MB can be attached, at most 10 at a time" };
+    if (attachments === null) return { ok: false, err: "Only PNG, JPEG, GIF or WebP images can be attached, at most 10 at a time" };
     if (!value && !attachments.length) return { ok: false, err: "Nothing to send" };
     if (value.length > 200_000) return { ok: false, err: "That message is too long to send" };
     let cwd: string | null = null;
