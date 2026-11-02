@@ -884,6 +884,7 @@ function registerIpc() {
 
   handle("sync:status", () => scheduler.status());
   handle("sync:now", () => scheduler.syncNow());
+  handle("sync:signIn", () => scheduler.signIn());
   handle("sync:setPaused", (paused: unknown) => scheduler.setPaused(paused === true));
   handle("sync:openLog", () => shell.openPath(path.join(syncDir(), "sync.log")));
   handle("sync:setUploadQuiet", (seconds: unknown) => scheduler.setUploadQuiet(typeof seconds === "number" ? seconds : NaN));

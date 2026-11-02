@@ -212,7 +212,7 @@ export interface SearchResult {
 
 // ------------------------------------------------------------------ sync
 
-export type SyncPhase = "idle" | "checking" | "downloading" | "uploading" | "offline" | "attention" | "paused" | "not-set-up";
+export type SyncPhase = "idle" | "checking" | "downloading" | "uploading" | "offline" | "signin" | "attention" | "paused" | "not-set-up";
 
 export interface SyncActivity {
   at: string;
@@ -221,7 +221,10 @@ export interface SyncActivity {
 }
 
 export interface SyncStatus {
+  /** "offline": GitHub isn't answering, for whatever reason (see noNetwork). "signin": GitHub refuses this PC's login. */
   phase: SyncPhase;
+  /** This PC has no network at all, so Claude can't answer either. */
+  noNetwork: boolean;
   machine: string;
   /** "2 of 3 PCs up to date" */
   headline: string;

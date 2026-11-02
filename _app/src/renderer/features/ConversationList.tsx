@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ConversationRow } from "../../shared/types";
 import { Icon } from "../components/Icon";
-import { GlassCircle, IconButton, Segmented } from "../components/controls";
+import { Button, GlassCircle, IconButton, Segmented } from "../components/controls";
 import { useStore, visibleRows } from "../lib/store";
 import { api } from "../lib/api";
 import { SEP, groupLabel, plural, rowTime } from "../lib/format";
@@ -112,7 +112,10 @@ export function ConversationList({ showSidebarToggle, onOpen }: { showSidebarTog
   const select = useStore((s) => s.select);
   const toast = useStore((s) => s.toast);
   const pcCount = sidebar?.devices.length ?? 0;
-  const offline = useStore((s) => s.sync?.phase === "offline");
+  const syncPhase = useStore((s) => s.sync?.phase);
+  const noNetwork = useStore((s) => s.sync?.noNetwork === true);
+  const githubSigningIn = useStore((s) => s.githubSigningIn);
+  const signInToGitHub = useStore((s) => s.signInToGitHub);
   const rows = visibleRows({ list, hidden });
 
   const entries = useMemo<Entry[]>(() => {
@@ -189,13 +192,27 @@ export function ConversationList({ showSidebarToggle, onOpen }: { showSidebarTog
           ]}
         />
       </div>
-      {offline && (
+      {syncPhase === "signin" && (
+        <div className="list-banner">
+          <div className="banner accent">
+            <Icon name="lock" />
+            <div className="text">
+              <span className="title">GitHub needs you to sign in</span>
+              <span className="sub">Claude still works. Chats won't reach your other PCs until you do.</span>
+            </div>
+            <Button kind="secondary" disabled={githubSigningIn} onClick={() => void signInToGitHub()}>
+              {githubSigningIn ? "Signing in…" : "Sign in"}
+            </Button>
+          </div>
+        </div>
+      )}
+      {(syncPhase === "offline" || syncPhase === "attention") && (
         <div className="list-banner">
           <div className="banner">
-            <Icon name="wifi-off" />
+            <Icon name={noNetwork ? "wifi-off" : "cloud-off"} />
             <div className="text">
-              <span className="title">You're offline</span>
-              <span className="sub">Everything on this PC still works. Changes upload when you reconnect.</span>
+              <span className="title">{noNetwork ? "You're offline" : "Can't reach GitHub right now"}</span>
+              <span className="sub">{noNetwork ? "Everything on this PC still works. Changes upload when you reconnect." : "Claude still works. Chats upload once GitHub answers."}</span>
             </div>
           </div>
         </div>

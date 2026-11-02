@@ -18,6 +18,7 @@
 //   node sync.mjs edit --json --ops '<json>'  pin, rename, archive, delete or mark as an app chat: [{session, field, value}]
 //   node sync.mjs folders --json [--refresh]  which folder each project lives in on this PC
 //   node sync.mjs push-pending --json         upload commits made while offline
+//   node sync.mjs signin --json               sign in to GitHub (Git Credential Manager's window may open)
 //   node sync.mjs announce --json [--app-version x]  record this PC's versions on GitHub
 //   node sync.mjs config --json [--set uploadQuietSeconds=60|120|300]  read or change a sync setting
 //   node sync.mjs rules [--push] [--json]      the shared rules file (_shared/CLAUDE.md): where it is; upload it now
@@ -59,6 +60,7 @@ import {
   STARTUP_WAIT_MS,
   RESUME_WAIT_MS,
   GIT_ENV,
+  signInToGitHub,
   SyncError,
   argText,
   sleep,
@@ -493,6 +495,7 @@ try {
   else if (cmd === "list") doList();
   else if (cmd === "pull-all") printJson(pullAll({ intoLocal: !args["no-local"], skip: [].concat(args.skip ?? []).filter((x) => typeof x === "string").flatMap((x) => x.split(",")).map((x) => x.trim()).filter(Boolean) }));
   else if (cmd === "check") printJson(checkRemote());
+  else if (cmd === "signin") printJson(signInToGitHub());
   else if (cmd === "edit") doEdit(args);
   else if (cmd === "folders") printJson({ ok: true, folders: localProjectFolders({ refresh: !!args.refresh }) });
   else if (cmd === "push-pending") printJson(pushPending());
@@ -506,7 +509,7 @@ try {
     printJson({ ok: clone.ok && (refresh?.ok ?? true), dir: APP_DIR, clone, refresh, runtime: clone.ok ? ensureRuntime() : null });
   } else if (cmd === "share-workspace") printJson(shareWorkspace({ id: argText(args.id), name: argText(args.name), remote: argText(args.remote) }));
   else if (cmd === "version") console.log(ENGINE_VERSION);
-  else fail("Usage: sync.mjs setup|push|pull|status|where|hook <event>|list|pull-all|check|edit|folders|push-pending|announce|config|app|version");
+  else fail("Usage: sync.mjs setup|push|pull|status|where|hook <event>|list|pull-all|check|signin|edit|folders|push-pending|announce|config|app|version");
 } catch (e) {
   log(`error in ${cmd}: ${e.stack || e}`);
   if (cmd === "hook" || cmd === "worker" || args.auto) process.exit(0); // never break Claude over a sync problem

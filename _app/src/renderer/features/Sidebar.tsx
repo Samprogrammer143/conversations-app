@@ -117,6 +117,7 @@ export function SearchField() {
 export function syncGlyph(s: SyncStatus | null): { node: React.ReactNode } {
   if (!s) return { node: <Icon name="cloud" className="glyph" /> };
   if (s.phase === "checking" || s.phase === "downloading" || s.phase === "uploading") return { node: <span className="glyph"><Spinner /></span> };
+  if (s.phase === "signin") return { node: <Icon name="triangle-alert" className="glyph warning" /> };
   if (s.phase === "offline") return { node: <Icon name="cloud-off" className="glyph" /> };
   if (s.phase === "attention") return { node: <Icon name="cloud-off" className="glyph danger" /> };
   if (s.phase === "paused") return { node: <Icon name="circle-pause" className="glyph" /> };

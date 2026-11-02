@@ -235,11 +235,13 @@ export function SyncPopover() {
       window.removeEventListener("keydown", esc);
     };
   }, [popover, setPopover]);
+  const githubSigningIn = useStore((s) => s.githubSigningIn);
+  const signInToGitHub = useStore((s) => s.signInToGitHub);
   if (popover !== "sync" || !sync) return null;
 
   const behind = sync.devices.filter((d) => d.status === "old-sync" && !d.isThisPc);
   const next = sync.nextCheckInMs != null ? Math.round(sync.nextCheckInMs / 1000) : null;
-  const headIcon = sync.phase === "attention" ? "cloud-off" : sync.phase === "offline" ? "wifi-off" : "cloud";
+  const headIcon = sync.phase === "signin" ? "lock" : sync.phase === "attention" ? "cloud-off" : sync.phase === "offline" ? (sync.noNetwork ? "wifi-off" : "cloud-off") : "cloud";
   const iconFor = (k: string) => ({ uploaded: "cloud-upload", downloaded: "cloud-download", saved: "hard-drive", "kept-both": "git-fork", failed: "cloud-off", edit: "pencil" })[k] ?? "cloud";
 
   return (
@@ -271,7 +273,18 @@ export function SyncPopover() {
           </div>
         ))}
       </div>
-      {sync.phase === "attention" || sync.phase === "offline" ? (
+      {sync.phase === "signin" ? (
+        <div className="sync-note">
+          <Icon name="info" className="info" />
+          <div className="text">
+            <div className="t1">GitHub refused this PC's login</div>
+            <div className="t2">Your chats are safe here and Claude still works. They sync again once you sign in.</div>
+          </div>
+          <Button kind="plain" disabled={githubSigningIn} onClick={() => void signInToGitHub()}>
+            {githubSigningIn ? "Signing in…" : "Sign in"}
+          </Button>
+        </div>
+      ) : sync.phase === "attention" || sync.phase === "offline" ? (
         <div className="sync-note">
           <Icon name="info" className="info" />
           <div className="text">

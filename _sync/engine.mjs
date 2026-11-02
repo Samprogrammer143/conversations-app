@@ -364,13 +364,16 @@ export function isLive(id, copies, open = openSessions(), { allowOpen = 0 } = {}
   return copies.some(writtenRecently);
 }
 
+/** Git's messages quote the remote, and a login in its address comes with it: never kept. */
+const stripLogin = (text) => String(text).replace(/(https?:\/\/)[^\s/@'"]+@/gi, "$1");
+
 export function log(msg) {
   try {
     fs.mkdirSync(SYNC_DIR, { recursive: true });
     try {
       if (fs.statSync(LOG_PATH).size > 1024 * 1024) fs.renameSync(LOG_PATH, `${LOG_PATH}.1`);
     } catch {}
-    fs.appendFileSync(LOG_PATH, `${new Date().toISOString()} [${process.pid}] ${msg}\n`);
+    fs.appendFileSync(LOG_PATH, `${new Date().toISOString()} [${process.pid}] ${stripLogin(msg)}\n`);
   } catch {}
 }
 
@@ -511,17 +514,131 @@ export function patchSession(id, patch) {
 }
 
 export function git(args, opts = {}) {
-  const r = spawnSync("git", args, {
-    cwd: opts.cwd ?? REPO_DIR,
-    env: GIT_ENV,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    timeout: opts.timeout ?? 120_000,
-    windowsHide: true,
-  });
-  const res = { ok: r.status === 0, code: r.status, out: (r.stdout || "").trim(), err: (r.stderr || r.error?.message || "").trim() };
-  if (!res.ok && !opts.quiet) log(`git ${args.join(" ")} failed (${r.status}): ${res.err}`);
+  const run = () => {
+    const r = spawnSync("git", args, {
+      cwd: opts.cwd ?? REPO_DIR,
+      env: GIT_ENV,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: opts.timeout ?? 120_000,
+      windowsHide: true,
+    });
+    return { ok: r.status === 0, code: r.status, out: (r.stdout || "").trim(), err: (r.stderr || r.error?.message || "").trim() };
+  };
+  let res = run();
+  // Refused for want of a login: put right once if it can be, then the same command again.
+  // Only commands that talk to GitHub: others' errors can quote a chat's title.
+  if (!res.ok && !opts.cwd && TALKS_TO_GITHUB.has(args[0]) && isAuthError(res.err) && repairGitLogin()) res = run();
+  if (!res.ok && !opts.quiet) log(`git ${args.join(" ")} failed (${res.code}): ${res.err}`);
   return res;
+}
+
+// ------------------------------------------------- the login to GitHub
+//
+// The sync signs in however git on this PC does. That can change under it: `gh auth login`
+// makes `gh` git's only way of signing in to github.com, for whichever account gh is on, and
+// a login saved in Windows is then no longer used. So when GitHub refuses the login, the
+// login saved in Windows is tried for this repository alone, and kept for it if it can
+// upload. The PC's own git settings, which something else may rely on, are left as they are.
+
+const TALKS_TO_GITHUB = new Set(["fetch", "push", "ls-remote"]);
+const AUTH_ERROR = /could not read (username|password)|authentication failed|invalid username or (password|token)|repository not found|returned error: 40[13]|permission to \S+ denied/i;
+/**
+ * Git's words for a login it lacks or GitHub refused (GitHub says "not found" of a private
+ * repository to someone without access). Not an SSH key refused: signing in can't put that right.
+ */
+export const isAuthError = (err) => AUTH_ERROR.test(String(err ?? ""));
+
+const loginHelper = () => process.env.CLAUDE_SYNC_TEST_LOGIN_HELPER || "manager"; // Git Credential Manager, part of Git for Windows
+
+/** The git setting for how this repository's host is signed in to; null for a remote that isn't over http(s). */
+function loginKey() {
+  const r = spawnSync("git", ["remote", "get-url", "origin"], { cwd: REPO_DIR, env: GIT_ENV, encoding: "utf8", windowsHide: true });
+  try {
+    const u = new URL((r.stdout || "").trim());
+    return /^https?:$/.test(u.protocol) ? `credential.${u.protocol}//${u.host}.helper` : null;
+  } catch {
+    return null;
+  }
+}
+
+const loginConfig = (...a) => spawnSync("git", ["config", "--local", ...a], { cwd: REPO_DIR, env: GIT_ENV, encoding: "utf8", windowsHide: true });
+/** What this repository alone says about signing in. */
+const localLogin = (key) => (loginConfig("--get-all", key).stdout || "").split(/\r?\n/).slice(0, -1);
+
+/** This repository signs in with the helper from now on: the empty value clears any set for the whole PC. */
+function pinLogin(key, helper) {
+  loginConfig("--unset-all", key);
+  loginConfig("--add", key, "");
+  loginConfig("--add", key, helper);
+  const set = localLogin(key);
+  const cleared = set.lastIndexOf("");
+  if (cleared >= 0 && set.slice(cleared + 1).includes(helper)) return true;
+  loginConfig("--unset-all", key); // half written (git config doesn't wait for its lock): as if never tried
+  return false;
+}
+
+/**
+ * Can this login upload? A dry run asks GitHub for the right to upload and sends nothing;
+ * being told to download first still means yes. With a helper, in place of what the
+ * settings say; without one, as they stand.
+ */
+function tryLogin(key, helper, env, timeout) {
+  const using = helper ? ["-c", `${key}=`, "-c", `${key}=${helper}`] : [];
+  const r = spawnSync("git", [...using, "push", "--dry-run", "--no-verify", "origin", "HEAD"], { cwd: REPO_DIR, env, encoding: "utf8", windowsHide: true, timeout });
+  return { ok: r.status === 0 || /\[rejected\]/.test(r.stderr || ""), err: (r.stderr || r.error?.message || "").trim(), timedOut: r.error?.code === "ETIMEDOUT" };
+}
+
+let loginRepairTried = false;
+function repairGitLogin() {
+  if (loginRepairTried) return false;
+  loginRepairTried = true;
+  const key = loginKey();
+  if (!key) return false;
+  const helper = loginHelper();
+  const set = localLogin(key);
+  if (set.includes(helper)) {
+    // Moved to the saved login earlier, and that is what was refused: the PC's own may work again.
+    loginConfig("--unset-all", key);
+    if (tryLogin(key, null, GIT_ENV, 30_000).ok) {
+      log("GitHub refused the login saved in Windows; this repository is back on this PC's usual GitHub login");
+      return true;
+    }
+    pinLogin(key, helper);
+    return false;
+  }
+  if (set.some((v) => v !== "")) return false; // set by hand: only Sign in replaces it, because you asked
+  if (!tryLogin(key, helper, GIT_ENV, 30_000).ok || !pinLogin(key, helper)) return false;
+  log("GitHub refused this PC's usual GitHub login; this repository now uses the login saved in Windows");
+  return true;
+}
+
+/** What to tell you when signing in didn't work. Fixed words: git's own can quote a login. */
+function signInProblem(r) {
+  if (r.ok) return "The sign-in to GitHub didn't finish";
+  if (r.timedOut) return "The sign-in to GitHub timed out";
+  if (/'credential-\S+' is not a git command/i.test(r.err)) return "This PC has no Git Credential Manager to sign in with";
+  if (/repository not found|returned error: 403|permission to \S+ denied/i.test(r.err)) return "That GitHub account can't upload to these chats. Give it access on GitHub.";
+  return isAuthError(r.err) ? "The sign-in to GitHub didn't finish" : "GitHub didn't answer, so the sign-in didn't finish";
+}
+
+/** Signs in from the app: the one time a window may open (Git Credential Manager's own), because you asked. */
+export function signInToGitHub() {
+  if (!loadConfig()?.remote || !fs.existsSync(path.join(REPO_DIR, ".git"))) return { ok: false, err: "Sync isn't set up on this PC" };
+  const key = loginKey();
+  if (!key) return { ok: false, err: "These chats don't sign in through GitHub's website" };
+  const helper = loginHelper();
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "true" };
+  let r = tryLogin(key, helper, env, 5 * 60_000);
+  // A saved login that has expired is only dropped when GitHub refuses it; the window opens on the next try.
+  if (!r.ok && /authentication failed|invalid username or/i.test(r.err)) r = tryLogin(key, helper, env, 5 * 60_000);
+  if (!r.ok || !pinLogin(key, helper)) {
+    log(`sign-in to GitHub didn't finish: ${r.err.split("\n").pop()}`);
+    return { ok: false, err: signInProblem(r) };
+  }
+  noteSyncResult({ ok: true });
+  log("signed in to GitHub from the app");
+  return { ok: true };
 }
 
 export const toGitPath = (p) => p.split(path.sep).join("/");
@@ -1203,7 +1320,7 @@ function noteSyncResult({ ok, error, fetched, pushed }) {
         delete s.lastError;
         delete s.failingSince;
       } else {
-        s.lastError = { at: now, message: String(error || "unknown error").split("\n")[0].slice(0, 300) };
+        s.lastError = { at: now, message: stripLogin(error || "unknown error").split("\n")[0].slice(0, 300) };
         s.failingSince ??= now;
       }
     });
@@ -1322,7 +1439,7 @@ export function refreshRepo() {
   const f = git(["fetch", "--quiet", "origin"], { timeout: 10 * 60_000 });
   if (!f.ok) {
     noteSyncResult({ ok: false, error: f.err });
-    return { ok: false, err: f.err };
+    return { ok: false, err: f.err, ...(isAuthError(f.err) ? { code: "auth" } : {}) };
   }
   const branch = currentBranch();
   if (!git(["rev-parse", "--verify", "--quiet", `origin/${branch}`], { quiet: true }).ok) {
@@ -1451,8 +1568,12 @@ function pushHead({ redo = false } = {}) {
       return { ok: true };
     }
     lastErr = p.err;
+    if (isAuthError(p.err)) {
+      noteSyncResult({ ok: false, error: p.err });
+      return { ok: false, code: "auth", err: p.err }; // trying again won't change GitHub's mind
+    }
     const rf = refreshRepo();
-    if (!rf.ok) return { ok: false, err: rf.err || p.err };
+    if (!rf.ok) return { ok: false, err: rf.err || p.err, ...(rf.code === "auth" ? { code: "auth" } : {}) };
     if (rf.recovered && redo) return { ok: false, recovered: true, err: "another PC changed it at the same time" };
   }
   noteSyncResult({ ok: false, error: lastErr });
@@ -1638,7 +1759,7 @@ export function announceDevice() {
   if (config.slug && !deviceOutOfDate(config)) return { ok: true, nothing: true };
   return withLock(() => {
     const rf = refreshRepo();
-    if (!rf.ok) return { ok: false, offline: rf.code !== "git-busy", code: rf.code, err: rf.err };
+    if (!rf.ok) return { ok: false, offline: !rf.code, code: rf.code, err: rf.err };
     if (!deviceOutOfDate(config)) return { ok: true, nothing: true };
     const rel = writeDevice(config);
     return commitAndPush(`Device: ${machineName(config)} runs engine ${ENGINE_VERSION}${config.appVersion ? `, app ${config.appVersion}` : ""}`, [rel]);
@@ -1796,7 +1917,7 @@ export function pushPending() {
   ensureRepo();
   return withLock(() => {
     const rf = refreshRepo();
-    if (!rf.ok) return { ok: false, offline: rf.code !== "git-busy", code: rf.code, err: rf.err };
+    if (!rf.ok) return { ok: false, offline: !rf.code, code: rf.code, err: rf.err };
     const up = uploadPending();
     const extra = up.uploaded.length || up.failed.length ? { reuploaded: up.uploaded, stillWaiting: up.failed } : {};
     if (!aheadCount()) return up.failed.length ? { ok: false, err: "some conversations could not be uploaded yet", ...extra } : { ok: true, nothing: !up.uploaded.length, ...extra };
@@ -1819,7 +1940,7 @@ export function pushRules() {
   ensureRepo();
   return withLock(() => {
     const rf = refreshRepo();
-    if (!rf.ok) return { ok: false, offline: rf.code !== "git-busy", code: rf.code, err: rf.err };
+    if (!rf.ok) return { ok: false, offline: !rf.code, code: rf.code, err: rf.err };
     if (!fs.existsSync(RULES_PATH)) return { ok: false, err: `no shared rules file at ${RULES_PATH}` };
     // The refresh above already committed any edit; "nothing" means there was nothing to push either.
     const ahead = aheadCount();
@@ -2015,7 +2136,8 @@ export function pushSession(args) {
     for (let attempt = 0; ; attempt++) {
       const rf = refreshRepo();
       if (!rf.ok && rf.code === "git-busy") return { ok: false, auto, id, msg: `Could not upload: ${rf.err}`, code: "git-error" };
-      if (!rf.ok) return { ok: false, auto, id, msg: `Could not reach GitHub: ${rf.err}`, offline: true };
+      if (!rf.ok && rf.code === "auth") return { ok: false, auto, id, msg: `GitHub refused this PC's login: ${stripLogin(rf.err)}`, code: "auth" };
+      if (!rf.ok) return { ok: false, auto, id, msg: `Could not reach GitHub: ${stripLogin(rf.err)}`, offline: true };
 
       const state = mergedState();
       if (isDeleted(state, id)) {
@@ -2204,7 +2326,7 @@ export function drainPendingUploads() {
   if (!pendingIds().length && !aheadCount()) return null;
   return withLock(() => {
     const rf = refreshRepo();
-    if (!rf.ok) return { ok: false, offline: rf.code !== "git-busy", err: rf.err };
+    if (!rf.ok) return { ok: false, offline: !rf.code, err: rf.err };
     const up = uploadPending();
     if (aheadCount()) pushHead();
     return { ok: true, ...up };
@@ -2457,7 +2579,7 @@ export function pullAll({ intoLocal = true, lockWaitMs = 60_000, skip = [] } = {
   const summary = { ok: true, downloaded: [], updated: [], skippedLive: [], noFolder: 0, retired: [] };
   return withLock(() => {
     const rf = refreshRepo();
-    if (!rf.ok) return { ok: false, offline: rf.code !== "git-busy", code: rf.code, err: rf.err };
+    if (!rf.ok) return { ok: false, offline: !rf.code, code: rf.code, err: rf.err };
     warnIfCloudSynced();
     updateState((s) => { s.lastPullAt = new Date().toISOString(); });
     const state = mergedState();
@@ -2526,7 +2648,7 @@ export function checkRemote() {
   const r = git(["ls-remote", "origin", `refs/heads/${branch}`], { quiet: true, timeout: 30_000 });
   if (!r.ok) {
     noteSyncResult({ ok: false, error: r.err });
-    return { ok: false, offline: true, err: r.err };
+    return isAuthError(r.err) ? { ok: false, code: "auth", err: r.err } : { ok: false, offline: true, err: r.err };
   }
   const remoteHead = r.out.split(/\s+/)[0] || null;
   const localHead = git(["rev-parse", `origin/${branch}`], { quiet: true }).out || null;

@@ -75,7 +75,7 @@ export function FlyoutApp() {
         <div className="fly-title">
           <div className="t1">Conversations</div>
           <div className="t2">
-            <span className={`status-dot ${sync?.phase === "attention" ? "danger" : behind || sync?.phase === "offline" ? "warning" : "success"}`} />
+            <span className={`status-dot ${sync?.phase === "attention" ? "danger" : behind || sync?.phase === "offline" || sync?.phase === "signin" ? "warning" : "success"}`} />
             {sync?.headline ?? "Starting…"}
           </div>
         </div>

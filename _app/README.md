@@ -93,8 +93,9 @@ npm run dist                        # release/Conversations Setup <version>.exe 
 
 The sandbox (`%LOCALAPPDATA%\Conversations-dev`) points the app at a local mirror of the sync
 repository, so development never pushes anything to GitHub. The engine tests live in
-`../_sync/test.mjs` (`node ../_sync/test.mjs`), and the app repository's own set-up, updates
-and the move from the old layout in `../_sync/test-app.mjs`.
+`../_sync/test.mjs` (`node ../_sync/test.mjs`), the app repository's own set-up, updates
+and the move from the old layout in `../_sync/test-app.mjs`, and what happens when GitHub
+refuses this PC's login in `../_sync/test-login.mjs`.
 
 Chats started from the sandbox (the chat test, or by hand) still run on this PC's real
 Claude Code, because it needs its own login and the sandbox never copies credentials. Their

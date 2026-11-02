@@ -79,6 +79,10 @@ export class SyncScheduler extends EventEmitter {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private phase: SyncPhase = "idle";
+  /** Signed in during a look at GitHub: that look's answer is out of date, so another follows it. */
+  private lookAgain = false;
+  /** "signin" came from an upload GitHub refused: reading still works, so a good look doesn't clear it. */
+  private uploadRefused = false;
   private engine: EngineStatus | null = null;
   private recent: SyncActivity[] = [];
   private nextAt: number | null = null;
@@ -231,20 +235,35 @@ export class SyncScheduler extends EventEmitter {
         this.phase = "offline";
         return;
       }
-      this.phase = "checking";
-      this.emitStatus();
-      const check = await runEngine<{ ok: boolean; changed?: boolean; offline?: boolean; err?: string; remoteHead?: string | null }>(["check", "--json"], { timeoutMs: 60_000 });
+      // A problem stays on screen while it is looked at again, so its banner doesn't blink at every look.
+      if (this.phase !== "offline" && this.phase !== "signin" && this.phase !== "attention") {
+        this.phase = "checking";
+        this.emitStatus();
+      }
+      const check = await runEngine<{ ok: boolean; changed?: boolean; offline?: boolean; code?: string; err?: string; remoteHead?: string | null }>(["check", "--json"], { timeoutMs: 60_000 });
       if (!check.ok) {
         await this.refreshEngineStatus();
+        // Refused, not unreachable: it won't put itself right, and waiting doesn't help.
+        if (check.json?.code === "auth") {
+          this.uploadRefused = false;
+          this.phase = "signin";
+          return;
+        }
         const since = this.engine?.failingSince ? Date.parse(this.engine.failingSince) : Date.now();
         this.phase = Date.now() - since > ATTENTION_AFTER_MS ? "attention" : "offline";
         if (this.phase === "attention" && this.recent[0]?.kind !== "failed") this.record({ kind: "failed", text: "Upload failed: github.com didn't answer" });
         return;
       }
+      if (this.phase === "signin" && !this.uploadRefused) {
+        this.phase = "checking";
+        this.emitStatus();
+      }
       const remoteHead = check.json?.remoteHead ?? null;
       if (shouldPull({ remoteHead, lastProcessed: this.heads.get(), changed: check.json?.changed, force, retryAt: this.retryPending ? 0 : this.retryPullAt })) {
-        this.phase = "downloading";
-        this.emitStatus();
+        if (this.phase !== "signin") {
+          this.phase = "downloading";
+          this.emitStatus();
+        }
         const args = ["pull-all", "--json"];
         if (!s.keepResumeUpToDate) args.push("--no-local");
         const skip = this.opts.skipIds?.() ?? [];
@@ -272,12 +291,20 @@ export class SyncScheduler extends EventEmitter {
       }
       await this.refreshEngineStatus();
       if ((this.engine?.unpushedCommits ?? 0) > 0) {
-        this.phase = "uploading";
-        this.emitStatus();
-        const pp = await runEngineSerial<{ ok: boolean }>(["push-pending", "--json"]);
+        if (this.phase !== "signin") {
+          this.phase = "uploading";
+          this.emitStatus();
+        }
+        const pp = await runEngineSerial<{ ok: boolean; code?: string }>(["push-pending", "--json"]);
         if (pp.ok) this.record({ kind: "uploaded", text: "Uploaded changes made while offline" });
         await this.refreshEngineStatus();
+        if (pp.json?.code === "auth") {
+          this.uploadRefused = true;
+          this.phase = "signin";
+          return;
+        }
       }
+      this.uploadRefused = false;
       this.phase = "idle";
     } catch (e) {
       log("sync", `tick failed: ${(e as Error).stack || e}`);
@@ -287,9 +314,23 @@ export class SyncScheduler extends EventEmitter {
       const visible = this.opts.isWindowVisible();
       const secs = visible ? s.checkWhileOpenSeconds : s.checkFromTraySeconds;
       // A conversation closed during this run still needs its pull-all: soon, not at the next interval.
-      const next = this.retryPending && this.phase === "idle" ? 2 : this.phase === "offline" ? Math.min(secs, 30) : secs;
+      const next = this.lookAgain ? 0.2 : this.retryPending && this.phase === "idle" ? 2 : this.phase === "offline" ? Math.min(secs, 30) : secs;
+      this.lookAgain = false;
       this.schedule(next * 1000);
     }
+  }
+
+  /** Signs in to GitHub from the app, then looks again. */
+  async signIn(): Promise<{ ok: boolean; err?: string }> {
+    const r = await runEngine<{ ok: boolean; err?: string }>(["signin", "--json"], { timeoutMs: 6 * 60_000 });
+    if (!r.ok) return { ok: false, err: r.json?.err ?? "The sign-in to GitHub didn't finish" };
+    if (this.running) this.lookAgain = true;
+    else {
+      this.phase = "idle";
+      this.emitStatus();
+      void this.syncNow();
+    }
+    return { ok: true };
   }
 
   /** Called by the app after it uploads an edit, so the status reflects it at once. */
@@ -308,6 +349,7 @@ export class SyncScheduler extends EventEmitter {
     const lastSync = [e?.lastFetchAt, e?.lastPushAt, e?.lastCheckAt].filter(Boolean).sort().pop() ?? null;
     const pending = e ? this.opts.pendingUploads(e.sessions || {}) + (e.unpushedCommits || 0) : 0;
     const paused = !s.syncAutomatically;
+    const noNetwork = !net.isOnline();
     let headline: string;
     let detail: string;
     const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null);
@@ -317,8 +359,11 @@ export class SyncScheduler extends EventEmitter {
     } else if (paused) {
       headline = "Sync paused";
       detail = lastSync ? `Last synced ${time(lastSync)}` : "Resume in the sync menu";
+    } else if (this.phase === "signin") {
+      headline = "Sign in to GitHub";
+      detail = "Chats aren't syncing";
     } else if (this.phase === "offline") {
-      headline = "Offline";
+      headline = noNetwork ? "Offline" : "Can't reach GitHub";
       detail = lastSync ? `Last synced ${time(lastSync)}` : "Saved on this PC";
     } else if (this.phase === "attention") {
       headline = "Can't reach GitHub";
@@ -335,6 +380,7 @@ export class SyncScheduler extends EventEmitter {
     }
     return {
       phase: paused ? "paused" : this.phase,
+      noNetwork,
       machine: e?.machine ?? thisMachine(),
       headline,
       detail,

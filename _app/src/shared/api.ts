@@ -73,6 +73,8 @@ export interface ConversationsApi {
   sync: {
     status(): Promise<SyncStatus>;
     now(): Promise<void>;
+    /** Signs in to GitHub: Git Credential Manager's own window opens. */
+    signIn(): Promise<{ ok: boolean; err?: string }>;
     setPaused(paused: boolean): Promise<void>;
     openLog(): Promise<void>;
     setUploadQuiet(seconds: number): Promise<{ ok: boolean; err?: string }>;
@@ -176,6 +178,7 @@ export const CHANNELS = [
   "edit:apply",
   "sync:status",
   "sync:now",
+  "sync:signIn",
   "sync:setPaused",
   "sync:openLog",
   "sync:setUploadQuiet",

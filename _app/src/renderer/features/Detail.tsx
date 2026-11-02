@@ -563,7 +563,8 @@ function Composer({
   // While Claude Code starts for this conversation, nothing else is sent: a second
   // send could start a second process on the same transcript.
   const starting = status?.state === "starting";
-  const offline = useStore((s) => s.sync?.phase === "offline");
+  // Only no network at all: Claude doesn't need GitHub, so GitHub's troubles never stop a message.
+  const offline = useStore((s) => s.sync?.noNetwork === true);
 
   useEffect(() => {
     const el = ref.current;
@@ -674,6 +675,10 @@ function Composer({
       toast({ text: "Images can't go with a ! command. Remove them, or send them as a message.", icon: "alert" });
       return;
     }
+    if (offline && !shell) {
+      toast({ text: "You're offline. Send is off until you reconnect.", icon: "alert" });
+      return;
+    }
     const sentKey = key;
     const shown = shell ? `! ${command}` : value || `(${images.length === 1 ? "image" : `${images.length} images`})`;
     setText("");
@@ -763,9 +768,9 @@ function Composer({
   const effortInfo = effort ? EFFORTS.find((e) => e.value === effort) : null;
   const placeholder = !id ? "Ask Claude… (/ for commands and skills, ! for the shell)" : running ? "Queue a follow-up…" : "Reply to Claude…";
   const contextPercent = status?.contextPercent ?? savedContextPercent;
-  const canSend = (text.trim() || pending.length) && !offline && !sending;
   // "!" at the start: the message is a shell command for this chat's folder.
   const shellMode = text.trimStart().startsWith("!");
+  const canSend = (text.trim() || pending.length) && (!offline || shellMode) && !sending;
   return (
     <div
       className={`composer${dragging ? " dragging" : ""}${shellMode ? " shell-mode" : ""}`}
@@ -857,22 +862,22 @@ function Composer({
           </span>
         ) : (
           <>
-            <button type="button" className="chip" aria-label="Model" title="Switch model: Up and Down in the message box, or Ctrl+M" aria-haspopup="menu" aria-expanded={menu?.kind === "model"} onClick={(e) => setMenu({ kind: "model", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
+            <button type="button" className="chip" aria-label="Model" title={`${shownModel}. Switch model: Up and Down in the message box, or Ctrl+M`} aria-haspopup="menu" aria-expanded={menu?.kind === "model"} onClick={(e) => setMenu({ kind: "model", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
               <Icon name="sparkle" size={14} />
-              {shownModel}
+              <span className="chip-label always">{shownModel}</span>
               <Icon name="chevron-down" size={12} />
             </button>
-            <button type="button" className="chip" aria-label={`Permission mode: ${modeInfo.label}`} aria-haspopup="menu" aria-expanded={menu?.kind === "mode"} onClick={(e) => setMenu({ kind: "mode", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
+            <button type="button" className="chip" aria-label={`Permission mode: ${modeInfo.label}`} title={`Permission mode: ${modeInfo.label}`} aria-haspopup="menu" aria-expanded={menu?.kind === "mode"} onClick={(e) => setMenu({ kind: "mode", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
               <Icon name={modeInfo.icon} size={14} />
-              {modeInfo.label}
+              <span className="chip-label">{modeInfo.label}</span>
               <Icon name="chevron-down" size={12} />
             </button>
           </>
         )}
         {!shellMode && (!modelEfforts || modelEfforts.length > 0) && (
-          <button type="button" className="chip" aria-label={`Effort: ${effortInfo?.label ?? "model default"}`} aria-haspopup="menu" aria-expanded={menu?.kind === "effort"} onClick={(e) => setMenu({ kind: "effort", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
+          <button type="button" className="chip" aria-label={`Effort: ${effortInfo?.label ?? "model default"}`} title={`Effort: ${effortInfo?.label ?? "model default"}`} aria-haspopup="menu" aria-expanded={menu?.kind === "effort"} onClick={(e) => setMenu({ kind: "effort", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
             <Icon name="gauge" size={14} />
-            {effortInfo ? effortInfo.label : "Effort"}
+            <span className="chip-label">{effortInfo ? effortInfo.label : "Effort"}</span>
             <Icon name="chevron-down" size={12} />
           </button>
         )}
@@ -881,13 +886,13 @@ function Composer({
           <span aria-hidden>Alert</span>
           <Toggle label="Alert mode: bring this chat to the front when it finishes or needs you" checked={!!prefs?.alert} onChange={(v) => setPrefs(key, { alert: v })} />
         </span>
-        {offline ? <span className="context">{`Offline${SEP}Send is off until you reconnect`}</span> : contextPercent != null ? <ContextRing percent={contextPercent} /> : null}
+        {offline ? <span className="context" title="Send is off until you reconnect">Offline</span> : contextPercent != null ? <ContextRing percent={contextPercent} /> : null}
         {(running && id) || (shellRunning && !id) ? (
           <button type="button" className="send stop" aria-label="Stop (Esc)" title="Stop (Esc)" onClick={() => void (id ? api.chat.stop(id) : api.chat.stopShell(key))}>
             <Icon name="x-stop-fill" size={16} />
           </button>
         ) : (
-          <button type="button" className={`send${canSend ? " ready" : ""}`} aria-label="Send (Enter)" title="Send (Enter)" disabled={!canSend} onClick={() => void send()}>
+          <button type="button" className={`send${canSend ? " ready" : ""}`} aria-label="Send (Enter)" title={offline && !shellMode ? "Send is off until you reconnect" : "Send (Enter)"} disabled={!canSend} onClick={() => void send()}>
             <Icon name="arrow-up" size={16} strokeWidth={2} />
           </button>
         )}

@@ -92,6 +92,9 @@ interface State {
   remove(id: string): void;
   rename(id: string, title: string): Promise<void>;
   setPopover(p: "sync" | null): void;
+  /** Signing in to GitHub from the app: Git Credential Manager's own window is open. */
+  githubSigningIn: boolean;
+  signInToGitHub(): Promise<void>;
   openMenu(id: string, x: number, y: number): void;
   closeMenu(): void;
 }
@@ -113,6 +116,8 @@ function flushDrafts() {
 }
 
 const rowsOf = (s: State) => s.list?.rows ?? [];
+
+let githubSignInToast = 0;
 
 export const useStore = create<State>((set, get) => ({
   info: null,
@@ -147,6 +152,15 @@ export const useStore = create<State>((set, get) => ({
   search: { open: false, text: "", result: null, active: 0, includeTools: false },
   toasts: [],
   popover: null,
+  githubSigningIn: false,
+  async signInToGitHub() {
+    if (get().githubSigningIn) return;
+    get().dismissToast(githubSignInToast);
+    set({ githubSigningIn: true });
+    const r = await api.sync.signIn().catch(() => ({ ok: false, err: undefined as string | undefined }));
+    set({ githubSigningIn: false });
+    if (!r.ok) githubSignInToast = get().toast({ text: r.err ?? "The sign-in to GitHub didn't finish", icon: "alert", durationMs: 10_000 });
+  },
   sidebarOpen: false,
   showShortcuts: false,
   renaming: null,
@@ -231,6 +245,15 @@ export const useStore = create<State>((set, get) => ({
       refreshTimer = window.setTimeout(() => void get().refresh(ids), 60);
     });
     api.on("sync-status", (s) => set({ sync: s }));
+    // The network comes and goes between the sync's looks; Send follows it at once.
+    const networkChanged = () => {
+      const read = () => void api.sync.status().then((s) => set({ sync: s }));
+      read();
+      setTimeout(read, 2000); // the main process can see it a moment after this window does
+      if (navigator.onLine && !get().sync?.paused) void api.sync.now();
+    };
+    window.addEventListener("online", networkChanged);
+    window.addEventListener("offline", networkChanged);
     api.on("usage", (u) => set({ usage: u }));
     void api.chat.usage().then((u) => {
       if (u && (!get().usage || u.at > get().usage!.at)) set({ usage: u });

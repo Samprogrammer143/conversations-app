@@ -640,6 +640,40 @@
   align-items: center;
   gap: 6px;
   padding: 4px 8px 8px;
+  container-type: inline-size;
+}
+/* A narrow message box gives up words, never Send. */
+@container (max-width: 490px) {
+  .alert-switch > span {
+    display: none;
+  }
+}
+@container (max-width: 455px) {
+  .composer-controls .chip-label:not(.always) {
+    display: none;
+  }
+}
+@container (max-width: 370px) {
+  .composer-controls .chip-label,
+  .composer-controls .context,
+  .context-ring > span {
+    display: none;
+  }
+}
+.composer-controls .chip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.composer-controls .chip .icon,
+.composer-controls .send,
+.composer-controls .context,
+.composer-controls .context-ring {
+  flex: none;
+}
+.composer-controls .chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* Alert mode's switch: small, beside the context ring. */
 .alert-switch {

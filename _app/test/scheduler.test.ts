@@ -12,20 +12,32 @@ const engine = vi.hoisted(() => ({
   status: {} as Record<string, unknown>,
   /** Called while a pull-all runs (to close a chat in the middle of one). */
   duringPull: null as null | (() => void),
+  /** How the next look at GitHub fails. */
+  checkFails: null as null | Record<string, unknown>,
+  signInFails: false,
+  /** Holds a look at GitHub, with its answer already decided, until it resolves. */
+  checkGate: null as null | Promise<void>,
+  pushFails: null as null | Record<string, unknown>,
+  online: true,
 }));
 
-vi.mock("electron", () => ({ net: { isOnline: () => true } }));
+vi.mock("electron", () => ({ net: { isOnline: () => engine.online } }));
 vi.mock("../src/main/sync/engine-bridge", () => {
   const run = async (args: string[]) => {
     engine.calls.push(args);
     const json =
       args[0] === "check"
-        ? { ok: true, remoteHead: engine.remoteHead, changed: false }
+        ? (engine.checkFails ?? { ok: true, remoteHead: engine.remoteHead, changed: false })
         : args[0] === "status"
           ? { ok: true, setUp: true, machine: "Home PC", unpushedCommits: 0, sessions: {}, ...engine.status }
           : args[0] === "pull-all"
             ? (engine.duringPull?.(), engine.pullOk ? { ok: true, downloaded: [], updated: [] } : { ok: false, err: "offline" })
-            : { ok: true };
+            : args[0] === "signin" && engine.signInFails
+              ? { ok: false, err: "That GitHub account can't upload to this workspace's chats" }
+              : args[0] === "push-pending" && engine.pushFails
+                ? engine.pushFails
+                : { ok: true };
+    if (args[0] === "check" && engine.checkGate) await engine.checkGate;
     return { ok: json.ok !== false, code: 0, json, stderr: "", ms: 1 };
   };
   return { detectEngineVersion: async () => 3, runEngine: run, runEngineSerial: run };
@@ -56,6 +68,10 @@ beforeEach(() => {
   engine.calls = [];
   engine.duringPull = null;
   engine.pullOk = true;
+  engine.checkFails = null;
+  engine.signInFails = false;
+  engine.checkGate = null;
+  engine.online = true;
 });
 
 describe("N16: a chat the app closes is brought up to date", () => {
@@ -95,6 +111,124 @@ describe("N16: a chat the app closes is brought up to date", () => {
     await scheduler.tick();
     expect(pulls().length).toBe(1);
     scheduler.stop();
+  });
+});
+
+describe("when GitHub can't be used", () => {
+  it("a refused login is a sign-in problem, at once, and doesn't say offline", async () => {
+    engine.checkFails = { ok: false, code: "auth", err: "could not read Password" };
+    await scheduler.syncNow();
+    scheduler.stop();
+    const s = scheduler.status();
+    expect(s).toMatchObject({ phase: "signin", noNetwork: false, headline: "Sign in to GitHub" });
+    expect(`${s.headline} ${s.detail}`).not.toMatch(/offline/i);
+  });
+  it("GitHub not answering isn't called being offline while the PC has a network", async () => {
+    engine.checkFails = { ok: false, offline: true, err: "Could not resolve host" };
+    await scheduler.syncNow();
+    scheduler.stop();
+    expect(scheduler.status()).toMatchObject({ phase: "offline", noNetwork: false, headline: "Can't reach GitHub" });
+  });
+  it("no network at all is offline", async () => {
+    engine.online = false;
+    await scheduler.syncNow();
+    scheduler.stop();
+    expect(scheduler.status()).toMatchObject({ phase: "offline", noNetwork: true, headline: "Offline" });
+  });
+  it("it comes back by itself once GitHub lets it in", async () => {
+    engine.checkFails = { ok: false, code: "auth" };
+    await scheduler.syncNow();
+    engine.checkFails = null;
+    await scheduler.syncNow();
+    scheduler.stop();
+    expect(scheduler.status().phase).toBe("idle");
+  });
+  it("a problem stays on screen while it is looked at again", async () => {
+    for (const fails of [{ ok: false, code: "auth" }, { ok: false, offline: true }]) {
+      engine.checkFails = fails;
+      await scheduler.syncNow();
+      const seen: string[] = [];
+      const see = (s: { phase: string }) => seen.push(s.phase);
+      scheduler.on("status", see);
+      await scheduler.syncNow();
+      scheduler.off("status", see);
+      expect(seen).not.toContain("checking");
+    }
+    engine.checkFails = null;
+    await scheduler.syncNow();
+    scheduler.stop();
+  });
+  it("an upload GitHub refuses is a sign-in problem, not 'up to date'", async () => {
+    engine.status = { unpushedCommits: 1 };
+    engine.pushFails = { ok: false, code: "auth", err: "403" };
+    await scheduler.syncNow();
+    scheduler.stop();
+    engine.status = {};
+    engine.pushFails = null;
+    expect(scheduler.status().phase).toBe("signin");
+  });
+  it("a sign-in that doesn't finish says so and changes nothing", async () => {
+    engine.checkFails = { ok: false, code: "auth" };
+    engine.signInFails = true;
+    await scheduler.syncNow();
+    const r = await scheduler.signIn();
+    scheduler.stop();
+    expect(r).toEqual({ ok: false, err: "That GitHub account can't upload to this workspace's chats" });
+    expect(scheduler.status().phase).toBe("signin");
+  });
+  it("signing in from the app asks the engine, then looks again", async () => {
+    engine.checkFails = { ok: false, code: "auth" };
+    await scheduler.syncNow();
+    engine.checkFails = null;
+    expect(await scheduler.signIn()).toEqual({ ok: true });
+    const signin = engine.calls.findIndex((c) => c[0] === "signin");
+    await new Promise((r) => setTimeout(r, 20));
+    scheduler.stop();
+    expect(signin).toBeGreaterThanOrEqual(0);
+    expect(engine.calls.slice(signin).some((c) => c[0] === "check")).toBe(true);
+    expect(scheduler.status().phase).toBe("idle");
+  });
+  it("signing in during a look: that look's out-of-date answer doesn't stay", async () => {
+    engine.checkFails = { ok: false, code: "auth" };
+    let open = () => {};
+    engine.checkGate = new Promise((r) => (open = r));
+    const look = scheduler.syncNow();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await scheduler.signIn()).toEqual({ ok: true });
+    engine.checkGate = null;
+    engine.checkFails = null;
+    open();
+    await look;
+    await new Promise((r) => setTimeout(r, 350));
+    scheduler.stop();
+    expect(scheduler.status().phase).toBe("idle");
+  });
+  it("GitHub letting it in again clears the banner at once, whatever comes next", async () => {
+    engine.checkFails = { ok: false, code: "auth" };
+    await scheduler.syncNow();
+    engine.checkFails = null;
+    let during = "";
+    engine.duringPull = () => (during = scheduler.status().phase);
+    await scheduler.syncNow();
+    scheduler.stop();
+    expect(during).toBe("downloading");
+    expect(scheduler.status().phase).toBe("idle");
+  });
+  it("uploads refused while reading works: the banner stays through each try", async () => {
+    engine.status = { unpushedCommits: 1 };
+    engine.pushFails = { ok: false, code: "auth" };
+    await scheduler.syncNow();
+    const seen: string[] = [];
+    const see = (s: { phase: string }) => seen.push(s.phase);
+    scheduler.on("status", see);
+    await scheduler.syncNow();
+    scheduler.off("status", see);
+    scheduler.stop();
+    engine.status = {};
+    engine.pushFails = null;
+    expect(seen).not.toContain("uploading");
+    expect(seen).not.toContain("checking");
+    expect(scheduler.status().phase).toBe("signin");
   });
 });
 

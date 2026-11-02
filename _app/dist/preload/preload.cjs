@@ -44,6 +44,7 @@ var api = {
   sync: {
     status: () => invoke("sync:status"),
     now: () => invoke("sync:now"),
+    signIn: () => invoke("sync:signIn"),
     setPaused: (paused) => invoke("sync:setPaused", paused),
     openLog: () => invoke("sync:openLog"),
     setUploadQuiet: (seconds) => invoke("sync:setUploadQuiet", seconds)
