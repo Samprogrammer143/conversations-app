@@ -494,9 +494,9 @@ function writeLauncher(w) {
 }
 
 // src/main/main.ts
-import fs25 from "node:fs";
+import fs26 from "node:fs";
 import { execFile, spawn as spawn9 } from "node:child_process";
-import path24 from "node:path";
+import path26 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/main/alert.ts
@@ -2547,8 +2547,9 @@ async function newChatInCli(folder) {
 }
 
 // src/main/chat/manager.ts
+import path21 from "node:path";
 import { EventEmitter as EventEmitter5 } from "node:events";
-import fs21 from "node:fs";
+import fs22 from "node:fs";
 
 // src/main/chat/mcp.ts
 import os9 from "node:os";
@@ -2752,12 +2753,456 @@ function refresh(claudePath) {
 }
 
 // src/main/chat/session.ts
-import fs19 from "node:fs";
-import path18 from "node:path";
+import fs20 from "node:fs";
+import path19 from "node:path";
 import { EventEmitter as EventEmitter4 } from "node:events";
 
-// src/main/chat/destructive.ts
+// src/main/chat/agents.ts
+import fs19 from "node:fs";
 import path17 from "node:path";
+
+// src/main/index/parse.ts
+function splitLines(buf, startOffset = 0) {
+  const out = [];
+  let start = 0;
+  for (; ; ) {
+    const nl = buf.indexOf(10, start);
+    if (nl === -1) break;
+    if (nl > start) {
+      const text = buf.toString("utf8", start, nl).replace(/\r$/, "");
+      if (text.trim()) out.push({ text, offset: startOffset + start });
+    }
+    start = nl + 1;
+  }
+  return out;
+}
+function parseEntries(buf) {
+  const entries = [];
+  let i = 0;
+  for (const l of splitLines(buf)) {
+    let j;
+    try {
+      j = JSON.parse(l.text);
+    } catch {
+      continue;
+    }
+    if (!j || typeof j !== "object") continue;
+    j.line = i++;
+    j.offset = l.offset;
+    entries.push(j);
+  }
+  return entries;
+}
+function blocksOf(content) {
+  if (Array.isArray(content)) return content.filter((b) => b && typeof b === "object");
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  return [];
+}
+function textFromToolResult(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((b) => b && typeof b === "object" && b.type === "text" ? String(b.text ?? "") : "").filter(Boolean).join("\n");
+  }
+  return "";
+}
+var SERVER_LABELS = [
+  [/figma/i, "Figma"],
+  [/posthog/i, "PostHog"],
+  [/google-ads|googleads/i, "Google Ads"],
+  [/analytics/i, "Google Analytics"],
+  [/supabase/i, "Supabase"],
+  [/claude-in-chrome|chrome-devtools|chrome/i, "Chrome"],
+  [/linear/i, "Linear"],
+  [/gmail/i, "Gmail"],
+  [/slack/i, "Slack"],
+  [/todoist/i, "Todoist"],
+  [/brevo/i, "Brevo"],
+  [/calendar/i, "Google Calendar"],
+  [/drive/i, "Google Drive"],
+  [/claude_docs|claude-docs/i, "Claude Docs"]
+];
+function serverLabel(server) {
+  for (const [re, label] of SERVER_LABELS) if (re.test(server)) return label;
+  return server.replace(/^claude_ai_/, "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+var HIDDEN_TOOLS = /* @__PURE__ */ new Set(["ToolSearch"]);
+function baseName(p) {
+  const s = String(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  const parts = s.split("/");
+  return parts.length > 1 ? parts.slice(-2).join("/") : s;
+}
+function toolKind(name) {
+  if (name.startsWith("mcp__")) return "mcp";
+  switch (name) {
+    case "Read":
+    case "NotebookRead":
+      return "read";
+    case "Grep":
+    case "Glob":
+    case "LS":
+      return "search";
+    case "Edit":
+    case "MultiEdit":
+    case "NotebookEdit":
+      return "edit";
+    case "Write":
+      return "write";
+    case "Bash":
+    case "PowerShell":
+    case "BashOutput":
+    case "KillShell":
+    case "KillBash":
+    case "Monitor":
+      return "command";
+    case "WebFetch":
+    case "WebSearch":
+      return "web";
+    case "Agent":
+    case "Task":
+    case "SendMessage":
+    case "TaskStop":
+    case "TaskOutput":
+      return "agent";
+    case "TodoWrite":
+    case "TaskCreate":
+    case "TaskUpdate":
+    case "ExitPlanMode":
+    case "EnterPlanMode":
+      return "plan";
+    case "Skill":
+      return "skill";
+    case "AskUserQuestion":
+      return "question";
+    default:
+      return "other";
+  }
+}
+function describeCall(name, input) {
+  const str3 = (k) => typeof input[k] === "string" ? input[k] : "";
+  if (name.startsWith("mcp__")) {
+    const [, server = "", tool = ""] = name.split("__");
+    const label = serverLabel(server);
+    return { label, detail: tool.replace(/_/g, " "), server: label };
+  }
+  switch (name) {
+    case "Read":
+    case "Write":
+    case "Edit":
+    case "MultiEdit":
+    case "NotebookEdit":
+    case "NotebookRead":
+      return { label: baseName(str3("file_path") || str3("notebook_path")), detail: str3("file_path") || str3("notebook_path") || null };
+    case "Grep":
+      return { label: str3("pattern"), detail: [str3("pattern"), str3("path") && `in ${baseName(str3("path"))}`].filter(Boolean).join(" ") || null };
+    case "Glob":
+      return { label: str3("pattern"), detail: str3("pattern") || null };
+    case "Bash":
+    case "PowerShell":
+      return { label: str3("command").split("\n")[0], detail: str3("command") || null };
+    case "WebFetch":
+      return { label: str3("url").replace(/^https?:\/\//, "").split("/")[0], detail: str3("url") || null };
+    case "WebSearch":
+      return { label: str3("query"), detail: str3("query") || null };
+    case "Agent":
+    case "Task":
+      return { label: str3("description") || "an agent", detail: str3("description") || str3("prompt").slice(0, 200) || null };
+    case "Skill":
+      return { label: str3("skill"), detail: str3("skill") || null };
+    default:
+      return { label: name, detail: null };
+  }
+}
+
+// src/main/chat/agents.ts
+var KEEP_ENDED = 20;
+var HEAD_BYTES = 256 * 1024;
+var TAIL_BYTES = 8 * 1024 * 1024;
+var MAX_STEPS = 500;
+var CACHED_LOGS = 8;
+var HANDBACK = "SubagentHandback";
+var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+var firstLine = (s) => s.trim().split("\n")[0].trim();
+var str2 = (v) => typeof v === "string" ? v : "";
+var isAgentId = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(v);
+var isAgent = (m) => !m.ambient && !m.skip_transcript && m.subagent_type !== "main-session" && (m.task_type === "local_agent" || !m.task_type && !!m.subagent_type);
+var usageOf = (m) => m.usage && typeof m.usage === "object" ? m.usage : {};
+var WITHHELD = "Claude Code's safety check held this agent's report back, so it isn't shown.";
+function reportOf(m, status) {
+  if (m.handback === "withheld") return { text: WITHHELD, overrides: true };
+  const h = m.handback_report && typeof m.handback_report === "object" ? m.handback_report : null;
+  if (str2(h?.text)) return { text: [str2(h?.warning), str2(h?.text)].filter(Boolean).join("\n\n"), overrides: !!str2(h?.warning) || m.handback === "flagged" };
+  return status === "finished" && str2(m.summary) ? { text: str2(m.summary), overrides: false } : null;
+}
+var AgentTracker = class {
+  runs = /* @__PURE__ */ new Map();
+  /** What each agent handed back, for when its log can't be read (or must not be shown as it is). */
+  results = /* @__PURE__ */ new Map();
+  /** Agents started by an agent: they wait on that one, not on Claude's turn. */
+  nested = /* @__PURE__ */ new Set();
+  /** true: in the background; false: Claude waits for it (it ends with the turn); unknown: older Claude Code. */
+  background = /* @__PURE__ */ new Map();
+  /** One message from Claude Code; true when the agents changed. */
+  handle(m) {
+    const id = str2(m.task_id);
+    switch (m.subtype) {
+      case "task_started":
+        if (!id || !isAgent(m)) return false;
+        this.add(id, m);
+        if (typeof m.is_backgrounded === "boolean") this.background.set(id, m.is_backgrounded);
+        if (str2(m.parent_task_id) || typeof m.spawn_depth === "number" && m.spawn_depth > 1 || m.owned_by_subagent === true) this.nested.add(id);
+        return true;
+      case "task_progress": {
+        const r = this.runs.get(id);
+        if (!r || r.status !== "running") return false;
+        const steps = usageOf(m).tool_uses;
+        this.runs.set(id, { ...r, line: firstLine(str2(m.summary) || str2(m.description)) || r.line, steps: typeof steps === "number" ? steps : r.steps });
+        return true;
+      }
+      case "task_updated": {
+        const patch = m.patch && typeof m.patch === "object" ? m.patch : {};
+        if (patch.is_backgrounded === true && this.runs.has(id)) this.background.set(id, true);
+        const status = patch.status === "completed" ? "finished" : patch.status === "failed" ? "failed" : patch.status === "killed" ? "stopped" : null;
+        if (!status) return false;
+        return this.end(id, status, firstLine(str2(patch.error)) || null, typeof patch.end_time === "number" ? patch.end_time : Date.now());
+      }
+      case "task_notification": {
+        const r = this.runs.get(id);
+        if (!r) return false;
+        const status = m.status === "completed" ? "finished" : m.status === "failed" ? "failed" : "stopped";
+        const report = reportOf(m, status);
+        if (report) this.results.set(id, report);
+        const steps = usageOf(m).tool_uses;
+        const ended = this.end(id, status, status === "failed" ? firstLine(str2(m.summary)) || null : null, Date.now());
+        if (typeof steps === "number" && steps !== this.runs.get(id).steps) {
+          this.runs.set(id, { ...this.runs.get(id), steps });
+          return true;
+        }
+        return ended;
+      }
+      case "background_tasks_changed": {
+        const tasks = Array.isArray(m.tasks) ? m.tasks : [];
+        const live2 = new Set(tasks.map((t) => str2(t.task_id)));
+        let changed = false;
+        for (const t of tasks) {
+          const tid = str2(t.task_id);
+          if (!tid || !isAgent(t)) continue;
+          if (!this.runs.has(tid)) {
+            this.add(tid, t);
+            changed = true;
+          }
+          this.background.set(tid, true);
+        }
+        for (const r of [...this.runs.values()]) if (r.status === "running" && this.background.get(r.id) === true && !live2.has(r.id)) changed = this.end(r.id, "finished", null, Date.now()) || changed;
+        return changed;
+      }
+      default:
+        return false;
+    }
+  }
+  /** A turn has ended: an agent Claude was waiting for has ended with it. */
+  turnEnded() {
+    let changed = false;
+    for (const r of [...this.runs.values()]) if (r.status === "running" && this.background.get(r.id) === false && !this.nested.has(r.id)) changed = this.end(r.id, "finished", null, Date.now()) || changed;
+    return changed;
+  }
+  /** Claude Code has gone, and what it was running with it. */
+  stopAll() {
+    let changed = false;
+    for (const r of [...this.runs.values()]) if (r.status === "running") changed = this.end(r.id, "stopped", null, Date.now()) || changed;
+    return changed;
+  }
+  /** Claude Code doesn't know the agent any more: it isn't running, whatever was last heard. */
+  forceStop(id) {
+    const r = this.runs.get(id);
+    if (!r || r.status !== "running") return false;
+    return this.end(id, "stopped", null, Date.now());
+  }
+  /** The chat moved to a new conversation (/clear): what had ended belongs to the old one. */
+  dropEnded() {
+    let changed = false;
+    for (const r of [...this.runs.values()])
+      if (r.status !== "running") {
+        this.forget(r.id);
+        changed = true;
+      }
+    return changed;
+  }
+  forget(id) {
+    this.runs.delete(id);
+    this.results.delete(id);
+    this.background.delete(id);
+    this.nested.delete(id);
+  }
+  add(id, m) {
+    this.forget(id);
+    this.runs.set(id, { id, description: clip(firstLine(str2(m.description)) || "An agent", 120), type: str2(m.subagent_type) || null, status: "running", line: null, steps: 0, startedAt: Date.now(), endedAt: null });
+    const ended = [...this.runs.values()].filter((r) => r.status !== "running");
+    for (const r of ended.slice(0, Math.max(0, ended.length - KEEP_ENDED))) this.forget(r.id);
+  }
+  end(id, status, line, at) {
+    const r = this.runs.get(id);
+    if (!r) return false;
+    if (r.status !== "running") {
+      const next = { ...r, status, line: r.line ?? line };
+      if (next.status === r.status && next.line === r.line) return false;
+      this.runs.set(id, next);
+      return true;
+    }
+    this.runs.set(id, { ...r, status, line: status === "finished" ? null : line, endedAt: at });
+    return true;
+  }
+  list() {
+    return [...this.runs.values()];
+  }
+  get running() {
+    return [...this.runs.values()].filter((r) => r.status === "running").length;
+  }
+  result(id) {
+    return this.results.get(id) ?? null;
+  }
+};
+function verbsFor(name, kind, server) {
+  if (name === "WebFetch") return ["Read", "Reading"];
+  if (name === "WebSearch") return ["Search", "Searching"];
+  switch (kind) {
+    case "read":
+      return ["Read", "Reading"];
+    case "search":
+      return ["Search", "Searching"];
+    case "edit":
+      return ["Edit", "Editing"];
+    case "write":
+      return ["Write", "Writing"];
+    case "command":
+      return ["Ran", "Running"];
+    case "agent":
+      return ["Agent", "Agent"];
+    case "plan":
+      return ["Plan", "Planning"];
+    case "mcp":
+      return [server ?? name, server ?? name];
+    default:
+      return [name, name];
+  }
+}
+var newLog = () => ({ brief: null, started: false, report: null, handedBack: false, steps: [], total: 0, open: /* @__PURE__ */ new Map() });
+function apply(st, buf) {
+  for (const e of parseEntries(buf)) {
+    const at = e.timestamp ? Date.parse(e.timestamp) : NaN;
+    if (e.type === "user") {
+      const blocks = blocksOf(e.message?.content);
+      if (!st.started) {
+        st.started = true;
+        if (!blocks.some((b) => b.type === "tool_result")) st.brief = clip(blocks.map((b) => str2(b.text)).join("\n").trim(), 2e4) || null;
+      }
+      for (const b of blocks) {
+        if (b.type !== "tool_result") continue;
+        const o = st.open.get(str2(b.tool_use_id));
+        if (!o) continue;
+        st.open.delete(str2(b.tool_use_id));
+        o.step.pending = false;
+        o.step.error = b.is_error === true;
+        if (o.at !== null && !Number.isNaN(at)) o.step.seconds = Math.max(0, Math.round((at - o.at) / 1e3));
+        if (o.step.error && !o.step.what) o.step.what = clip(firstLine(textFromToolResult(b.content)), 240);
+      }
+    } else if (e.type === "assistant") {
+      st.started = true;
+      for (const b of blocksOf(e.message?.content)) {
+        if (b.type === "text" && str2(b.text).trim()) {
+          if (!st.handedBack) st.report = clip(str2(b.text), 2e5);
+          continue;
+        }
+        if (b.type !== "tool_use") continue;
+        const name = str2(b.name);
+        const input = b.input && typeof b.input === "object" ? b.input : {};
+        if (name === HANDBACK) {
+          st.report = clip(str2(input.message), 2e5) || st.report;
+          st.handedBack = true;
+          continue;
+        }
+        if (HIDDEN_TOOLS.has(name)) continue;
+        if (!st.handedBack) st.report = null;
+        const kind = toolKind(name);
+        const call = describeCall(name, input);
+        const [verb, verbNow] = verbsFor(name, kind, call.server);
+        const what = name === "WebFetch" ? str2(input.url).replace(/^https?:\/\//, "") : kind === "mcp" ? call.detail ?? "" : name === call.label ? "" : call.label;
+        const step = { id: str2(b.id) || `s${st.total}`, kind, verb, verbNow, what: clip(firstLine(what), 240), pending: true, error: false, seconds: null };
+        st.steps.push(step);
+        st.total++;
+        st.open.set(step.id, { step, at: Number.isNaN(at) ? null : at });
+        if (st.steps.length > MAX_STEPS) st.open.delete(st.steps.shift().id);
+      }
+    }
+  }
+}
+var snapshot = (st) => ({ brief: st.brief, report: st.report, total: st.total, steps: st.steps.map((s) => ({ ...s })) });
+function mergeAgentLogs(parts) {
+  if (!parts.length) return null;
+  const steps = parts.flatMap((p, i) => i < parts.length - 1 ? p.steps.map((s) => ({ ...s, pending: false })) : p.steps);
+  return { brief: parts.find((p) => p.brief)?.brief ?? null, report: [...parts].reverse().find((p) => p.report)?.report ?? null, total: parts.reduce((n, p) => n + p.total, 0), steps: steps.slice(-MAX_STEPS) };
+}
+var agentLogFile = (transcript, agentId) => path17.join(path17.dirname(transcript), path17.basename(transcript, ".jsonl"), "subagents", `agent-${agentId}.jsonl`);
+var logs = /* @__PURE__ */ new Map();
+function applyLines(st, buf) {
+  const end = buf.lastIndexOf(10);
+  if (end < 0) return 0;
+  apply(st, buf.subarray(0, end + 1));
+  return end + 1;
+}
+var reading = /* @__PURE__ */ new Map();
+function readAgentLog(file4) {
+  const next = (reading.get(file4) ?? Promise.resolve()).then(() => readOnce(file4));
+  const settled = next.catch(() => null);
+  reading.set(file4, settled);
+  void settled.then(() => {
+    if (reading.get(file4) === settled) reading.delete(file4);
+  });
+  return next;
+}
+async function readOnce(file4) {
+  let size;
+  let mtimeMs;
+  try {
+    ({ size, mtimeMs } = await fs19.promises.stat(file4));
+  } catch {
+    logs.delete(file4);
+    return null;
+  }
+  let c = logs.get(file4);
+  if (c && c.size === size && c.mtimeMs === mtimeMs) return snapshot(c.state);
+  try {
+    const h = await fs19.promises.open(file4, "r");
+    try {
+      if (!c || size < c.offset) {
+        c = { size: 0, mtimeMs: 0, offset: 0, state: newLog() };
+        if (size > HEAD_BYTES + TAIL_BYTES) {
+          const head = Buffer.alloc(HEAD_BYTES);
+          const { bytesRead: bytesRead2 } = await h.read(head, 0, HEAD_BYTES, 0);
+          applyLines(c.state, head.subarray(0, bytesRead2));
+          for (const o of c.state.open.values()) o.step.pending = false;
+          c.state.open.clear();
+          c.offset = size - TAIL_BYTES;
+        }
+      }
+      const fresh = Buffer.alloc(size - c.offset);
+      const { bytesRead } = await h.read(fresh, 0, fresh.length, c.offset);
+      c.offset += applyLines(c.state, fresh.subarray(0, bytesRead));
+      c.size = size;
+      c.mtimeMs = mtimeMs;
+    } finally {
+      await h.close();
+    }
+  } catch {
+    return c ? snapshot(c.state) : null;
+  }
+  logs.delete(file4);
+  logs.set(file4, c);
+  for (const k of logs.keys()) if (logs.size > CACHED_LOGS) logs.delete(k);
+  return snapshot(c.state);
+}
+
+// src/main/chat/destructive.ts
+import path18 from "node:path";
 var SAFE = { destructive: false, deletesFiles: false, consequence: null };
 function serverName(tool) {
   const s = tool.split("__")[1] ?? tool;
@@ -2809,7 +3254,7 @@ function splitCommands(line) {
   endCommand();
   return out;
 }
-var commandName = (w) => path17.win32.basename(w).toLowerCase().replace(/\.(exe|cmd|bat|com|ps1)$/, "");
+var commandName = (w) => path18.win32.basename(w).toLowerCase().replace(/\.(exe|cmd|bat|com|ps1)$/, "");
 var PREFIXES = /* @__PURE__ */ new Set(["sudo", "time", "nohup", "exec", "command", "call", "start", "xargs", "env", "npx", "bunx", "pnpx", "!"]);
 var KEYWORDS = /* @__PURE__ */ new Set(["if", "then", "else", "elif", "do", "while", "until", "for", "foreach", "where-object", "foreach-object", "%", "?"]);
 var KNOWN = /* @__PURE__ */ new Set(["rm", "unlink", "shred", "rimraf", "del", "erase", "rd", "rmdir", "remove-item", "ri", "clear-content", "clc", "set-content", "out-file", "git", "find", "format", "format-volume", "dd", "robocopy", "reg", "powershell", "pwsh", "cmd", "bash", "sh", "zsh", "wsl", "iex", "invoke-expression"]);
@@ -2818,7 +3263,7 @@ var CLOUD_CLIS = { az: "Azure", aws: "AWS", gcloud: "Google Cloud", gsutil: "Goo
 var CLOUD_VERB = /^(delete|destroy|remove|rm|rb|purge|uninstall|wipe|drop|truncate)$|^(delete|remove|destroy)-|:(destroy|reset|delete|remove)$/;
 function shortTarget(t, cwd) {
   const clean = t.replace(/^["']|["']$/g, "").replace(/[\\/]+$/, "");
-  if (["", ".", "*", "./*", ".\\*", "*.*"].includes(clean)) return `everything in ${path17.win32.basename(cwd) || cwd}`;
+  if (["", ".", "*", "./*", ".\\*", "*.*"].includes(clean)) return `everything in ${path18.win32.basename(cwd) || cwd}`;
   const parts = clean.split(/[\\/]+/).filter(Boolean);
   const s = parts.length > 2 ? parts.slice(-2).join("/") : parts.join("/");
   return s.length > 56 ? `${s.slice(0, 26)}\u2026${s.slice(-26)}` : s;
@@ -2911,7 +3356,7 @@ function existsHere(target, ctx2) {
   const absolute = /^[a-z]:[\\/]/i.test(t) || t.startsWith("\\\\");
   if (!absolute && ctx2.movesAround) return true;
   try {
-    return ctx2.exists(absolute ? t : path17.win32.resolve(ctx2.cwd, t));
+    return ctx2.exists(absolute ? t : path18.win32.resolve(ctx2.cwd, t));
   } catch {
     return true;
   }
@@ -3327,7 +3772,7 @@ var MOVES = /* @__PURE__ */ new Set(["cd", "chdir", "pushd", "popd", "set-locati
 function classifyCommand(command, cwd, opts = {}) {
   const fx = newEffects();
   const commands = splitCommands(command);
-  const ctx2 = { cwd, folder: path17.win32.basename(cwd) || cwd, movesAround: commands.some((c) => MOVES.has(commandName(c[0] ?? ""))), exists: opts.exists };
+  const ctx2 = { cwd, folder: path18.win32.basename(cwd) || cwd, movesAround: commands.some((c) => MOVES.has(commandName(c[0] ?? ""))), exists: opts.exists };
   for (const words of commands) analyse(words, ctx2, fx, 0);
   if (commands.some((c) => c.some((w) => SQL_CLIENTS.has(commandName(w))))) sqlEffects(command, fx);
   const destructive = fx.deletes.length > 0 || fx.deletesUnnamed || fx.sentences.length > 0;
@@ -3439,14 +3884,14 @@ function systemPrompt(resuming) {
 }
 var SIGN_IN_WAIT_MS = 10 * 60 * 1e3;
 function readQuestions(input) {
-  const str2 = (v, max) => typeof v === "string" ? v.trim().slice(0, max) : "";
+  const str3 = (v, max) => typeof v === "string" ? v.trim().slice(0, max) : "";
   const list = Array.isArray(input.questions) ? input.questions : [];
   const out = [];
   for (const q of list.slice(0, 4)) {
     const question = typeof q?.question === "string" && q.question.trim() && q.question.length <= 8e3 ? q.question : "";
     if (!question || out.some((x) => x.question === question)) continue;
-    const options = (Array.isArray(q.options) ? q.options : []).slice(0, 8).map((o) => ({ label: str2(o?.label, 200), description: str2(o?.description, 600), preview: str2(o?.preview, 4e3) || null })).filter((o) => o.label);
-    out.push({ question, header: str2(q.header, 40), multiSelect: q.multiSelect === true, options });
+    const options = (Array.isArray(q.options) ? q.options : []).slice(0, 8).map((o) => ({ label: str3(o?.label, 200), description: str3(o?.description, 600), preview: str3(o?.preview, 4e3) || null })).filter((o) => o.label);
+    out.push({ question, header: str3(q.header, 40), multiSelect: q.multiSelect === true, options });
   }
   return out.length ? out : null;
 }
@@ -3497,6 +3942,9 @@ var ChatSession = class extends EventEmitter4 {
   turnDone = 0;
   msgTokens = 0;
   ended = false;
+  agentRuns = new AgentTracker();
+  /** Conversations this session was before (/clear moves it on): its agents' logs may be under them. */
+  pastIds = [];
   lastActivity = Date.now();
   /** When this session last wrote to its transcript (for the single-writer check). */
   lastWriteAt = 0;
@@ -3508,6 +3956,10 @@ var ChatSession = class extends EventEmitter4 {
   }
   get busy() {
     return ["starting", "thinking", "running-tool", "writing", "waiting-approval"].includes(this.status.state);
+  }
+  /** Agents still at work, which end with this session even when Claude itself is idle. */
+  get agentsRunning() {
+    return this.agentRuns.running > 0;
   }
   set(patch) {
     this.status = { ...this.status, ...patch, conversationId: this.id ?? "" };
@@ -3539,6 +3991,8 @@ var ChatSession = class extends EventEmitter4 {
         resume: this.opts.resume,
         settingSources: ["user", "project", "local"],
         includePartialMessages: true,
+        // A one-line status for each agent, for the agents bar.
+        agentProgressSummaries: true,
         pathToClaudeCodeExecutable: this.opts.claudePath,
         permissionMode: this.opts.permissionMode,
         model: this.opts.model ?? void 0,
@@ -3645,23 +4099,33 @@ var ChatSession = class extends EventEmitter4 {
     this.followUps = [];
     for (const p of this.pending.values()) p.resolve({ behavior: "deny", message: "The session ended." });
     this.pending.clear();
+    this.agentRuns.stopAll();
+    const agents = this.agentRuns.list();
     if (err) {
       log("chat", `session ${this.id} ended with an error: ${err.message}`);
-      this.set({ state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { ...errorFor(err.message), title: isAuthError(err.message) ? "Claude Code's sign-in has expired" : "Claude Code stopped" } });
-    } else this.set({ state: this.status.state === "error" ? "error" : "idle", activity: null, permission: null, streamingText: "", queued: [] });
+      this.set({ agents, state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { ...errorFor(err.message), title: isAuthError(err.message) ? "Claude Code's sign-in has expired" : "Claude Code stopped" } });
+    } else this.set({ agents, state: this.status.state === "error" ? "error" : "idle", activity: null, permission: null, streamingText: "", queued: [] });
     this.emit("ended");
   }
   handle(m) {
     this.touch();
     switch (m.type) {
       case "system":
+        if (this.agentRuns.handle(m)) {
+          this.set({ agents: this.agentRuns.list() });
+          return;
+        }
         if (m.subtype === "init") {
           const isNew = !this.id;
           const before = this.id;
           this.id = m.session_id;
           this.set({ model: m.model, permissionMode: m.permissionMode });
           if (isNew) this.emit("created", this.id);
-          else if (before && before !== m.session_id) this.emit("rekeyed", before, m.session_id);
+          else if (before && before !== m.session_id) {
+            this.pastIds.push(before);
+            if (this.agentRuns.dropEnded()) this.set({ agents: this.agentRuns.list() });
+            this.emit("rekeyed", before, m.session_id);
+          }
         } else if (m.subtype === "commands_changed") {
           rememberCommands(this.cwd, toCommands(m.commands));
         } else if (m.subtype === "api_retry") {
@@ -3720,6 +4184,7 @@ var ChatSession = class extends EventEmitter4 {
         this.quietResults = Math.max(0, this.quietResults - this.mergeable);
         this.mergeable = 0;
         this.clearStream();
+        if (this.agentRuns.turnEnded()) this.set({ agents: this.agentRuns.list() });
         if (m.subtype === "success") this.set({ state: "idle", activity: null, streamingText: "" });
         else {
           const errors = "errors" in m && Array.isArray(m.errors) ? m.errors.join(" ") : "";
@@ -3755,7 +4220,7 @@ var ChatSession = class extends EventEmitter4 {
         conversationId: this.id ?? "",
         toolName,
         title: questions.length === 1 ? "Claude has a question" : `Claude has ${questions.length} questions`,
-        context: [`in ${path18.basename(this.cwd)}`, this.opts.machine].join("  \xB7  "),
+        context: [`in ${path19.basename(this.cwd)}`, this.opts.machine].join("  \xB7  "),
         body: questions[0].question.trim().slice(0, 1e3),
         consequence: null,
         destructive: false,
@@ -3771,9 +4236,9 @@ var ChatSession = class extends EventEmitter4 {
       });
     }
     const command = typeof input.command === "string" ? input.command : null;
-    const verdict = classifyTool(toolName, input, this.cwd, { exists: (p) => fs19.existsSync(p) });
+    const verdict = classifyTool(toolName, input, this.cwd, { exists: (p) => fs20.existsSync(p) });
     const destructive = verdict.destructive || !!o.defaultToNo;
-    const folder = path18.basename(this.cwd);
+    const folder = path19.basename(this.cwd);
     const shell3 = SHELLS[toolName];
     const file4 = String(input.file_path ?? input.notebook_path ?? input.path ?? "");
     let title = o.title || `Allow ${o.displayName ?? toolName}?`;
@@ -3899,6 +4364,25 @@ ${JSON.stringify(input, null, 2).slice(0, 1200)}`;
       this.set({ state: "idle", activity: null, streamingText: "", queued: this.followUps.map(followLabel) });
     } catch (e) {
       log("chat", `interrupt failed: ${e.message}`);
+    }
+  }
+  /** What an agent handed back, for when its log can't be read or mustn't be shown as it is. */
+  agentResult(agentId) {
+    return this.agentRuns.result(agentId);
+  }
+  /** Stops one agent; Claude and the others carry on. */
+  async stopAgent(agentId) {
+    try {
+      await this.q?.stopTask(agentId);
+      return !!this.q;
+    } catch (e) {
+      const msg = e.message;
+      log("chat", `stopping an agent failed: ${msg}`);
+      if (/no (such )?task|not found|unknown task/i.test(msg) && this.agentRuns.forceStop(agentId)) {
+        this.set({ agents: this.agentRuns.list() });
+        return true;
+      }
+      return false;
     }
   }
   /** Waits (up to `ms`) until the command records handed over are in the transcript, before the session is closed. */
@@ -4036,15 +4520,15 @@ function plainError(msg) {
 
 // src/main/chat/shell.ts
 import crypto2 from "node:crypto";
-import fs20 from "node:fs";
+import fs21 from "node:fs";
 import os11 from "node:os";
-import path19 from "node:path";
+import path20 from "node:path";
 import { spawn as spawn7 } from "node:child_process";
 var MAX_OUTPUT = 3e4;
 var TIME_LIMIT_MS = 10 * 6e4;
 var exists = (p) => {
   try {
-    return !!p && fs20.statSync(p).isFile();
+    return !!p && fs21.statSync(p).isFile();
   } catch {
     return false;
   }
@@ -4056,18 +4540,18 @@ function findShell(env = process.env, platform = process.platform) {
   }
   const candidates = [];
   if (env.CLAUDE_CODE_GIT_BASH_PATH) candidates.push(env.CLAUDE_CODE_GIT_BASH_PATH);
-  for (const dir of (env.PATH ?? env.Path ?? "").split(path19.delimiter)) {
+  for (const dir of (env.PATH ?? env.Path ?? "").split(path20.delimiter)) {
     if (!dir) continue;
-    if (exists(path19.join(dir, "git.exe"))) {
-      candidates.push(path19.join(dir, "..", "bin", "bash.exe"), path19.join(dir, "bash.exe"));
+    if (exists(path20.join(dir, "git.exe"))) {
+      candidates.push(path20.join(dir, "..", "bin", "bash.exe"), path20.join(dir, "bash.exe"));
     }
   }
-  for (const root of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && path19.join(env.LOCALAPPDATA, "Programs")]) {
-    if (root) candidates.push(path19.join(root, "Git", "bin", "bash.exe"));
+  for (const root of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && path20.join(env.LOCALAPPDATA, "Programs")]) {
+    if (root) candidates.push(path20.join(root, "Git", "bin", "bash.exe"));
   }
-  const bash = candidates.map((c) => path19.resolve(c)).find(exists);
+  const bash = candidates.map((c) => path20.resolve(c)).find(exists);
   if (bash) return { file: bash, args: (c) => ["-c", c], name: "bash" };
-  const ps = path19.join(env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const ps = path20.join(env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   if (exists(ps)) return { file: ps, args: (c) => ["-NoProfile", "-NonInteractive", "-Command", c], name: "powershell" };
   return null;
 }
@@ -4143,7 +4627,7 @@ async function killTree2(child, bashGroup) {
   }
   let msysPid = "";
   try {
-    msysPid = bashGroup ? fs20.readFileSync(bashGroup.pidFile, "utf8").trim() : "";
+    msysPid = bashGroup ? fs21.readFileSync(bashGroup.pidFile, "utf8").trim() : "";
   } catch {
   }
   if (bashGroup && /^\d+$/.test(msysPid)) {
@@ -4162,7 +4646,7 @@ function runShell(command, cwd, opts = {}) {
   env.CHERE_INVOKING = "1";
   let stopped = null;
   let child;
-  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path19.join(os11.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
+  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path20.join(os11.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
   let args = shell3.args(command);
   if (bashGroup) {
     env.CONVERSATIONS_SHELL_COMMAND = command;
@@ -4194,7 +4678,7 @@ function runShell(command, cwd, opts = {}) {
       if (settledFlag) return;
       settledFlag = true;
       clearTimeout(timer);
-      if (bashGroup) setTimeout(() => fs20.rm(bashGroup.pidFile, { force: true }, () => {
+      if (bashGroup) setTimeout(() => fs21.rm(bashGroup.pidFile, { force: true }, () => {
       }), 1e4).unref?.();
       const errText = err.text();
       resolve({ stdout: out.text(), stderr: extraErr ? `${errText}${errText && !errText.endsWith("\n") ? "\n" : ""}${extraErr}` : errText, code, stopped });
@@ -4212,11 +4696,11 @@ function runShell(command, cwd, opts = {}) {
 }
 function sweepPidFiles(dir = os11.tmpdir(), olderThanMs = 6e4) {
   try {
-    for (const name of fs20.readdirSync(dir)) {
+    for (const name of fs21.readdirSync(dir)) {
       if (!/^conversations-shell-\d+-[0-9a-f-]{36}\.pid$/.test(name)) continue;
-      const f = path19.join(dir, name);
+      const f = path20.join(dir, name);
       try {
-        if (Date.now() - fs20.statSync(f).mtimeMs > olderThanMs) fs20.rmSync(f, { force: true });
+        if (Date.now() - fs21.statSync(f).mtimeMs > olderThanMs) fs21.rmSync(f, { force: true });
       } catch {
       }
     }
@@ -4230,6 +4714,7 @@ var STILL_STARTING = "Claude Code is still starting for this conversation. Send 
 var STOPPED_BEFORE_START = "Stopped before Claude Code started.";
 var LIVE_MS2 = 2 * 60 * 1e3;
 var IDLE_CLOSE_MS = 15 * 60 * 1e3;
+var AGENT_SILENCE_MS = 2 * 60 * 60 * 1e3;
 var UNUSED_CLOSE_MS = 2 * 60 * 1e3;
 var NEW_CHAT_STARTING = "A new chat is already starting in this folder. Send it again in a moment.";
 var SHELL_BUSY = "A command is already running in this conversation. Stop it or wait for it to finish.";
@@ -4246,7 +4731,9 @@ var ChatManager = class extends EventEmitter5 {
     this.deps = deps;
     this.reaper = setInterval(() => {
       for (const [id, s] of this.sessions) {
-        if (!s.busy && Date.now() - s.lastActivity > (s.used === false ? UNUSED_CLOSE_MS : IDLE_CLOSE_MS)) {
+        const quiet = Date.now() - s.lastActivity;
+        if (!s.busy && (!s.agentsRunning || quiet > AGENT_SILENCE_MS) && quiet > (s.used === false ? UNUSED_CLOSE_MS : IDLE_CLOSE_MS)) {
+          if (s.agentsRunning) log("chat", `closing ${id}: its agents have been silent for ${Math.round(quiet / 6e4)} min`);
           s.close();
           this.sessions.delete(id);
         }
@@ -4266,6 +4753,11 @@ var ChatManager = class extends EventEmitter5 {
    */
   drafts = /* @__PURE__ */ new Map();
   draftSeq = 0;
+  /**
+   * Sessions that have ended, for a while: their agents stay on screen, and what Claude Code
+   * said of their reports (held back, or with a warning) and where their logs went still count.
+   */
+  closed = /* @__PURE__ */ new Map();
   /** When the app last wrote each conversation, kept after its session ends. */
   lastWrites = /* @__PURE__ */ new Map();
   /** /mcp looks in progress, by folder. */
@@ -4273,6 +4765,16 @@ var ChatManager = class extends EventEmitter5 {
   /** "!" commands running now, by conversation id (or a new chat's draft key). */
   shells = /* @__PURE__ */ new Map();
   reaper;
+  /** Agents still at work in this chat (even with Claude itself idle). */
+  agentsRunning(id) {
+    return !!this.sessions.get(id)?.agentsRunning;
+  }
+  /** Chats something would be lost in if their Claude Code stopped now: running, or with agents at work. */
+  workingIds() {
+    const ids = this.runningIds();
+    for (const [id, s] of this.sessions) if (s.alive && s.agentsRunning) ids.add(id);
+    return ids;
+  }
   isRunning(id) {
     if (this.starting.has(id) || this.shells.has(id)) return true;
     const s = this.sessions.get(id) ?? this.drafts.get(id)?.session;
@@ -4476,7 +4978,7 @@ var ChatManager = class extends EventEmitter5 {
     const p = this.deps.localTranscript(id);
     if (!p) return false;
     try {
-      const mtime = fs21.statSync(p).mtimeMs;
+      const mtime = fs22.statSync(p).mtimeMs;
       const ours = this.sessions.get(id)?.lastWriteAt ?? 0;
       return Date.now() - mtime < LIVE_MS2 && mtime > ours + 3e3;
     } catch {
@@ -4618,6 +5120,11 @@ var ChatManager = class extends EventEmitter5 {
     });
     s.on("ended", () => {
       if (s.id) this.lastWrites.set(s.id, Math.max(s.lastWriteAt, Date.now()));
+      if (s.id) {
+        this.closed.delete(s.id);
+        this.closed.set(s.id, s);
+        for (const k of this.closed.keys()) if (this.closed.size > 20) this.closed.delete(k);
+      }
       if (s.id && this.sessions.get(s.id) === s && s.status.state !== "error") this.sessions.delete(s.id);
       this.emit("changed");
       if (s.id) this.emit("closed", s.id);
@@ -4673,7 +5180,29 @@ var ChatManager = class extends EventEmitter5 {
   }
   /** Ends every session that isn't working on something (after a sign-in: they start again with it). */
   async releaseIdle() {
-    for (const id of [...this.sessions.keys()]) if (!this.isRunning(id)) await this.release(id, { onlyIdle: true });
+    for (const [id, s] of [...this.sessions]) if (!this.isRunning(id) && !s.agentsRunning) await this.release(id, { onlyIdle: true });
+  }
+  /** What one of a chat's agents was asked, has done and found. */
+  async agentDetail(id, agentId) {
+    const s = this.sessions.get(id) ?? this.closed.get(id);
+    const parts = [];
+    for (const x of [...s?.pastIds ?? [], id]) {
+      for (const t of [this.deps.localTranscript(x), s ? path21.join(projectsDir(), encodeCwd(s.cwd), `${x}.jsonl`) : null]) {
+        const d2 = t ? await readAgentLog(agentLogFile(t, agentId)) : null;
+        if (d2) {
+          parts.push(d2);
+          break;
+        }
+      }
+    }
+    const said = s?.agentResult?.(agentId) ?? null;
+    const d = mergeAgentLogs(parts);
+    const report = said?.overrides ? said.text : d?.report ?? said?.text ?? null;
+    if (d) return { ...d, report };
+    return s ? { brief: null, steps: [], total: 0, report } : null;
+  }
+  async stopAgent(id, agentId) {
+    return await this.sessions.get(id)?.stopAgent?.(agentId) ?? false;
   }
   respond(requestId, decision) {
     for (const s of this.sessions.values()) if (s.respond(requestId, decision)) return true;
@@ -4726,10 +5255,10 @@ var ChatManager = class extends EventEmitter5 {
 };
 
 // src/main/chat/usage.ts
-import fs22 from "node:fs";
+import fs23 from "node:fs";
 import os12 from "node:os";
-import path20 from "node:path";
-var file3 = () => path20.join(appDataDir(), "usage.json");
+import path22 from "node:path";
+var file3 = () => path22.join(appDataDir(), "usage.json");
 var clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
 function meter(key, label, w) {
   if (!w || typeof w.utilization !== "number" || !Number.isFinite(w.utilization)) return null;
@@ -4759,7 +5288,7 @@ var lastAskAt = 0;
 function lastUsage() {
   if (last === void 0) {
     try {
-      const saved = JSON.parse(fs22.readFileSync(file3(), "utf8"));
+      const saved = JSON.parse(fs23.readFileSync(file3(), "utf8"));
       last = saved && Array.isArray(saved.meters) && typeof saved.at === "number" ? saved : null;
     } catch {
       last = null;
@@ -4798,8 +5327,8 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
       if (words(next) !== words(lastUsage())) log("chat", `usage: ${words(next)}`);
       last = next;
       try {
-        if (next) fs22.writeFileSync(file3(), JSON.stringify(next));
-        else fs22.rmSync(file3(), { force: true });
+        if (next) fs23.writeFileSync(file3(), JSON.stringify(next));
+        else fs23.rmSync(file3(), { force: true });
       } catch {
       }
       return next;
@@ -4817,8 +5346,8 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
 }
 
 // src/main/composer-state.ts
-import fs23 from "node:fs";
-import path21 from "node:path";
+import fs24 from "node:fs";
+import path23 from "node:path";
 var MAX_KEYS = 400;
 var MAX_DRAFT = 1e5;
 var RESERVED = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
@@ -4842,7 +5371,7 @@ function put(map, key, value) {
   return next;
 }
 var ComposerStore = class {
-  constructor(file4 = path21.join(appDataDir(), "composer.json")) {
+  constructor(file4 = path23.join(appDataDir(), "composer.json")) {
     this.file = file4;
   }
   file;
@@ -4853,7 +5382,7 @@ var ComposerStore = class {
     if (!this.loaded) {
       this.loaded = true;
       try {
-        const raw = JSON.parse(fs23.readFileSync(this.file, "utf8"));
+        const raw = JSON.parse(fs24.readFileSync(this.file, "utf8"));
         let drafts = {};
         let prefs = {};
         for (const [k, v] of Object.entries(raw.drafts ?? {})) if (isComposerKey(k) && typeof v === "string" && v) drafts = put(drafts, k, v.slice(0, MAX_DRAFT));
@@ -4901,13 +5430,13 @@ var ComposerStore = class {
     if (!this.loaded) return;
     const tmp = `${this.file}.${process.pid}.tmp`;
     try {
-      fs23.mkdirSync(path21.dirname(this.file), { recursive: true });
-      fs23.writeFileSync(tmp, JSON.stringify(this.state));
-      fs23.renameSync(tmp, this.file);
+      fs24.mkdirSync(path23.dirname(this.file), { recursive: true });
+      fs24.writeFileSync(tmp, JSON.stringify(this.state));
+      fs24.renameSync(tmp, this.file);
     } catch (e) {
       log("app", `could not save the composer's drafts: ${e.message}`);
       try {
-        fs23.rmSync(tmp, { force: true });
+        fs24.rmSync(tmp, { force: true });
       } catch {
       }
     }
@@ -4915,13 +5444,13 @@ var ComposerStore = class {
 };
 
 // src/main/chat/notify.ts
-import path22 from "node:path";
+import path24 from "node:path";
 import { app as app2, Notification } from "electron";
 var PROTOCOL = "conversations";
 var xmlEscape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function registerProtocol() {
   if (app2.isPackaged) app2.setAsDefaultProtocolClient(PROTOCOL);
-  else if (process.env.CONVERSATIONS_REGISTER_PROTOCOL === "1") app2.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path22.resolve(process.argv[1] ?? ".")]);
+  else if (process.env.CONVERSATIONS_REGISTER_PROTOCOL === "1") app2.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path24.resolve(process.argv[1] ?? ".")]);
 }
 function parseProtocolArgs(argv) {
   const url = argv.find((a) => a.startsWith(`${PROTOCOL}://`));
@@ -5020,8 +5549,8 @@ var StartupQueue = class {
 };
 
 // src/shell/stages.ts
-import fs24 from "node:fs";
-import path23 from "node:path";
+import fs25 from "node:fs";
+import path25 from "node:path";
 var RUNNING_MARK = "running.json";
 var processAlive2 = (pid) => {
   try {
@@ -5033,24 +5562,24 @@ var processAlive2 = (pid) => {
 };
 var ownMark = (pid) => `running-${pid}.json`;
 function writeRunningMark(root, stage, pid = process.pid) {
-  fs24.mkdirSync(root, { recursive: true });
+  fs25.mkdirSync(root, { recursive: true });
   const body = JSON.stringify({ pid, stage, at: (/* @__PURE__ */ new Date()).toISOString() });
   for (const name of [ownMark(pid), RUNNING_MARK]) {
-    const tmp = path23.join(root, `${name}.${pid}.tmp`);
-    fs24.writeFileSync(tmp, body);
-    fs24.renameSync(tmp, path23.join(root, name));
+    const tmp = path25.join(root, `${name}.${pid}.tmp`);
+    fs25.writeFileSync(tmp, body);
+    fs25.renameSync(tmp, path25.join(root, name));
   }
 }
 var markerNames = (root) => {
   try {
-    return fs24.readdirSync(root).filter((f) => f === RUNNING_MARK || /^running-\d+\.json$/.test(f));
+    return fs25.readdirSync(root).filter((f) => f === RUNNING_MARK || /^running-\d+\.json$/.test(f));
   } catch {
     return [];
   }
 };
 var readMarker = (root, f) => {
   try {
-    const m = JSON.parse(fs24.readFileSync(path23.join(root, f), "utf8"));
+    const m = JSON.parse(fs25.readFileSync(path25.join(root, f), "utf8"));
     return typeof m?.pid === "number" && typeof m?.stage === "string" ? m : null;
   } catch {
     return null;
@@ -5063,9 +5592,9 @@ function readRunningMarks(root, alive = processAlive2) {
 function stagesToRemove(root, inUse, alive = processAlive2, keepAlso = []) {
   let names;
   try {
-    names = fs24.readdirSync(root).filter((d) => {
+    names = fs25.readdirSync(root).filter((d) => {
       try {
-        return fs24.statSync(path23.join(root, d)).isDirectory();
+        return fs25.statSync(path25.join(root, d)).isDirectory();
       } catch {
         return false;
       }
@@ -5073,21 +5602,21 @@ function stagesToRemove(root, inUse, alive = processAlive2, keepAlso = []) {
   } catch {
     return [];
   }
-  const keep = /* @__PURE__ */ new Set([path23.basename(inUse)]);
-  for (const mark of readRunningMarks(root, alive)) keep.add(path23.basename(mark.stage));
-  for (const k of keepAlso) keep.add(path23.basename(k));
-  const older = names.filter((d) => !keep.has(d) && !d.endsWith(".tmp")).map((d) => ({ d, t: fs24.statSync(path23.join(root, d)).mtimeMs })).sort((a, b) => b.t - a.t);
-  return older.slice(1).map((o) => path23.join(root, o.d));
+  const keep = /* @__PURE__ */ new Set([path25.basename(inUse)]);
+  for (const mark of readRunningMarks(root, alive)) keep.add(path25.basename(mark.stage));
+  for (const k of keepAlso) keep.add(path25.basename(k));
+  const older = names.filter((d) => !keep.has(d) && !d.endsWith(".tmp")).map((d) => ({ d, t: fs25.statSync(path25.join(root, d)).mtimeMs })).sort((a, b) => b.t - a.t);
+  return older.slice(1).map((o) => path25.join(root, o.d));
 }
 function cleanStages(root, inUse, alive = processAlive2, keepAlso = []) {
   const gone = [];
   for (const f of markerNames(root)) {
     const m = readMarker(root, f);
-    if (f !== RUNNING_MARK && (!m || !alive(m.pid))) fs24.rmSync(path23.join(root, f), { force: true });
+    if (f !== RUNNING_MARK && (!m || !alive(m.pid))) fs25.rmSync(path25.join(root, f), { force: true });
   }
   for (const p of stagesToRemove(root, inUse, alive, keepAlso)) {
     try {
-      fs24.rmSync(p, { recursive: true, force: true });
+      fs25.rmSync(p, { recursive: true, force: true });
       gone.push(p);
     } catch {
     }
@@ -5273,22 +5802,22 @@ function lastLine(out) {
 // src/main/main.ts
 process.on("uncaughtException", (e) => log("app", `uncaught exception: ${e?.stack || e}`));
 process.on("unhandledRejection", (e) => log("app", `unhandled rejection: ${e?.stack || e}`));
-var HERE = path24.dirname(fileURLToPath(import.meta.url));
-var DIST = path24.resolve(HERE, "..");
+var HERE = path26.dirname(fileURLToPath(import.meta.url));
+var DIST = path26.resolve(HERE, "..");
 var files = {
-  preload: path24.join(DIST, "preload", "preload.cjs"),
-  page: process.env.CONVERSATIONS_DEV_URL || path24.join(DIST, "renderer", "index.html")
+  preload: path26.join(DIST, "preload", "preload.cjs"),
+  page: process.env.CONVERSATIONS_DEV_URL || path26.join(DIST, "renderer", "index.html")
 };
-var RESOURCES = app3.isPackaged ? process.resourcesPath : path24.resolve(DIST, "..", "resources");
-files.icon = path24.join(RESOURCES, "icon.ico");
+var RESOURCES = app3.isPackaged ? process.resourcesPath : path26.resolve(DIST, "..", "resources");
+files.icon = path26.join(RESOURCES, "icon.ico");
 var APP_VERSION = (() => {
   try {
-    return JSON.parse(fs25.readFileSync(path24.join(DIST, "app.json"), "utf8")).version || app3.getVersion();
+    return JSON.parse(fs26.readFileSync(path26.join(DIST, "app.json"), "utf8")).version || app3.getVersion();
   } catch {
     return app3.getVersion();
   }
 })();
-if (process.env.CONVERSATIONS_DATA_DIR) app3.setPath("userData", path24.join(process.env.CONVERSATIONS_DATA_DIR, "electron"));
+if (process.env.CONVERSATIONS_DATA_DIR) app3.setPath("userData", path26.join(process.env.CONVERSATIONS_DATA_DIR, "electron"));
 if (!app3.requestSingleInstanceLock()) {
   app3.quit();
   process.exit(0);
@@ -5321,7 +5850,7 @@ function recordedCwdOnThisPc(id) {
   if (!index.ready) return null;
   const cwd = index.db.prepare("SELECT cwd FROM conversations WHERE id = ?").get(id)?.cwd ?? null;
   try {
-    return cwd && fs25.statSync(cwd).isDirectory() ? cwd : null;
+    return cwd && fs26.statSync(cwd).isDirectory() ? cwd : null;
   } catch {
     return null;
   }
@@ -5356,13 +5885,13 @@ var chat = new ChatManager({
   syncBeforeResume: prepareResume,
   terminalHas: (id) => isOpenInTerminal(id)
 });
-var ownedFile = () => path24.join(appDataDir(), "app-owned.json");
+var ownedFile = () => path26.join(appDataDir(), "app-owned.json");
 var ownedMarked = null;
 var ownedMarking = /* @__PURE__ */ new Set();
 async function markAppOwned(id) {
   if (!ownedMarked) {
     try {
-      const v = JSON.parse(fs25.readFileSync(ownedFile(), "utf8"));
+      const v = JSON.parse(fs26.readFileSync(ownedFile(), "utf8"));
       ownedMarked = new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
     } catch {
       ownedMarked = /* @__PURE__ */ new Set();
@@ -5376,8 +5905,8 @@ async function markAppOwned(id) {
     if (r.ok && !r.json?.nothing) {
       ownedMarked.add(id);
       const tmp = `${ownedFile()}.${process.pid}.tmp`;
-      fs25.writeFileSync(tmp, JSON.stringify([...ownedMarked]));
-      fs25.renameSync(tmp, ownedFile());
+      fs26.writeFileSync(tmp, JSON.stringify([...ownedMarked]));
+      fs26.renameSync(tmp, ownedFile());
     } else log("chat", `couldn't mark ${id.slice(0, 8)} as an app conversation: ${r.json?.nothing ? "the sync engine doesn't know the field yet" : r.stderr.split("\n")[0]}`);
   } catch (e) {
     log("chat", `marking ${id.slice(0, 8)} failed: ${e.message}`);
@@ -5412,7 +5941,7 @@ function inferredFolders() {
     for (const r of rows) {
       if (map[r.p]) continue;
       try {
-        if (fs25.statSync(r.cwd).isDirectory()) map[r.p] = r.cwd;
+        if (fs26.statSync(r.cwd).isDirectory()) map[r.p] = r.cwd;
       } catch {
       }
     }
@@ -5498,8 +6027,8 @@ function makeMain(show) {
   return w;
 }
 function appIcon(name) {
-  const p = path24.join(RESOURCES, name);
-  return fs25.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
+  const p = path26.join(RESOURCES, name);
+  return fs26.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
 }
 function toggleFlyout() {
   if (!tray) return;
@@ -5580,7 +6109,7 @@ async function retrySdk() {
 function checkForUpdate() {
   refreshAppRepo();
   void retrySdk();
-  const source = fs25.existsSync(path24.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
+  const source = fs26.existsSync(path26.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
   return new Promise(
     (done) => execFile("git", ["-C", source, "show", "HEAD:_app/dist/app.json"], { windowsHide: true, timeout: 2e4 }, (err, stdout) => {
       done();
@@ -5638,7 +6167,7 @@ function quit() {
 var loginChoiceFile = () => sharedDataFile("start-at-login.json");
 function sharedStartAtLogin() {
   try {
-    const v = JSON.parse(fs25.readFileSync(loginChoiceFile(), "utf8"))?.on;
+    const v = JSON.parse(fs26.readFileSync(loginChoiceFile(), "utf8"))?.on;
     return typeof v === "boolean" ? v : null;
   } catch {
     return null;
@@ -5648,8 +6177,8 @@ function saveStartAtLogin(on) {
   try {
     const f = loginChoiceFile();
     const tmp = `${f}.${process.pid}.tmp`;
-    fs25.writeFileSync(tmp, JSON.stringify({ on }));
-    fs25.renameSync(tmp, f);
+    fs26.writeFileSync(tmp, JSON.stringify({ on }));
+    fs26.renameSync(tmp, f);
   } catch (e) {
     log("app", `could not keep the start-at-login choice: ${e.message}`);
   }
@@ -5691,6 +6220,7 @@ async function applyEdit(id, field, value) {
   let releasedAt = 0;
   if (field === "deleted" && value === true) {
     if (chat.isRunning(id)) return { ok: false, err: "Claude is still working in this conversation. Stop it first, then delete it." };
+    if (chat.agentsRunning(id)) return { ok: false, err: "Claude's agents are still working in this conversation. Stop them first, then delete it." };
     if (await chat.openInTerminal(id)) return { ok: false, err: "This conversation is open in a terminal on this PC. Close it there first, then delete it." };
     if (chat.isOpenInApp(id)) await chat.release(id);
     releasedAt = Date.now();
@@ -5721,7 +6251,7 @@ function handle(channel, fn) {
 var BAD_ID = "That conversation id isn't valid";
 function isUsableFolder(p) {
   try {
-    return path24.isAbsolute(p) && fs25.statSync(p).isDirectory();
+    return path26.isAbsolute(p) && fs26.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -5748,7 +6278,7 @@ function registerIpc() {
   handle("app:openExternal", (url) => typeof url === "string" && /^https?:\/\//.test(url) ? shell2.openExternal(url) : void 0);
   handle("app:openPath", (p) => {
     try {
-      if (typeof p === "string" && path24.isAbsolute(p) && fs25.statSync(p).isDirectory()) return shell2.openPath(p);
+      if (typeof p === "string" && path26.isAbsolute(p) && fs26.statSync(p).isDirectory()) return shell2.openPath(p);
     } catch {
     }
     return "Only folders can be opened";
@@ -5775,7 +6305,7 @@ function registerIpc() {
     if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: "That workspace is disconnected on this PC: reconnect it first" };
     if (id === currentWorkspace().id) return { ok: true };
     if (openElsewhere(id)) return { ok: openWorkspaceWindow(id), elsewhere: true };
-    const running = chat.runningIds().size;
+    const running = chat.workingIds().size;
     if (running && force !== true) return { ok: false, running };
     log("app", `switching to workspace ${id}`);
     closeMark();
@@ -5843,7 +6373,7 @@ function registerIpc() {
     const forWindow = workspacesForWindow().workspaces;
     const next = all.find((w) => w.id !== id && !w.disconnected && forWindow.some((f) => f.id === w.id && f.setUp));
     if (!next) return { ok: false, err: "Add another workspace first: Conversations needs one to show" };
-    if (id === "main" && !fs25.existsSync(path24.join(appRepoDir(), ".git"))) return { ok: false, err: "This PC still gets the app's updates through this workspace: it can be disconnected after its next update" };
+    if (id === "main" && !fs26.existsSync(path26.join(appRepoDir(), ".git"))) return { ok: false, err: "This PC still gets the app's updates through this workspace: it can be disconnected after its next update" };
     if (id !== currentWorkspace().id) {
       if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first: right-click its tray icon, then Quit ${target.name}.` };
       setDisconnected(id, true);
@@ -5851,7 +6381,7 @@ function registerIpc() {
       broadcast("workspaces-changed", null);
       return { ok: true };
     }
-    const running = chat.runningIds().size;
+    const running = chat.workingIds().size;
     if (running && force !== true) return { ok: false, running };
     setDisconnected(id, true);
     closeMark();
@@ -5872,7 +6402,7 @@ function registerIpc() {
     log("app", `reconnected workspace ${id}`);
     broadcast("workspaces-changed", null);
     const w = listWorkspaces().workspaces.find((x) => x.id === id);
-    return { ok: true, synced: !!w && fs25.existsSync(path24.join(w.syncHome, "config.json")) };
+    return { ok: true, synced: !!w && fs26.existsSync(path26.join(w.syncHome, "config.json")) };
   });
   handle("workspace:rename", (id, name) => {
     if (!isWorkspaceId(id) || typeof name !== "string" || !name.trim()) return;
@@ -5896,14 +6426,14 @@ function registerIpc() {
     const images = [];
     const paths = [];
     for (const p of r.filePaths) {
-      const type = IMAGE_TYPES[path24.extname(p).toLowerCase()];
+      const type = IMAGE_TYPES[path26.extname(p).toLowerCase()];
       let size = 0;
       try {
-        size = fs25.statSync(p).size;
+        size = fs26.statSync(p).size;
       } catch {
         continue;
       }
-      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path24.basename(p), mediaType: type, data: fs25.readFileSync(p).toString("base64") });
+      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path26.basename(p), mediaType: type, data: fs26.readFileSync(p).toString("base64") });
       else paths.push(p);
     }
     return { images, paths };
@@ -5958,12 +6488,13 @@ function registerIpc() {
   handle("sync:now", () => scheduler.syncNow());
   handle("sync:signIn", () => scheduler.signIn());
   handle("sync:setPaused", (paused) => scheduler.setPaused(paused === true));
-  handle("sync:openLog", () => shell2.openPath(path24.join(syncDir(), "sync.log")));
+  handle("sync:openLog", () => shell2.openPath(path26.join(syncDir(), "sync.log")));
   handle("sync:setUploadQuiet", (seconds) => scheduler.setUploadQuiet(typeof seconds === "number" ? seconds : NaN));
   handle("cli:open", async (id) => {
     if (!isUuid(id)) return { ok: false, message: BAD_ID };
     const d = conversationDetail(index.db, id, ctx(), folders2());
     if (!d) return { ok: false, message: "That conversation isn't on this PC yet" };
+    if (chat.agentsRunning(id)) return { ok: false, message: "Claude's agents are still working in this chat. Stop them or let them finish, then open it in the CLI." };
     return openInCli({
       id,
       projectId: d.row.projectId,
@@ -5999,11 +6530,11 @@ function registerIpc() {
       const d = conversationDetail(index.db, id, ctx(), folders2());
       if (!d) return { ok: false, err: "That conversation isn't on this PC yet" };
       cwd = d.folder;
-      if (!cwd || !fs25.existsSync(cwd)) {
+      if (!cwd || !fs26.existsSync(cwd)) {
         const local3 = localTranscript(id);
         cwd = local3 ? folderForTranscript(local3, []) : null;
       }
-      if (!cwd || !fs25.existsSync(cwd)) {
+      if (!cwd || !fs26.existsSync(cwd)) {
         cwd = await chooseFolder(mainWin, d.row.projectLabel);
         if (!cwd) return { ok: false, err: "Chat needs a folder to work in on this PC" };
         pickedFolder = { id, folder: cwd, at: Date.now() };
@@ -6060,7 +6591,7 @@ function registerIpc() {
       const d = conversationDetail(index.db, id, ctx(), folders2());
       cwd = d?.folder ?? d?.row.cwd ?? null;
     } else if (isProjectId(projectId)) cwd = folders2()[projectId] ?? null;
-    if (!cwd || !fs25.existsSync(cwd)) cwd = app3.getPath("home");
+    if (!cwd || !fs26.existsSync(cwd)) cwd = app3.getPath("home");
     return { id, cwd };
   };
   handle("chat:commands", (rawId, projectId, folder) => {
@@ -6100,6 +6631,8 @@ function registerIpc() {
   });
   handle("chat:setPermissionMode", (id, mode) => isUuid(id) && isPermissionMode(mode) ? chat.setPermissionMode(id, mode) : void 0);
   handle("chat:status", (id) => isUuid(id) ? chat.status(id) : null);
+  handle("chat:agent", (id, agentId) => isUuid(id) && isAgentId(agentId) ? chat.agentDetail(id, agentId) : null);
+  handle("chat:stopAgent", (id, agentId) => isUuid(id) && isAgentId(agentId) ? chat.stopAgent(id, agentId) : false);
   handle("chat:models", () => chat.models());
   handle("composer:load", () => composer.get());
   handle("composer:save", (patch) => composer.save(patch));
@@ -6213,7 +6746,7 @@ function handleSecondInstance(argv) {
   if (argv.includes("--restart-for-update")) {
     void checkForUpdate().then(() => {
       const inUse = !!mainWin && !mainWin.isDestroyed() && mainWin.isFocused();
-      if (updateReady && !chat.runningIds().size && !signingIn() && !inUse) restart({ others: false });
+      if (updateReady && !chat.workingIds().size && !signingIn() && !inUse) restart({ others: false });
       else if (updateReady) log("app", `version ${updateReady} is ready; this window restarts for it when you choose`);
     });
     return;
@@ -6264,7 +6797,7 @@ void app3.whenReady().then(async () => {
   registerIpc();
   log("app", `starting ${APP_VERSION} on ${thisMachine()}; data in ${appDataDir()}`);
   try {
-    await index.start(path24.join(HERE, "index-worker.mjs"));
+    await index.start(path26.join(HERE, "index-worker.mjs"));
     index.watchLive(liveConversationIds);
   } catch (e) {
     log("index", `the index is not available: ${e.stack || e}`);
@@ -6294,7 +6827,7 @@ void app3.whenReady().then(async () => {
   setTimeout(checkForUpdate, 15e3).unref();
   setInterval(checkForUpdate, 2 * 6e4).unref();
   const mainHere = listWorkspaces().workspaces[0];
-  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs25.existsSync(path24.join(mainHere.syncHome, "config.json"))) {
+  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs26.existsSync(path26.join(mainHere.syncHome, "config.json"))) {
     const keepMainCurrent = () => {
       const open = openNow();
       if (open.includes("main") || open.some((id) => id < currentWorkspace().id)) return;
@@ -6388,7 +6921,7 @@ void app3.whenReady().then(async () => {
   }
   secondInstances.finish();
   powerMonitor.on("resume", () => markingOpen && markOpen(currentWorkspace().id));
-  fs25.watchFile(registryPath(), { interval: 2e3 }, () => {
+  fs26.watchFile(registryPath(), { interval: 2e3 }, () => {
     broadcast("workspaces-changed", null);
     refreshLabels();
   });

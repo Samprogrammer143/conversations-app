@@ -8,15 +8,19 @@
 // - Approvals while the window is closed: the request is pinned in the tray,
 //   the tray icon gets a badge, and one Windows notification is raised.
 
+import path from "node:path";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
-import type { Attachment, ChatStatus, McpActionResult, McpPanelData, McpServerInfo, PermissionRequest, SlashCommandInfo } from "../../shared/types";
+import type { AgentDetail, Attachment, ChatStatus, McpActionResult, McpPanelData, McpServerInfo, PermissionRequest, SlashCommandInfo } from "../../shared/types";
 import { probeMcp } from "./mcp";
 import { commandsFor, knownModels, type ModelChoice } from "./models";
 import type { Decision, EffortLevel, PermissionMode } from "../validate";
 import { ChatSession, type SessionOptions } from "./session";
 import { runShell, shellMessages, type RunningShell } from "./shell";
 import { log } from "../log";
+import { projectsDir } from "../paths";
+import { encodeCwd } from "../resume-folder";
+import { agentLogFile, mergeAgentLogs, readAgentLog, type AgentResult } from "./agents";
 
 export interface ChatManagerLike extends EventEmitter {
   isRunning(id: string): boolean;
@@ -54,6 +58,11 @@ export interface SessionLike extends EventEmitter {
   lastWriteAt: number;
   /** Something has been handed to it (a message or a command's record), not just started for /mcp. */
   readonly used?: boolean;
+  /** Agents still at work: they end with the session, so it isn't closed as idle. */
+  readonly agentsRunning?: boolean;
+  agentResult?(agentId: string): AgentResult | null;
+  readonly pastIds?: string[];
+  stopAgent?(agentId: string): Promise<boolean>;
   start(first: string, attachments?: Attachment[]): void;
   startShell?(record: [string, string]): void;
   startIdle?(): void;
@@ -107,6 +116,8 @@ export const STOPPED_BEFORE_START = "Stopped before Claude Code started.";
 
 const LIVE_MS = 2 * 60 * 1000;
 const IDLE_CLOSE_MS = 15 * 60 * 1000;
+/** Agents at work keep a session open, but not one Claude Code has said nothing in for this long: they're stuck. */
+const AGENT_SILENCE_MS = 2 * 60 * 60 * 1000;
 /**
  * A Claude Code started only for /mcp and never used closes sooner: while it is open,
  * sync leaves the conversation alone, so it should not hold it for long.
@@ -156,6 +167,11 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
    */
   private drafts = new Map<string, { session: SessionLike; cwd: string }>();
   private draftSeq = 0;
+  /**
+   * Sessions that have ended, for a while: their agents stay on screen, and what Claude Code
+   * said of their reports (held back, or with a warning) and where their logs went still count.
+   */
+  private closed = new Map<string, SessionLike>();
   /** When the app last wrote each conversation, kept after its session ends. */
   private lastWrites = new Map<string, number>();
   /** /mcp looks in progress, by folder. */
@@ -169,13 +185,27 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
     // Sessions that sit idle are closed; continuing later resumes them.
     this.reaper = setInterval(() => {
       for (const [id, s] of this.sessions) {
-        if (!s.busy && Date.now() - s.lastActivity > (s.used === false ? UNUSED_CLOSE_MS : IDLE_CLOSE_MS)) {
+        const quiet = Date.now() - s.lastActivity;
+        if (!s.busy && (!s.agentsRunning || quiet > AGENT_SILENCE_MS) && quiet > (s.used === false ? UNUSED_CLOSE_MS : IDLE_CLOSE_MS)) {
+          if (s.agentsRunning) log("chat", `closing ${id}: its agents have been silent for ${Math.round(quiet / 60_000)} min`);
           s.close();
           this.sessions.delete(id);
         }
       }
     }, 60_000);
     this.reaper.unref?.();
+  }
+
+  /** Agents still at work in this chat (even with Claude itself idle). */
+  agentsRunning(id: string) {
+    return !!this.sessions.get(id)?.agentsRunning;
+  }
+
+  /** Chats something would be lost in if their Claude Code stopped now: running, or with agents at work. */
+  workingIds() {
+    const ids = this.runningIds();
+    for (const [id, s] of this.sessions) if (s.alive && s.agentsRunning) ids.add(id);
+    return ids;
   }
 
   isRunning(id: string) {
@@ -580,6 +610,11 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
     });
     s.on("ended", () => {
       if (s.id) this.lastWrites.set(s.id, Math.max(s.lastWriteAt, Date.now()));
+      if (s.id) {
+        this.closed.delete(s.id);
+        this.closed.set(s.id, s);
+        for (const k of this.closed.keys()) if (this.closed.size > 20) this.closed.delete(k);
+      }
       if (s.id && this.sessions.get(s.id) === s && s.status.state !== "error") this.sessions.delete(s.id);
       this.emit("changed");
       // Sync left it alone while the app had it open: it can be brought up to date now.
@@ -644,8 +679,36 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
 
   /** Ends every session that isn't working on something (after a sign-in: they start again with it). */
   async releaseIdle() {
-    // Not one working on something: a turn, a start, a "!" command, a permission question.
-    for (const id of [...this.sessions.keys()]) if (!this.isRunning(id)) await this.release(id, { onlyIdle: true });
+    // Not one working on something: a turn, a start, a "!" command, a permission question, an agent.
+    for (const [id, s] of [...this.sessions]) if (!this.isRunning(id) && !s.agentsRunning) await this.release(id, { onlyIdle: true });
+  }
+
+  /** What one of a chat's agents was asked, has done and found. */
+  async agentDetail(id: string, agentId: string): Promise<AgentDetail | null> {
+    const s = this.sessions.get(id) ?? this.closed.get(id);
+    // Where the index says the chat is, or (a chat too new for the index) where Claude Code keeps its
+    // folder's; under this conversation, or one the session was before /clear moved it on.
+    // A running agent's log moves on with the conversation: its parts, oldest first.
+    const parts: AgentDetail[] = [];
+    for (const x of [...(s?.pastIds ?? []), id]) {
+      for (const t of [this.deps.localTranscript(x), s ? path.join(projectsDir(), encodeCwd(s.cwd), `${x}.jsonl`) : null]) {
+        const d = t ? await readAgentLog(agentLogFile(t, agentId)) : null;
+        if (d) {
+          parts.push(d);
+          break;
+        }
+      }
+    }
+    const said = s?.agentResult?.(agentId) ?? null;
+    const d = mergeAgentLogs(parts);
+    // What Claude Code says outranks the log when it warned about the report or held it back.
+    const report = said?.overrides ? said.text : (d?.report ?? said?.text ?? null);
+    if (d) return { ...d, report };
+    return s ? { brief: null, steps: [], total: 0, report } : null;
+  }
+
+  async stopAgent(id: string, agentId: string): Promise<boolean> {
+    return (await this.sessions.get(id)?.stopAgent?.(agentId)) ?? false;
   }
 
   respond(requestId: string, decision: Decision): boolean {

@@ -170,13 +170,13 @@ export function isMetaText(text: string): boolean {
   return META_PREFIXES.some((p) => t.startsWith(p));
 }
 
-function blocksOf(content: unknown): { type: string; [k: string]: unknown }[] {
+export function blocksOf(content: unknown): { type: string; [k: string]: unknown }[] {
   if (Array.isArray(content)) return content.filter((b) => b && typeof b === "object") as { type: string }[];
   if (typeof content === "string") return [{ type: "text", text: content }];
   return [];
 }
 
-function textFromToolResult(content: unknown): string {
+export function textFromToolResult(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
@@ -238,7 +238,7 @@ function serverLabel(server: string): string {
   return server.replace(/^claude_ai_/, "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const HIDDEN_TOOLS = new Set(["ToolSearch"]);
+export const HIDDEN_TOOLS = new Set(["ToolSearch"]);
 
 function baseName(p: string): string {
   const s = String(p).replace(/\\/g, "/").replace(/\/+$/, "");
@@ -246,7 +246,7 @@ function baseName(p: string): string {
   return parts.length > 1 ? parts.slice(-2).join("/") : s;
 }
 
-function toolKind(name: string): ToolKind {
+export function toolKind(name: string): ToolKind {
   if (name.startsWith("mcp__")) return "mcp";
   switch (name) {
     case "Read":
@@ -293,7 +293,7 @@ function toolKind(name: string): ToolKind {
   }
 }
 
-function describeCall(name: string, input: Record<string, unknown>): { label: string; detail: string | null; server?: string } {
+export function describeCall(name: string, input: Record<string, unknown>): { label: string; detail: string | null; server?: string } {
   const str = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : "");
   if (name.startsWith("mcp__")) {
     const [, server = "", tool = ""] = name.split("__");

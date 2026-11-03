@@ -95,6 +95,9 @@ interface State {
   /** Signing in to GitHub from the app: Git Credential Manager's own window is open. */
   githubSigningIn: boolean;
   signInToGitHub(): Promise<void>;
+  /** Ended agents you've looked at or closed: the bar stops mentioning them. */
+  seenAgents: Record<string, true>;
+  markAgentsSeen(ids: string[]): void;
   openMenu(id: string, x: number, y: number): void;
   closeMenu(): void;
 }
@@ -152,6 +155,10 @@ export const useStore = create<State>((set, get) => ({
   search: { open: false, text: "", result: null, active: 0, includeTools: false },
   toasts: [],
   popover: null,
+  seenAgents: {},
+  markAgentsSeen(ids) {
+    if (ids.some((id) => !get().seenAgents[id])) set({ seenAgents: { ...get().seenAgents, ...Object.fromEntries(ids.map((id) => [id, true as const])) } });
+  },
   githubSigningIn: false,
   async signInToGitHub() {
     if (get().githubSigningIn) return;

@@ -7,6 +7,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import type { CanUseTool, Query, SDKMessage, SDKUserMessage, PermissionResult, PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "./sdk";
+import { AgentTracker } from "./agents";
 import type { Attachment, ChatStatus, ClaudeQuestion, McpServerInfo, PermissionRequest } from "../../shared/types";
 import { toMcpInfo } from "./mcp";
 import { log } from "../log";
@@ -175,6 +176,9 @@ export class ChatSession extends EventEmitter {
   private turnDone = 0;
   private msgTokens = 0;
   private ended = false;
+  private agentRuns = new AgentTracker();
+  /** Conversations this session was before (/clear moves it on): its agents' logs may be under them. */
+  readonly pastIds: string[] = [];
   lastActivity = Date.now();
   /** When this session last wrote to its transcript (for the single-writer check). */
   lastWriteAt = 0;
@@ -207,6 +211,11 @@ export class ChatSession extends EventEmitter {
 
   get busy() {
     return ["starting", "thinking", "running-tool", "writing", "waiting-approval"].includes(this.status.state);
+  }
+
+  /** Agents still at work, which end with this session even when Claude itself is idle. */
+  get agentsRunning() {
+    return this.agentRuns.running > 0;
   }
 
   private set(patch: Partial<ChatStatus>) {
@@ -245,6 +254,8 @@ export class ChatSession extends EventEmitter {
         resume: this.opts.resume,
         settingSources: ["user", "project", "local"],
         includePartialMessages: true,
+        // A one-line status for each agent, for the agents bar.
+        agentProgressSummaries: true,
         pathToClaudeCodeExecutable: this.opts.claudePath,
         permissionMode: this.opts.permissionMode,
         model: this.opts.model ?? undefined,
@@ -363,10 +374,12 @@ export class ChatSession extends EventEmitter {
     this.followUps = [];
     for (const p of this.pending.values()) p.resolve({ behavior: "deny", message: "The session ended." });
     this.pending.clear();
+    this.agentRuns.stopAll();
+    const agents = this.agentRuns.list();
     if (err) {
       log("chat", `session ${this.id} ended with an error: ${err.message}`);
-      this.set({ state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { ...errorFor(err.message), title: isAuthError(err.message) ? "Claude Code's sign-in has expired" : "Claude Code stopped" } });
-    } else this.set({ state: this.status.state === "error" ? "error" : "idle", activity: null, permission: null, streamingText: "", queued: [] });
+      this.set({ agents, state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { ...errorFor(err.message), title: isAuthError(err.message) ? "Claude Code's sign-in has expired" : "Claude Code stopped" } });
+    } else this.set({ agents, state: this.status.state === "error" ? "error" : "idle", activity: null, permission: null, streamingText: "", queued: [] });
     this.emit("ended");
   }
 
@@ -374,6 +387,10 @@ export class ChatSession extends EventEmitter {
     this.touch();
     switch (m.type) {
       case "system":
+        if (this.agentRuns.handle(m as unknown as { subtype?: string })) {
+          this.set({ agents: this.agentRuns.list() });
+          return;
+        }
         if (m.subtype === "init") {
           const isNew = !this.id;
           const before = this.id;
@@ -381,7 +398,12 @@ export class ChatSession extends EventEmitter {
           this.set({ model: m.model, permissionMode: m.permissionMode });
           if (isNew) this.emit("created", this.id);
           // Claude Code moved to another conversation (/clear and its aliases do): the app follows it.
-          else if (before && before !== m.session_id) this.emit("rekeyed", before, m.session_id);
+          // Agents still running come along; the ones that ended stay with the old conversation.
+          else if (before && before !== m.session_id) {
+            this.pastIds.push(before);
+            if (this.agentRuns.dropEnded()) this.set({ agents: this.agentRuns.list() });
+            this.emit("rekeyed", before, m.session_id);
+          }
         } else if (m.subtype === "commands_changed") {
           rememberCommands(this.cwd, toCommands((m as { commands: { name: string; description?: string; argumentHint?: string; builtin?: boolean }[] }).commands));
         } else if (m.subtype === "api_retry") {
@@ -446,6 +468,8 @@ export class ChatSession extends EventEmitter {
         this.quietResults = Math.max(0, this.quietResults - this.mergeable);
         this.mergeable = 0;
         this.clearStream();
+        // An agent Claude was waiting for has ended with the turn, whatever was last heard of it.
+        if (this.agentRuns.turnEnded()) this.set({ agents: this.agentRuns.list() });
         if (m.subtype === "success") this.set({ state: "idle", activity: null, streamingText: "" });
         else {
           const errors = "errors" in m && Array.isArray(m.errors) ? m.errors.join(" ") : "";
@@ -647,6 +671,28 @@ export class ChatSession extends EventEmitter {
       this.set({ state: "idle", activity: null, streamingText: "", queued: this.followUps.map(followLabel) });
     } catch (e) {
       log("chat", `interrupt failed: ${(e as Error).message}`);
+    }
+  }
+
+  /** What an agent handed back, for when its log can't be read or mustn't be shown as it is. */
+  agentResult(agentId: string) {
+    return this.agentRuns.result(agentId);
+  }
+
+  /** Stops one agent; Claude and the others carry on. */
+  async stopAgent(agentId: string): Promise<boolean> {
+    try {
+      await this.q?.stopTask(agentId);
+      return !!this.q;
+    } catch (e) {
+      const msg = (e as Error).message;
+      log("chat", `stopping an agent failed: ${msg}`);
+      // Claude Code no longer has it: it isn't running, whatever the app last heard.
+      if (/no (such )?task|not found|unknown task/i.test(msg) && this.agentRuns.forceStop(agentId)) {
+        this.set({ agents: this.agentRuns.list() });
+        return true;
+      }
+      return false;
     }
   }
 

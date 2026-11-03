@@ -55,7 +55,8 @@ export function App() {
     let holdTimer: number | undefined;
     const s = () => useStore.getState();
     const onDown = (e: KeyboardEvent) => {
-      const typing = (e.target as HTMLElement)?.closest("input, textarea, [contenteditable]");
+      // (The agent panel keeps its keys too: Delete, arrows and Enter there aren't for the chat list.)
+      const typing = (e.target as HTMLElement)?.closest("input, textarea, [contenteditable], .agent-panel");
       if (e.key === "Control" && !e.repeat) {
         holdTimer = window.setTimeout(() => useStore.setState({ showShortcuts: true }), 650);
         return;

@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatStatus } from "../src/shared/types";
 import { ChatManager, NEW_CHAT_STARTING, OPEN_IN_TERMINAL, STILL_STARTING, STOPPED_BEFORE_START, type ManagerDeps, type SessionLike } from "../src/main/chat/manager";
 import type { SessionOptions } from "../src/main/chat/session";
@@ -23,6 +23,17 @@ class FakeSession extends EventEmitter implements SessionLike {
   lastWriteAt = 0;
   started: string[] = [];
   sent: string[] = [];
+  agentsRunning = false;
+  pastIds: string[] = [];
+  stoppedAgents: string[] = [];
+  handedBack: { text: string; overrides: boolean } | null = { text: "What it said when it ended", overrides: false };
+  agentResult() {
+    return this.handedBack;
+  }
+  async stopAgent(id: string) {
+    this.stoppedAgents.push(id);
+    return true;
+  }
   constructor(o: SessionOptions) {
     super();
     this.id = o.resume ?? null;
@@ -277,5 +288,140 @@ describe("item 7: a new chat is tracked from the first moment", () => {
     m.closeAll();
     expect(created[1].alive).toBe(false);
     expect((await p2).ok).toBe(false);
+  });
+});
+
+describe("a chat whose agents are still at work", () => {
+  async function running(over: Partial<ManagerDeps> = {}) {
+    const t = setup(over);
+    const sent = t.m.send({ id: ID, text: "go", cwd: "C:/p" });
+    t.release();
+    await sent;
+    const s = t.created[0];
+    s.busy = false;
+    s.agentsRunning = true;
+    return { ...t, s };
+  }
+  it("isn't closed as idle, however long they take; once they're done it is", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "Date"] });
+    try {
+      const { s } = await running();
+      vi.advanceTimersByTime(60 * 60_000);
+      expect(s.alive).toBe(true);
+      s.agentsRunning = false;
+      vi.advanceTimersByTime(20 * 60_000);
+      expect(s.alive).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("isn't closed by a sign-in restarting idle chats", async () => {
+    const { m, s } = await running();
+    await m.releaseIdle();
+    expect(s.alive).toBe(true);
+    s.agentsRunning = false;
+    await m.releaseIdle();
+    expect(s.alive).toBe(false);
+  });
+  it("Stop on one agent goes to that chat's session", async () => {
+    const { m, s } = await running();
+    expect(await m.stopAgent(ID, "a1")).toBe(true);
+    expect(s.stoppedAgents).toEqual(["a1"]);
+    expect(await m.stopAgent("bbbbbbbb-1111-4111-8111-aaaaaaaaaaaa", "a1")).toBe(false);
+  });
+  it("an agent's details: from its log, beside where the index says the chat is", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manager-agents-"));
+    try {
+      const transcript = path.join(dir, `${ID}.jsonl`);
+      fs.mkdirSync(path.join(dir, ID, "subagents"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ID, "subagents", "agent-a1.jsonl"), `${JSON.stringify({ type: "user", message: { content: "The brief" } })}\n`);
+      const { m } = await running({ localTranscript: () => transcript });
+      // No report in its log: what it said when it ended stands in.
+      expect(await m.agentDetail(ID, "a1")).toEqual({ brief: "The brief", steps: [], total: 0, report: "What it said when it ended" });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("a report Claude Code warned about or held back: its word, not the log's", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manager-agents-"));
+    try {
+      fs.mkdirSync(path.join(dir, ID, "subagents"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ID, "subagents", "agent-a1.jsonl"), [{ type: "user", message: { content: "Go" } }, { type: "assistant", message: { content: [{ type: "tool_use", id: "h", name: "SubagentHandback", input: { message: "Unchecked report" } }] } }].map((e) => JSON.stringify(e)).join("\n") + "\n");
+      const { m, s } = await running({ localTranscript: (x) => path.join(dir, `${x}.jsonl`) });
+      s.handedBack = null;
+      expect((await m.agentDetail(ID, "a1"))?.report).toBe("Unchecked report");
+      s.handedBack = { text: "SECURITY WARNING\n\nChecked report", overrides: true };
+      expect((await m.agentDetail(ID, "a1"))?.report).toBe("SECURITY WARNING\n\nChecked report");
+      s.handedBack = { text: "Summary", overrides: false };
+      expect((await m.agentDetail(ID, "a1"))?.report).toBe("Unchecked report");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("after the session has closed, what Claude Code said of a report still counts", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manager-agents-"));
+    try {
+      fs.mkdirSync(path.join(dir, ID, "subagents"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ID, "subagents", "agent-a1.jsonl"), [{ type: "user", message: { content: "Go" } }, { type: "assistant", message: { content: [{ type: "tool_use", id: "h", name: "SubagentHandback", input: { message: "Unchecked report" } }] } }].map((e) => JSON.stringify(e)).join("\n") + "\n");
+      const { m, s } = await running({ localTranscript: (x) => path.join(dir, `${x}.jsonl`) });
+      s.handedBack = { text: "Held back", overrides: true };
+      s.close();
+      expect((await m.agentDetail(ID, "a1"))?.report).toBe("Held back");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("after /clear, a running agent's log in two parts: read as one", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manager-agents-"));
+    const OLD = "dddddddd-1111-4111-8111-aaaaaaaaaaaa";
+    try {
+      for (const [x, e] of [[OLD, { type: "user", message: { content: "The brief" } }], [ID, { type: "assistant", message: { content: [{ type: "tool_use", id: "2", name: "Read", input: { file_path: "b.txt" } }] } }]] as const) {
+        fs.mkdirSync(path.join(dir, x, "subagents"), { recursive: true });
+        fs.writeFileSync(path.join(dir, x, "subagents", "agent-a1.jsonl"), `${JSON.stringify(e)}\n`);
+      }
+      const { m, s } = await running({ localTranscript: (x) => path.join(dir, `${x}.jsonl`) });
+      s.pastIds.push(OLD);
+      expect(await m.agentDetail(ID, "a1")).toMatchObject({ brief: "The brief", total: 1, steps: [{ id: "2" }] });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("after /clear: an agent's log is found under the conversation it started in", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manager-agents-"));
+    const OLD = "cccccccc-1111-4111-8111-aaaaaaaaaaaa";
+    try {
+      fs.mkdirSync(path.join(dir, OLD, "subagents"), { recursive: true });
+      fs.writeFileSync(path.join(dir, OLD, "subagents", "agent-a1.jsonl"), `${JSON.stringify({ type: "user", message: { content: "Started before /clear" } })}\n`);
+      const { m, s } = await running({ localTranscript: (x) => path.join(dir, `${x}.jsonl`) });
+      s.pastIds.push(OLD);
+      expect((await m.agentDetail(ID, "a1"))?.brief).toBe("Started before /clear");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("agents that have said nothing for two hours are taken to be stuck: the session closes", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "Date"] });
+    try {
+      const { s } = await running();
+      vi.advanceTimersByTime(110 * 60_000);
+      expect(s.alive).toBe(true);
+      vi.advanceTimersByTime(15 * 60_000);
+      expect(s.alive).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("a chat with agents at work counts as working, for switching, updating, deleting and Open in CLI", async () => {
+    const { m, s } = await running();
+    expect(m.isRunning(ID)).toBe(false);
+    expect(m.agentsRunning(ID)).toBe(true);
+    expect([...m.workingIds()]).toEqual([ID]);
+    s.agentsRunning = false;
+    expect([...m.workingIds()]).toEqual([]);
+  });
+  it("no log yet: what it said, if anything; a chat with no session and no log: nothing", async () => {
+    const { m } = await running();
+    expect(await m.agentDetail(ID, "nope")).toEqual({ brief: null, steps: [], total: 0, report: "What it said when it ended" });
+    expect(await m.agentDetail("bbbbbbbb-1111-4111-8111-aaaaaaaaaaaa", "a1")).toBe(null);
   });
 });

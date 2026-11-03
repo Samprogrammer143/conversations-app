@@ -218,3 +218,84 @@ describe("what counts as Claude Code's own sign-in failing", () => {
     expect(isAuthError("used 4010 tokens on port 8401")).toBe(false);
   });
 });
+
+describe("agents", () => {
+  const started = { type: "system", subtype: "task_started", task_id: "a1", description: "Count fruit", subagent_type: "general-purpose", task_type: "local_agent", is_backgrounded: true };
+  it("reach the window with the chat's status, and don't disturb what Claude itself is doing", () => {
+    const { s, x } = session();
+    s.send("go");
+    const seen: number[] = [];
+    s.on("status", (st: ChatStatus) => seen.push(st.agents?.length ?? 0));
+    x.handle(started);
+    expect(seen.at(-1)).toBe(1);
+    expect(s.status.state).toBe("thinking");
+    expect(s.agentsRunning).toBe(true);
+    x.handle({ type: "system", subtype: "task_progress", task_id: "a1", description: "Reading fruit.txt", usage: { tool_uses: 1 } });
+    expect(s.status.agents?.[0]).toMatchObject({ description: "Count fruit", line: "Reading fruit.txt", steps: 1 });
+    x.handle({ type: "system", subtype: "task_notification", task_id: "a1", status: "completed", summary: "3 lines", usage: { tool_uses: 2 } });
+    expect(s.status.agents?.[0]).toMatchObject({ status: "finished", steps: 2 });
+    expect(s.agentsRunning).toBe(false);
+    expect(s.agentResult("a1")).toEqual({ text: "3 lines", overrides: false });
+  });
+  it("a background agent outlives the turn that started it", () => {
+    const { s, x } = session();
+    s.send("go");
+    x.handle(started);
+    x.handle({ type: "result", subtype: "success" });
+    expect(s.status.state).toBe("idle");
+    expect(s.busy).toBe(false);
+    expect(s.agentsRunning).toBe(true);
+  });
+  it("other system messages still reach the session", () => {
+    const { s, x } = session();
+    x.handle({ type: "system", subtype: "api_retry", attempt: 1, max_retries: 3 });
+    expect(s.status.activity).toMatch(/retrying/);
+    x.handle({ type: "system", subtype: "init", session_id: "11111111-2222-4333-8444-555555555555", model: "m", permissionMode: "default" });
+    expect(s.id).toBe("11111111-2222-4333-8444-555555555555");
+  });
+  it("ending the session stops them, and says so", () => {
+    const { s, x } = session();
+    x.handle(started);
+    s.close();
+    expect(s.status.agents?.[0].status).toBe("stopped");
+    expect(s.agentsRunning).toBe(false);
+  });
+  it("after /clear: running agents come along, ended ones stay behind, and the old conversation is remembered", () => {
+    const { s, x } = session();
+    x.handle({ type: "system", subtype: "init", session_id: "11111111-2222-4333-8444-555555555555", model: "m", permissionMode: "default" });
+    x.handle(started);
+    x.handle({ ...started, task_id: "a2", description: "Done one" });
+    x.handle({ type: "system", subtype: "task_notification", task_id: "a2", status: "completed", summary: "x" });
+    x.handle({ type: "system", subtype: "init", session_id: "22222222-2222-4333-8444-555555555555", model: "m", permissionMode: "default" });
+    expect(s.pastIds).toEqual(["11111111-2222-4333-8444-555555555555"]);
+    expect(s.status.agents?.map((a) => a.id)).toEqual(["a1"]);
+  });
+  it("one Claude was waiting for ends with the turn", () => {
+    const { s, x } = session();
+    s.send("go");
+    x.handle({ ...started, task_id: "f1", is_backgrounded: false });
+    x.handle({ type: "result", subtype: "success" });
+    expect(s.status.agents?.[0].status).toBe("finished");
+    expect(s.agentsRunning).toBe(false);
+  });
+  it("Stop on an agent Claude Code no longer has: it's shown as stopped", async () => {
+    const { s, x, fake } = session();
+    x.handle(started);
+    Object.assign(fake, { stopTask: vi.fn(async () => Promise.reject(new Error("No task found with ID: a1"))) });
+    expect(await s.stopAgent("a1")).toBe(true);
+    expect(s.status.agents?.[0].status).toBe("stopped");
+    Object.assign(fake, { stopTask: vi.fn(async () => Promise.reject(new Error("Not connected"))) });
+    x.handle({ ...started, task_id: "a3" });
+    expect(await s.stopAgent("a3")).toBe(false);
+    expect(s.status.agents?.find((a) => a.id === "a3")?.status).toBe("running");
+  });
+  it("Stop on one agent asks Claude Code to stop that one", async () => {
+    const { s, fake } = session();
+    const stopTask = vi.fn(async () => {});
+    Object.assign(fake, { stopTask });
+    expect(await s.stopAgent("a1")).toBe(true);
+    expect(stopTask).toHaveBeenCalledWith("a1");
+    stopTask.mockRejectedValueOnce(new Error("no such task"));
+    expect(await s.stopAgent("a1")).toBe(false);
+  });
+});

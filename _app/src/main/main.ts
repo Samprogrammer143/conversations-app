@@ -35,6 +35,7 @@ import { isOpenInTerminal, readRegistry, sessionProcesses, thisPidDomain } from 
 import { NEEDS_FOLDER, NO_FOLDER, NOT_HERE, OPEN_ON_THIS_PC } from "./handover";
 import { folderForTranscript } from "./resume-folder";
 import { displayRemote } from "./remote-display";
+import { isAgentId } from "./chat/agents";
 import { checkEdit, isDecision, isEffort, isModelName, isPermissionMode, isRequestId, isUuid } from "./validate";
 import { EditsOverlay } from "./edits-overlay";
 import { StartupQueue } from "./startup-queue";
@@ -579,6 +580,7 @@ async function applyEdit(id: string, field: EditField, value: boolean | string |
   if (field === "deleted" && value === true) {
     // Never delete under a writer: Claude would recreate the file a moment later.
     if (chat.isRunning(id)) return { ok: false, err: "Claude is still working in this conversation. Stop it first, then delete it." };
+    if (chat.agentsRunning(id)) return { ok: false, err: "Claude's agents are still working in this conversation. Stop them first, then delete it." };
     if (await chat.openInTerminal(id)) return { ok: false, err: "This conversation is open in a terminal on this PC. Close it there first, then delete it." };
     // An idle chat in the app is simply closed first.
     if (chat.isOpenInApp(id)) await chat.release(id);
@@ -681,7 +683,7 @@ function registerIpc() {
     if (id === currentWorkspace().id) return { ok: true };
     // Open in a window of its own already: that window comes forward, and this one stays as it is.
     if (openElsewhere(id)) return { ok: openWorkspaceWindow(id), elsewhere: true };
-    const running = chat.runningIds().size;
+    const running = chat.workingIds().size;
     if (running && force !== true) return { ok: false, running };
     log("app", `switching to workspace ${id}`);
     closeMark();
@@ -772,7 +774,7 @@ function registerIpc() {
       broadcast("workspaces-changed", null);
       return { ok: true };
     }
-    const running = chat.runningIds().size;
+    const running = chat.workingIds().size;
     if (running && force !== true) return { ok: false, running };
     setDisconnected(id, true);
     closeMark();
@@ -893,6 +895,7 @@ function registerIpc() {
     if (!isUuid(id)) return { ok: false, message: BAD_ID };
     const d = conversationDetail(index.db, id, ctx(), folders());
     if (!d) return { ok: false, message: "That conversation isn't on this PC yet" };
+    if (chat.agentsRunning(id)) return { ok: false, message: "Claude's agents are still working in this chat. Stop them or let them finish, then open it in the CLI." };
     return openInCli({
       id,
       projectId: d.row.projectId,
@@ -1044,6 +1047,8 @@ function registerIpc() {
   });
   handle("chat:setPermissionMode", (id: unknown, mode: unknown) => (isUuid(id) && isPermissionMode(mode) ? chat.setPermissionMode(id, mode) : undefined));
   handle("chat:status", (id: unknown) => (isUuid(id) ? chat.status(id) : null));
+  handle("chat:agent", (id: unknown, agentId: unknown) => (isUuid(id) && isAgentId(agentId) ? chat.agentDetail(id, agentId) : null));
+  handle("chat:stopAgent", (id: unknown, agentId: unknown) => (isUuid(id) && isAgentId(agentId) ? chat.stopAgent(id, agentId) : false));
   handle("chat:models", () => chat.models());
   handle("composer:load", () => composer.get());
   handle("composer:save", (patch: unknown) => composer.save(patch));
@@ -1185,7 +1190,7 @@ function handleSecondInstance(argv: string[]) {
   if (argv.includes("--restart-for-update")) {
     void checkForUpdate().then(() => {
       const inUse = !!mainWin && !mainWin.isDestroyed() && mainWin.isFocused();
-      if (updateReady && !chat.runningIds().size && !signingIn() && !inUse) restart({ others: false });
+      if (updateReady && !chat.workingIds().size && !signingIn() && !inUse) restart({ others: false });
       else if (updateReady) log("app", `version ${updateReady} is ready; this window restarts for it when you choose`);
     });
     return;

@@ -2,6 +2,7 @@
 // preload script. Requests go through ipcRenderer.invoke; pushes arrive as events.
 
 import type {
+  AgentDetail,
   Attachment,
   Effort,
   SlashCommandInfo,
@@ -103,6 +104,10 @@ export interface ConversationsApi {
     commands(id: string | null, projectId: string | null, folder?: string | null): Promise<SlashCommandInfo[]>;
     setPermissionMode(id: string, mode: string): Promise<void>;
     status(id: string): Promise<ChatStatus | null>;
+    /** What one of a chat's agents was asked, has done and found. */
+    agent(id: string, agentId: string): Promise<AgentDetail | null>;
+    /** Stops one agent; Claude and the others carry on. */
+    stopAgent(id: string, agentId: string): Promise<boolean>;
     models(): Promise<ModelChoice[]>;
     pending(): Promise<PermissionRequest[]>;
     /** The plan usage meters (the last reading; a fresh one follows as a "usage" event). */
@@ -196,6 +201,8 @@ export const CHANNELS = [
   "chat:commands",
   "chat:setPermissionMode",
   "chat:status",
+  "chat:agent",
+  "chat:stopAgent",
   "chat:models",
   "chat:pending",
   "chat:usage",

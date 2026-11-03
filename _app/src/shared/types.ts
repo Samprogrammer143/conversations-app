@@ -315,6 +315,41 @@ export interface ClaudeQuestion {
 
 export type ChatState = "idle" | "starting" | "thinking" | "running-tool" | "writing" | "waiting-approval" | "stopped" | "error";
 
+/** An agent Claude started in a chat, from what Claude Code reports while the app runs it. */
+export interface AgentRun {
+  id: string;
+  /** Its task: "Göcek research". */
+  description: string;
+  type: string | null;
+  status: "running" | "finished" | "failed" | "stopped";
+  /** Running: what it is doing now. Failed: why. */
+  line: string | null;
+  steps: number;
+  startedAt: number;
+  endedAt: number | null;
+}
+
+export interface AgentStep {
+  id: string;
+  kind: ToolKind;
+  /** "Read", and "Reading" while it runs. */
+  verb: string;
+  verbNow: string;
+  what: string;
+  pending: boolean;
+  error: boolean;
+  seconds: number | null;
+}
+
+/** What an agent was asked, has done and found, from the log it keeps. */
+export interface AgentDetail {
+  brief: string | null;
+  /** The newest steps (up to 500). */
+  steps: AgentStep[];
+  total: number;
+  report: string | null;
+}
+
 export interface ChatStatus {
   conversationId: string;
   state: ChatState;
@@ -331,6 +366,8 @@ export interface ChatStatus {
   streamingText: string;
   /** Tokens Claude has written so far this turn, while it runs. */
   turnTokens: number | null;
+  /** The agents this session has started, running or ended. */
+  agents?: AgentRun[];
 }
 
 /** A workspace: one Claude account, with its own conversations and sync repository. */

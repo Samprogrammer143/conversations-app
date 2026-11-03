@@ -1,5 +1,7 @@
+import { AgentBar, AgentPanel } from "./Agents";
+import { agentKey, agentToOpen } from "../lib/agents";
 import { useEffect, useRef, useState } from "react";
-import type { Attachment, ChatStatus, ClaudeQuestion, ComposerPrefs, Effort, ModelChoice, PermissionRequest, SlashCommandInfo } from "../../shared/types";
+import type { AgentRun, Attachment, ChatStatus, ClaudeQuestion, ComposerPrefs, Effort, ModelChoice, PermissionRequest, SlashCommandInfo } from "../../shared/types";
 import { Icon } from "../components/Icon";
 import { Button, GlassCircle, IconButton, Spinner, Toggle, ToolbarButton } from "../components/controls";
 import { api } from "../lib/api";
@@ -94,6 +96,10 @@ const tokens = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(n < 10_
 
 const BUSY = ["starting", "thinking", "running-tool", "writing", "waiting-approval"];
 
+const NO_AGENTS: AgentRun[] = [];
+/** How wide the chat's pane must be for the agent panel to sit beside the chat rather than over it. */
+const AGENTS_BESIDE_FROM = 780;
+
 function useChatStatus(id: string | null) {
   const [status, setStatus] = useState<ChatStatus | null>(null);
   useEffect(() => {
@@ -112,7 +118,7 @@ function useChatStatus(id: string | null) {
  * the card is out of sight: a key press must never answer a request you can't see.
  */
 function focusCard(card: HTMLElement | null, destructive: boolean) {
-  const typing = document.activeElement?.closest("textarea, input, [contenteditable]");
+  const typing = document.activeElement?.closest("textarea, input, [contenteditable], .agent-panel");
   // Alert mode just brought this chat forward: you may still be typing, so no button gets the keys.
   if (!card || typing || Date.now() < useStore.getState().alertGuardUntil) return;
   const r = card.getBoundingClientRect();
@@ -679,6 +685,8 @@ function Composer({
       toast({ text: "You're offline. Send is off until you reconnect.", icon: "alert" });
       return;
     }
+    // Your next message is the end of an ended agent's time on the bar (once it has gone).
+    const endedAgents = (status?.agents ?? []).filter((a) => a.status !== "running").map(agentKey);
     const sentKey = key;
     const shown = shell ? `! ${command}` : value || `(${images.length === 1 ? "image" : `${images.length} images`})`;
     setText("");
@@ -695,6 +703,7 @@ function Composer({
     }
     if (mounted.current) setSending(false);
     if (shell) setShellRunning(sentKey, false);
+    if (r.ok) useStore.getState().markAgentsSeen(endedAgents);
     if (!r.ok) {
       if (id) useStore.getState().clearSent(id, [shown]);
       if (r.ran) {
@@ -747,7 +756,7 @@ function Composer({
           const css = getComputedStyle(el);
           const lines = (el.scrollHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom)) / parseFloat(css.lineHeight);
           if (lines > 1.5) return;
-        } else if (a?.closest("input, select, textarea, [contenteditable], .rows, .sb-content, [role=listbox], [role=menu]")) return;
+        } else if (a?.closest("input, select, textarea, [contenteditable], .rows, .sb-content, .agent-panel, [role=listbox], [role=menu]")) return;
       }
       const list = models.filter((m) => m.current);
       if (list.length < 2) return;
@@ -1049,6 +1058,26 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
   const [pad, setPad] = useState(140);
   const status = useChatStatus(detail?.row.id ?? null);
   const scrollEdge = scroll.scrolled;
+  const markAgentsSeen = useStore((s) => s.markAgentsSeen);
+  const seenAgents = useStore((s) => s.seenAgents);
+  const [agentPanel, setAgentPanel] = useState<{ id: string; agent: string | null } | null>(null);
+  const section = useRef<HTMLElement>(null);
+  const [roomBeside, setRoomBeside] = useState(true);
+  const agentList = status?.agents ?? NO_AGENTS;
+  const covering = agentPanel?.id === detail?.row.id && agentList.length > 0 && !roomBeside;
+  // Another chat, or no agents to show (a resumed session starts with none): the panel closes.
+  useEffect(() => setAgentPanel(null), [detail?.row.id]);
+  useEffect(() => {
+    if (!agentList.length) setAgentPanel(null);
+  }, [agentList.length]);
+  // Covering the chat, the panel gives way to a request Claude is waiting on; and what it covers
+  // takes no focus or keys meanwhile, so nothing is answered unseen.
+  useEffect(() => {
+    if (covering && status?.permission) setAgentPanel(null);
+  }, [covering, status?.permission?.requestId]);
+  useEffect(() => {
+    for (const n of section.current?.querySelectorAll(".transcript, .composer-wrap") ?? []) n.toggleAttribute("inert", covering);
+  }, [covering, detail?.row.id]);
 
   useEffect(() => {
     const on = (e: Event) => setNewCount((e as CustomEvent<number>).detail);
@@ -1060,6 +1089,13 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
     if (!el) return;
     // The last message sits 20 px above the composer (the wrap adds a 24 px fade on top).
     const ro = new ResizeObserver(() => setPad(el.offsetHeight - 24 + 20));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [detail?.row.id]);
+  useEffect(() => {
+    const el = section.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setRoomBeside(el.clientWidth >= AGENTS_BESIDE_FROM));
     ro.observe(el);
     return () => ro.disconnect();
   }, [detail?.row.id]);
@@ -1089,9 +1125,12 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
   if (running && !parts[0].startsWith("Live")) parts[0] = "Live on this PC";
   const lead = parts[0];
   const rest = parts.slice(1).join(SEP);
+  const agents = agentList;
+  const agentsOpen = agentPanel?.id === row.id && agents.length > 0;
+  const seeEnded = () => markAgentsSeen(agents.filter((a) => a.status !== "running").map(agentKey));
 
   return (
-    <section className="detail" aria-label={row.title}>
+    <section className={`detail${agentsOpen ? (roomBeside ? " agents-beside" : " agents-over") : ""}`} aria-label={row.title} ref={section}>
       <div className={`detail-toolbar drag${onBack ? " with-back" : ""}`}>
         {onBack && <IconButton icon="arrow-left" label="Back (Alt+Left)" onClick={onBack} />}
         <div className="detail-title">
@@ -1189,6 +1228,15 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
           </div>
         )}
         {status && <Activity s={status} />}
+        <AgentBar
+          agents={agents}
+          onOpen={() => {
+            // With no room beside the chat, the panel would cover a request Claude is waiting on.
+            if (!roomBeside && status?.permission) toast({ text: "Answer Claude's request first, then look at the agents", icon: "alert" });
+            else setAgentPanel({ id: row.id, agent: agentToOpen(agents, seenAgents) });
+          }}
+          onDismiss={seeEnded}
+        />
         <Composer
           id={row.id}
           projectId={row.projectId}
@@ -1204,6 +1252,18 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
           }}
         />
       </div>
+      {agentsOpen && (
+        <AgentPanel
+          conversationId={row.id}
+          agents={agents}
+          selected={agentPanel.agent}
+          onSelect={(agent) => setAgentPanel({ id: row.id, agent })}
+          onClose={() => {
+            seeEnded();
+            setAgentPanel(null);
+          }}
+        />
+      )}
     </section>
   );
 }

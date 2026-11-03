@@ -675,6 +675,274 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The agents bar: docked to the top of the message box (Figma: Agent Bar). */
+.composer-wrap > .agent-bar {
+  display: flex;
+  align-items: center;
+  width: calc(100% - 32px);
+  max-width: calc(var(--reading) - 32px);
+  height: 28px;
+  margin-bottom: -8px;
+  border: 1px solid var(--separator-default);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--bg-sunken);
+}
+.agent-bar-open {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px 0 10px;
+  border-radius: inherit;
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  text-align: left;
+}
+.agent-bar-open:hover {
+  background: var(--fill-quaternary);
+}
+.agent-bar .name {
+  flex: 0 1 auto;
+  min-width: 48px;
+  font-weight: 500;
+  color: var(--label-primary);
+}
+.agent-bar .line {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.agent-bar .when,
+.agent-panel .when {
+  flex: none;
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.agent-bar .chev {
+  flex: none;
+  color: var(--icon-tertiary);
+}
+.agent-bar-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--icon-tertiary);
+}
+.agent-bar-close:hover {
+  background: var(--fill-tertiary);
+}
+.agent-ok {
+  flex: none;
+  color: var(--status-success);
+}
+.agent-warn {
+  flex: none;
+  color: var(--status-warning);
+}
+
+/* The agent panel: beside the chat when there's room, over it when there isn't. */
+.detail.agents-beside {
+  --agent-panel: 420px;
+}
+.detail.agents-over {
+  --agent-panel: 100%;
+}
+.detail.agents-beside .transcript {
+  margin-right: var(--agent-panel);
+}
+.detail.agents-beside .composer-wrap,
+.detail.agents-beside .scroll-fade {
+  right: var(--agent-panel);
+}
+.agent-panel {
+  position: absolute;
+  z-index: 9;
+  top: var(--toolbar);
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: var(--agent-panel);
+  padding: 10px 16px 16px;
+  border-left: 1px solid var(--separator-default);
+  background: var(--bg-content);
+  outline: 0;
+}
+.agent-panel-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+.agent-panel-head .title {
+  flex: none;
+  font: 600 15px/20px var(--font-ui);
+  letter-spacing: -0.009em;
+}
+.agent-panel-head .counts {
+  flex: 1 1 0;
+  min-width: 0;
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.agent-rows {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 30%;
+  min-height: 46px;
+}
+.agent-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  text-align: left;
+}
+.agent-row:hover {
+  background: var(--fill-quaternary);
+}
+.agent-row.selected {
+  background: var(--fill-selected);
+}
+.agent-row .text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.agent-row .name {
+  font-weight: 500;
+  color: var(--label-primary);
+}
+.agent-divider {
+  flex: none;
+  height: 1px;
+  background: var(--separator-default);
+}
+.agent-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+.agent-names {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.agent-names .name {
+  font: 600 13px/18px var(--font-ui);
+  letter-spacing: -0.003em;
+  overflow-wrap: anywhere;
+}
+.agent-names .stats {
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.agent-body {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.agent-line {
+  flex: none;
+  font: 400 13px/18px var(--font-ui);
+  overflow-wrap: anywhere;
+}
+.agent-line.quiet {
+  color: var(--label-secondary);
+}
+.agent-chips {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.agent-chips:empty {
+  display: none;
+}
+.agent-brief {
+  flex: none;
+  max-height: 240px;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--radius-lg);
+  background: var(--bg-sunken);
+  font: 400 12px/18px var(--font-ui);
+  color: var(--label-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-steps {
+  flex: none;
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-sunken);
+}
+.agent-earlier {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+  text-align: left;
+}
+.agent-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font: 400 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.agent-step .icon {
+  flex: none;
+  color: var(--icon-secondary);
+}
+.agent-step .verb {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--label-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-step.error .verb {
+  color: var(--status-danger);
+}
+.agent-step .what {
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+.agent-step .took {
+  flex: none;
+  color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.agent-report {
+  flex: none;
+  overflow-wrap: anywhere;
+}
+
 /* Alert mode's switch: small, beside the context ring. */
 .alert-switch {
   display: flex;
