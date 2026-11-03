@@ -4,6 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { CanUseTool, Query, SDKMessage, SDKUserMessage, PermissionResult, PermissionUpdate } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "./sdk";
@@ -17,6 +18,8 @@ import { remember, rememberCommands, toChoices, toCommands, type ModelChoice } f
 
 /** Streamed text reaches the window at most this often (20 times a second). */
 const STREAM_EMIT_MS = 50;
+/** How soon after a Stop the stopped turn's end arrives: a failure reported later is a real one. */
+const STOP_RESULT_MS = 15_000;
 
 /** Messages typed in the app, handed to Claude Code as they arrive. */
 class InputQueue implements AsyncIterable<SDKUserMessage> {
@@ -46,6 +49,18 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
 
 type FollowUp = { text: string; attachments: Attachment[] } | { shell: [string, string]; label: string };
 const followLabel = (f: FollowUp) => ("shell" in f ? f.label : f.text);
+
+/** A message Claude never read, handed back to the window for its message box. */
+export interface ReturnedMessage {
+  text: string;
+  attachments: Attachment[];
+}
+
+/** What Claude Code says of one message it was given: queued, started (Claude has read it), completed or cancelled. */
+interface Lifecycle {
+  command_uuid?: string;
+  state?: string;
+}
 
 export interface SessionOptions {
   /** The conversation to continue; omitted for a new chat. */
@@ -165,6 +180,19 @@ export class ChatSession extends EventEmitter {
    * turn here too, so it lands in the transcript in the order you typed it.
    */
   private followUps: FollowUp[] = [];
+  /**
+   * Claude Code reads a message sent while it works at its next step, as a terminal does
+   * (it says so at the start); an older one only takes them at the end of a turn, so the
+   * app keeps them until then.
+   */
+  private live = false;
+  /** Messages handed to Claude Code while it works, by id, until it has read them, or they're cancelled. */
+  private sentAhead = new Map<string, ReturnedMessage & { read: boolean; cancelled?: boolean }>();
+  /** Stopping now: messages cancelled meanwhile are handed back together, in the order you sent them. */
+  private stopping = false;
+  /** You pressed Stop: the turn's end that follows reports the stop as a failure, which it isn't. */
+  private stopped = false;
+  private stoppedAt = 0;
   /** Shell records handed over that start no turn; each still reports a result, which is not a turn's end. */
   private quietResults = 0;
   /**
@@ -272,11 +300,22 @@ export class ChatSession extends EventEmitter {
     void this.pump();
   }
 
-  /** A message from the composer: sent now, or kept in the app's queue until Claude finishes. */
+  /** What is waiting for Claude: messages it hasn't read yet, in the order you sent them. */
+  private queuedLabels() {
+    const ahead = [...this.sentAhead.values()].filter((m) => !m.read).map((m) => m.text);
+    return [...ahead, ...this.followUps.map(followLabel)];
+  }
+
+  /**
+   * A message from the composer: sent now. While Claude works, Claude Code takes it and Claude
+   * reads it at its next step; an older Claude Code gets it once the turn has ended.
+   */
   send(text: string, attachments: Attachment[] = []) {
     if (this.q && this.busy) {
+      // (Behind a "!" command's record still waiting its turn, it waits too: they go in the order you typed them.)
+      if (this.live && !this.followUps.length) return this.sendAhead({ text, attachments });
       this.followUps.push({ text, attachments });
-      this.set({ queued: this.followUps.map(followLabel) });
+      this.set({ queued: this.queuedLabels() });
       return;
     }
     this.flushRecords();
@@ -287,7 +326,7 @@ export class ChatSession extends EventEmitter {
   appendShell(record: [string, string], label: string) {
     if (this.q && this.busy) {
       this.followUps.push({ shell: record, label });
-      this.set({ queued: this.followUps.map(followLabel) });
+      this.set({ queued: this.queuedLabels() });
       return;
     }
     this.flushRecords();
@@ -300,7 +339,7 @@ export class ChatSession extends EventEmitter {
     if (!records.length) return;
     this.followUps = this.followUps.filter((f) => !("shell" in f));
     for (const r of records) this.handOverShell(r.shell);
-    this.set({ queued: this.followUps.map(followLabel) });
+    this.set({ queued: this.queuedLabels() });
   }
 
   /** The command and its output, as the CLI's bash mode records them: in the transcript, for Claude's next turn. */
@@ -319,25 +358,80 @@ export class ChatSession extends EventEmitter {
     for (let next = this.followUps.shift(); next; next = this.followUps.shift()) {
       if ("shell" in next) {
         this.handOverShell(next.shell);
-        this.set({ queued: this.followUps.map(followLabel) });
+        this.set({ queued: this.queuedLabels() });
         continue;
       }
       this.handOver(next);
+      if (this.live) this.sendHeldAhead();
       return;
     }
   }
 
-  /** Gives one message to Claude Code: its images first, then the text. */
-  private handOver(item: { text: string; attachments: Attachment[] }) {
-    this.used = true;
+  /**
+   * One message as Claude Code takes it: its images first, then the text. Marked as yours, so
+   * one Claude reads in the middle of its work is taken as from you, not as text a tool returned.
+   */
+  private userMessage(item: { text: string; attachments: Attachment[] }, uuid: string): SDKUserMessage {
     const content = item.attachments.length
       ? [...item.attachments.map((a) => ({ type: "image" as const, source: { type: "base64" as const, media_type: a.mediaType, data: a.data } })), { type: "text" as const, text: item.text }]
       : item.text;
-    const msg: SDKUserMessage = { type: "user", message: { role: "user", content }, parent_tool_use_id: null, priority: "next", timestamp: new Date().toISOString() };
+    return { type: "user", message: { role: "user", content }, parent_tool_use_id: null, priority: "next", uuid, origin: { kind: "human" }, timestamp: new Date().toISOString() } as unknown as SDKUserMessage;
+  }
+
+  /** A message for Claude while it works: Claude Code holds it, and Claude reads it at its next step. */
+  private sendAhead(item: ReturnedMessage) {
+    const uuid = randomUUID();
+    this.used = true;
+    this.sentAhead.set(uuid, { ...item, read: false });
+    this.input.push(this.userMessage(item, uuid));
+    this.lastWriteAt = Date.now();
+    this.set({ queued: this.queuedLabels() });
+  }
+
+  /** Claude Code turned out to read messages while it works: those held for the turn's end go now (up to a "!" record). */
+  private sendHeldAhead() {
+    while (this.followUps.length && !("shell" in this.followUps[0])) this.sendAhead(this.followUps.shift() as ReturnedMessage);
+  }
+
+  /** What Claude Code says of a message sent while it worked. */
+  private lifecycle(m: Lifecycle) {
+    const ahead = m.command_uuid ? this.sentAhead.get(m.command_uuid) : undefined;
+    if (!ahead || !m.command_uuid) return;
+    if (m.state === "started") {
+      ahead.read = true;
+      // The turn it was sent into had ended before Claude got to it: it starts one of its own.
+      if (!this.busy) {
+        this.turnDone = 0;
+        this.msgTokens = 0;
+        this.mergeable = this.quietResults;
+        this.stopped = false;
+        this.set({ state: "thinking", activity: null, error: null, turnTokens: null, queued: this.queuedLabels() });
+      } else this.set({ queued: this.queuedLabels() });
+    } else if (m.state === "completed" || m.state === "cancelled") {
+      if (m.state === "cancelled" && !ahead.read) {
+        // Stopping collects it with the rest; otherwise it goes back now.
+        if (this.stopping) {
+          ahead.cancelled = true;
+          return;
+        }
+        this.emit("returned", [{ text: ahead.text, attachments: ahead.attachments }]);
+      }
+      this.sentAhead.delete(m.command_uuid);
+      this.set({ queued: this.queuedLabels() });
+    }
+  }
+
+  /** Gives one message to Claude Code to start a turn with. */
+  private handOver(item: { text: string; attachments: Attachment[] }) {
+    this.used = true;
+    const uuid = randomUUID();
+    const msg = this.userMessage(item, uuid);
+    // Followed too (Claude Code may still be finishing something): Stop can then always hand it back.
+    if (this.live) this.sentAhead.set(uuid, { ...item, read: false });
     this.turnDone = 0;
     this.msgTokens = 0;
     this.mergeable = this.quietResults;
-    this.set({ state: "thinking", activity: null, error: null, turnTokens: null, queued: this.followUps.map(followLabel) });
+    this.set({ state: "thinking", activity: null, error: null, turnTokens: null, queued: this.queuedLabels() });
     this.input.push(msg);
   }
 
@@ -371,6 +465,8 @@ export class ChatSession extends EventEmitter {
     this.clearStream();
     const lostRecords = this.followUps.filter((f) => "shell" in f).length;
     if (lostRecords) log("chat", `session ${this.id} ended with ${lostRecords} command record(s) not yet written`);
+    const unread = [...[...this.sentAhead.values()].filter((m) => !m.read), ...this.followUps.filter((f): f is ReturnedMessage => !("shell" in f))].map(({ text, attachments }) => ({ text, attachments }));
+    this.sentAhead.clear();
     this.followUps = [];
     for (const p of this.pending.values()) p.resolve({ behavior: "deny", message: "The session ended." });
     this.pending.clear();
@@ -380,11 +476,13 @@ export class ChatSession extends EventEmitter {
       log("chat", `session ${this.id} ended with an error: ${err.message}`);
       this.set({ agents, state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { ...errorFor(err.message), title: isAuthError(err.message) ? "Claude Code's sign-in has expired" : "Claude Code stopped" } });
     } else this.set({ agents, state: this.status.state === "error" ? "error" : "idle", activity: null, permission: null, streamingText: "", queued: [] });
+    if (unread.length) this.emit("returned", unread);
     this.emit("ended");
   }
 
   private handle(m: SDKMessage) {
     this.touch();
+    if ((m as { type: string }).type === "command_lifecycle") return this.lifecycle(m as unknown as Lifecycle);
     switch (m.type) {
       case "system":
         if (this.agentRuns.handle(m as unknown as { subtype?: string })) {
@@ -396,6 +494,9 @@ export class ChatSession extends EventEmitter {
           const before = this.id;
           this.id = m.session_id;
           this.set({ model: m.model, permissionMode: m.permissionMode });
+          const caps = (m as { capabilities?: unknown }).capabilities;
+          this.live = Array.isArray(caps) && caps.includes("msg_lifecycle_v1") && caps.includes("interrupt_cancel_queued_v1");
+          if (this.live && this.busy) this.sendHeldAhead();
           if (isNew) this.emit("created", this.id);
           // Claude Code moved to another conversation (/clear and its aliases do): the app follows it.
           // Agents still running come along; the ones that ended stay with the old conversation.
@@ -470,12 +571,14 @@ export class ChatSession extends EventEmitter {
         this.clearStream();
         // An agent Claude was waiting for has ended with the turn, whatever was last heard of it.
         if (this.agentRuns.turnEnded()) this.set({ agents: this.agentRuns.list() });
-        if (m.subtype === "success") this.set({ state: "idle", activity: null, streamingText: "" });
+        const stopped = this.stopped && m.subtype === "error_during_execution" && Date.now() - this.stoppedAt < STOP_RESULT_MS;
+        this.stopped = false;
+        if (m.subtype === "success" || stopped) this.set({ state: "idle", activity: null, streamingText: "" });
         else {
-          const errors = "errors" in m && Array.isArray(m.errors) ? m.errors.join(" ") : "";
+          const errors = "errors" in m && Array.isArray(m.errors) ? m.errors.map((x) => stripDiagnostics(String(x))).filter(Boolean).join(" ") : "";
           // The reason Claude gave on its way out (a sign-in that expired) says more than the turn's end does.
           const said = this.status.error;
-          this.set({ state: "error", activity: null, streamingText: "", error: said?.kind === "auth" ? said : errorFor(errors || m.subtype) });
+          this.set({ state: "error", activity: null, streamingText: "", error: said?.kind === "auth" ? said : errorFor(errors || (m.subtype === "error_during_execution" ? "" : m.subtype)) });
         }
         // The turn is over: the next follow-up, if any, goes to Claude Code now.
         this.nextFollowUp();
@@ -659,19 +762,42 @@ export class ChatSession extends EventEmitter {
   // ------------------------------------------------------------ controls
 
   async interrupt() {
-    // Follow-ups never reached Claude Code (see send), so Stop cancels them too. A
-    // command's record is not a request: the command has run, so it stays queued
-    // and is written once the stopped turn has ended (never in the middle of it).
+    // Stop also calls off the messages Claude hasn't read: they go back to your message box,
+    // never quietly away. (Ones it has read are in the conversation already.) A command's
+    // record is not a request: the command has run, so it stays queued and is written once
+    // the stopped turn has ended (never in the middle of it).
+    const held = this.followUps.filter((f): f is ReturnedMessage => !("shell" in f));
     this.followUps = this.followUps.filter((f) => "shell" in f);
     this.clearStream();
-    this.set({ queued: this.followUps.map(followLabel) });
+    this.stopping = true;
+    if (this.busy) {
+      this.stopped = true;
+      this.stoppedAt = Date.now();
+    }
     try {
       for (const [id, p] of [...this.pending.entries()]) this.respond(id, "deny", !!p.request.questions);
-      await this.q?.interrupt();
-      this.set({ state: "idle", activity: null, streamingText: "", queued: this.followUps.map(followLabel) });
+      // (The option is in the SDK, not yet in its published types.)
+      const q = this.q as unknown as { interrupt(o?: { cancelQueued?: boolean }): Promise<{ cancelled?: string[] } | undefined> } | null;
+      const receipt = this.live ? await q?.interrupt({ cancelQueued: true }) : await q?.interrupt();
+      for (const uuid of receipt?.cancelled ?? []) {
+        const a = this.sentAhead.get(uuid);
+        if (a) a.cancelled = true;
+      }
+      this.set({ state: "idle", activity: null, streamingText: "" });
     } catch (e) {
       log("chat", `interrupt failed: ${(e as Error).message}`);
+    } finally {
+      this.stopping = false;
     }
+    const back: ReturnedMessage[] = [];
+    for (const [uuid, a] of [...this.sentAhead]) {
+      if (!a.cancelled) continue;
+      this.sentAhead.delete(uuid);
+      if (!a.read) back.push({ text: a.text, attachments: a.attachments });
+    }
+    back.push(...held.map(({ text, attachments }) => ({ text, attachments })));
+    this.set({ queued: this.queuedLabels() });
+    if (back.length) this.emit("returned", back);
   }
 
   /** What an agent handed back, for when its log can't be read or mustn't be shown as it is. */
@@ -847,8 +973,12 @@ function errorFor(msg: string): { title: string; body: string; kind?: "auth" } {
   return { title: "Claude stopped before finishing", body: plainError(msg) };
 }
 
+/** Claude Code's notes for its own developers ("[ede_diagnostic] result_type=…") say nothing to you. */
+const stripDiagnostics = (s: string) => s.replace(/\[[a-z_]+_diagnostic\][^\n]*/gi, "").trim();
+
 function plainError(msg: string): string {
-  const m = msg.trim();
+  const m = stripDiagnostics(msg);
+  if (!m) return "The conversation is saved up to here.";
   if (/ENOENT|not found|spawn/i.test(m)) return "Claude Code could not be started on this PC. Check that it is installed, then try again.";
   return `${m.slice(0, 280)}${m.length > 280 ? "…" : ""} The conversation is saved up to here.`;
 }

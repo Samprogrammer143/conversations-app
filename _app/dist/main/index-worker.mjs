@@ -926,6 +926,35 @@ function parseTranscript(buf, ctx) {
         }
         continue;
       }
+      if (e.type === "attachment") {
+        const a = e.attachment ?? {};
+        if (a.type !== "queued_command" || (a.commandMode ?? "prompt") !== "prompt" || e.isSidechain || a.isMeta || a.origin && a.origin.kind !== "human") continue;
+        const blocks = blocksOf(a.prompt);
+        const text = blocks.filter((b) => b.type === "text").map((b) => String(b.text ?? "")).filter((t) => !isMetaText(t)).join("\n\n").trim();
+        const images = [];
+        blocks.forEach((b, bi) => {
+          const src = b.source;
+          if (b.type === "image" && src?.type === "base64") images.push({ key: `${encodeURIComponent(ctx.sourcePath)}|${e.offset}|${bi}`, mediaType: String(src.media_type ?? "image/png") });
+        });
+        if (!text && !images.length) continue;
+        openShell = null;
+        openCommand = null;
+        closeTurn();
+        const day = localDate(e.timestamp);
+        if (day && day !== lastDay) {
+          if (lastDay !== null) items.push({ kind: "day", seq: seq++, date: day });
+          lastDay = day;
+        }
+        items.push({ kind: "user", seq: seq++, uuid: e.uuid ?? "", ts: e.timestamp ?? null, text, images, pc: ctx.machineForCwd(e.cwd) });
+        if (text) fts.push({ seq: seq - 1, role: "prompt", body: text });
+        info.prompts++;
+        const one = text.replace(/\s+/g, " ").slice(0, 200);
+        if (one) {
+          info.firstPrompt ??= one;
+          info.lastPrompt = one;
+        }
+        continue;
+      }
       if (e.type === "system") {
         if (e.subtype === "turn_duration" && typeof e.durationMs === "number") turnDuration = e.durationMs;
         else if (e.subtype === "compact_boundary") {

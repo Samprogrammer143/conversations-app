@@ -15,7 +15,7 @@ import type { AgentDetail, Attachment, ChatStatus, McpActionResult, McpPanelData
 import { probeMcp } from "./mcp";
 import { commandsFor, knownModels, type ModelChoice } from "./models";
 import type { Decision, EffortLevel, PermissionMode } from "../validate";
-import { ChatSession, type SessionOptions } from "./session";
+import { ChatSession, type ReturnedMessage, type SessionOptions } from "./session";
 import { runShell, shellMessages, type RunningShell } from "./shell";
 import { log } from "../log";
 import { projectsDir } from "../paths";
@@ -597,6 +597,11 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
       } else this.emit("status", st);
     });
     s.on("permission", (p: PermissionRequest) => this.emit("permission", p));
+    // Messages Claude never read: back to the window, for the chat's message box.
+    s.on("returned", (items: ReturnedMessage[]) => {
+      if (s.id) this.emit("returned", s.id, items);
+      else log("chat", `${items.length} unread message(s) of a new chat couldn't be handed back: it has no id yet`);
+    });
     // Claude Code moved the session to a new conversation: the app keeps writing where it writes.
     s.on("rekeyed", (before: string, after: string) => {
       if (this.sessions.get(before) === s) {

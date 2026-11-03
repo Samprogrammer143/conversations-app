@@ -8,10 +8,12 @@ import { Icon, ToolIcon } from "../components/Icon";
 import { IconButton } from "../components/controls";
 import { Markdown } from "../components/Markdown";
 import { api } from "../lib/api";
-import { useStore } from "../lib/store";
+import { sentLabel, useStore } from "../lib/store";
 import { SEP, dayLabel, modelLabel, time24 } from "../lib/format";
 
 const PAGE = 150;
+/** How long a sent message's bubble may wait, once Claude is done, for its message to show up. */
+const STALE_SENT_MS = 5000;
 
 function copy(text: string) {
   void api.app.copyText(text);
@@ -287,6 +289,7 @@ export function Transcript({
   liveText = "",
   sent = [],
   running = false,
+  settled = true,
   tail = null,
   tailKey = null,
 }: {
@@ -297,6 +300,8 @@ export function Transcript({
   sent?: string[];
   /** A chat is running in this app right now. */
   running?: boolean;
+  /** Claude is done and has nothing of yours waiting: a sent message's bubble can't still be on its way. */
+  settled?: boolean;
   /** Shown after the last turn: the approval card Claude is waiting on. */
   tail?: ReactNode;
   tailKey?: string | null;
@@ -309,6 +314,8 @@ export function Transcript({
   const loadingOlder = useRef(false);
   const anchor = useRef<{ height: number; top: number } | null>(null);
   const lastSeq = useRef(-1);
+  const firstSeen = useRef(new Map<string, number>());
+  const settledRef = useRef(settled);
 
   const load = useCallback(
     async (reason: "open" | "update") => {
@@ -333,20 +340,36 @@ export function Transcript({
       // arguments are recorded trimmed).
       const flat = (s: string) => s.replace(/\s+/g, " ").trim();
       const arrived = page.items.flatMap((i) =>
-        i.kind === "user" ? [{ text: flat(i.text), prefix: false }] : i.kind === "shell" ? [{ text: flat(`! ${i.command}`), prefix: true }] : i.kind === "command" ? [{ text: flat(`/${i.name} ${i.args}`), prefix: true }] : [],
+        i.kind === "user" ? [{ text: flat(sentLabel(i.text, i.images.length)), prefix: false }] : i.kind === "shell" ? [{ text: flat(`! ${i.command}`), prefix: true }] : i.kind === "command" ? [{ text: flat(`/${i.name} ${i.args}`), prefix: true }] : [],
       );
       const pendingTexts = useStore.getState().sent[id] ?? [];
       // A very long command is kept shortened (ending in "…"): it still counts as arrived.
       const same = (a: { text: string; prefix: boolean }, t: string) => a.text === t || (a.prefix && a.text.endsWith("…") && t.startsWith(a.text.slice(0, -1)));
       const landed = pendingTexts.filter((t) => arrived.some((a) => same(a, flat(t))));
-      if (landed.length) useStore.getState().clearSent(id, landed);
+      // Claude has nothing waiting and has finished: a bubble still here (Claude Code
+      // recorded the words differently) stands for nothing more, so it goes. Only one
+      // seen a while, so one just sent isn't taken for it.
+      const now = Date.now();
+      for (const t of [...firstSeen.current.keys()]) if (!pendingTexts.includes(t)) firstSeen.current.delete(t);
+      for (const t of pendingTexts) if (!firstSeen.current.has(t)) firstSeen.current.set(t, now);
+      const stale = settledRef.current ? pendingTexts.filter((t) => !landed.includes(t) && now - (firstSeen.current.get(t) ?? now) > STALE_SENT_MS) : [];
+      for (const t of [...landed, ...stale]) firstSeen.current.delete(t);
+      if (landed.length || stale.length) useStore.getState().clearSent(id, [...landed, ...stale]);
     },
     [id],
   );
+  // Once Claude is done, a look again a little later clears what's left (nothing else may change the file).
+  useEffect(() => {
+    settledRef.current = settled;
+    if (!settled) return;
+    const t = window.setTimeout(() => void load("update"), STALE_SENT_MS + 500);
+    return () => window.clearTimeout(t);
+  }, [settled, load]);
 
   useEffect(() => {
     atBottom.current = true;
     lastSeq.current = -1;
+    firstSeen.current = new Map();
     setNewCount(0);
     setItems([]);
     void load("open");
@@ -445,7 +468,7 @@ export function Transcript({
           return <Other key={`o${b.item.seq}`} item={b.item} />;
         })}
         {sent.map((t, i) => (
-          <div className="you" key={`sent-${i}`}>
+          <div className="you sent" key={`sent-${i}`}>
             {t.startsWith("! ") ? (
               <div className="bubble shell-command selectable">
                 <span className="bang" aria-hidden>

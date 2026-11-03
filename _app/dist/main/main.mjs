@@ -973,7 +973,7 @@ var IndexService = class _IndexService extends EventEmitter {
         line = Buffer.concat(chunks).toString("utf8");
       }
       const entry = JSON.parse(line);
-      const b = entry?.message?.content?.[block];
+      const b = entry?.message?.content?.[block] ?? entry?.attachment?.prompt?.[block];
       if (b?.type !== "image" || b.source?.type !== "base64") return null;
       return `data:${b.source.media_type || "image/png"};base64,${b.source.data}`;
     } catch {
@@ -2755,6 +2755,7 @@ function refresh(claudePath) {
 // src/main/chat/session.ts
 import fs20 from "node:fs";
 import path19 from "node:path";
+import { randomUUID } from "node:crypto";
 import { EventEmitter as EventEmitter4 } from "node:events";
 
 // src/main/chat/agents.ts
@@ -3817,6 +3818,7 @@ function destructiveFallback(description) {
 
 // src/main/chat/session.ts
 var STREAM_EMIT_MS = 50;
+var STOP_RESULT_MS = 15e3;
 var InputQueue = class {
   items = [];
   wake = null;
@@ -3931,6 +3933,19 @@ var ChatSession = class extends EventEmitter4 {
    * turn here too, so it lands in the transcript in the order you typed it.
    */
   followUps = [];
+  /**
+   * Claude Code reads a message sent while it works at its next step, as a terminal does
+   * (it says so at the start); an older one only takes them at the end of a turn, so the
+   * app keeps them until then.
+   */
+  live = false;
+  /** Messages handed to Claude Code while it works, by id, until it has read them, or they're cancelled. */
+  sentAhead = /* @__PURE__ */ new Map();
+  /** Stopping now: messages cancelled meanwhile are handed back together, in the order you sent them. */
+  stopping = false;
+  /** You pressed Stop: the turn's end that follows reports the stop as a failure, which it isn't. */
+  stopped = false;
+  stoppedAt = 0;
   /** Shell records handed over that start no turn; each still reports a result, which is not a turn's end. */
   quietResults = 0;
   /**
@@ -4008,11 +4023,20 @@ var ChatSession = class extends EventEmitter4 {
     });
     void this.pump();
   }
-  /** A message from the composer: sent now, or kept in the app's queue until Claude finishes. */
+  /** What is waiting for Claude: messages it hasn't read yet, in the order you sent them. */
+  queuedLabels() {
+    const ahead = [...this.sentAhead.values()].filter((m) => !m.read).map((m) => m.text);
+    return [...ahead, ...this.followUps.map(followLabel)];
+  }
+  /**
+   * A message from the composer: sent now. While Claude works, Claude Code takes it and Claude
+   * reads it at its next step; an older Claude Code gets it once the turn has ended.
+   */
   send(text, attachments = []) {
     if (this.q && this.busy) {
+      if (this.live && !this.followUps.length) return this.sendAhead({ text, attachments });
       this.followUps.push({ text, attachments });
-      this.set({ queued: this.followUps.map(followLabel) });
+      this.set({ queued: this.queuedLabels() });
       return;
     }
     this.flushRecords();
@@ -4022,7 +4046,7 @@ var ChatSession = class extends EventEmitter4 {
   appendShell(record, label) {
     if (this.q && this.busy) {
       this.followUps.push({ shell: record, label });
-      this.set({ queued: this.followUps.map(followLabel) });
+      this.set({ queued: this.queuedLabels() });
       return;
     }
     this.flushRecords();
@@ -4034,7 +4058,7 @@ var ChatSession = class extends EventEmitter4 {
     if (!records.length) return;
     this.followUps = this.followUps.filter((f) => !("shell" in f));
     for (const r of records) this.handOverShell(r.shell);
-    this.set({ queued: this.followUps.map(followLabel) });
+    this.set({ queued: this.queuedLabels() });
   }
   /** The command and its output, as the CLI's bash mode records them: in the transcript, for Claude's next turn. */
   handOverShell(record) {
@@ -4051,22 +4075,70 @@ var ChatSession = class extends EventEmitter4 {
     for (let next = this.followUps.shift(); next; next = this.followUps.shift()) {
       if ("shell" in next) {
         this.handOverShell(next.shell);
-        this.set({ queued: this.followUps.map(followLabel) });
+        this.set({ queued: this.queuedLabels() });
         continue;
       }
       this.handOver(next);
+      if (this.live) this.sendHeldAhead();
       return;
     }
   }
-  /** Gives one message to Claude Code: its images first, then the text. */
+  /**
+   * One message as Claude Code takes it: its images first, then the text. Marked as yours, so
+   * one Claude reads in the middle of its work is taken as from you, not as text a tool returned.
+   */
+  userMessage(item, uuid) {
+    const content = item.attachments.length ? [...item.attachments.map((a) => ({ type: "image", source: { type: "base64", media_type: a.mediaType, data: a.data } })), { type: "text", text: item.text }] : item.text;
+    return { type: "user", message: { role: "user", content }, parent_tool_use_id: null, priority: "next", uuid, origin: { kind: "human" }, timestamp: (/* @__PURE__ */ new Date()).toISOString() };
+  }
+  /** A message for Claude while it works: Claude Code holds it, and Claude reads it at its next step. */
+  sendAhead(item) {
+    const uuid = randomUUID();
+    this.used = true;
+    this.sentAhead.set(uuid, { ...item, read: false });
+    this.input.push(this.userMessage(item, uuid));
+    this.lastWriteAt = Date.now();
+    this.set({ queued: this.queuedLabels() });
+  }
+  /** Claude Code turned out to read messages while it works: those held for the turn's end go now (up to a "!" record). */
+  sendHeldAhead() {
+    while (this.followUps.length && !("shell" in this.followUps[0])) this.sendAhead(this.followUps.shift());
+  }
+  /** What Claude Code says of a message sent while it worked. */
+  lifecycle(m) {
+    const ahead = m.command_uuid ? this.sentAhead.get(m.command_uuid) : void 0;
+    if (!ahead || !m.command_uuid) return;
+    if (m.state === "started") {
+      ahead.read = true;
+      if (!this.busy) {
+        this.turnDone = 0;
+        this.msgTokens = 0;
+        this.mergeable = this.quietResults;
+        this.stopped = false;
+        this.set({ state: "thinking", activity: null, error: null, turnTokens: null, queued: this.queuedLabels() });
+      } else this.set({ queued: this.queuedLabels() });
+    } else if (m.state === "completed" || m.state === "cancelled") {
+      if (m.state === "cancelled" && !ahead.read) {
+        if (this.stopping) {
+          ahead.cancelled = true;
+          return;
+        }
+        this.emit("returned", [{ text: ahead.text, attachments: ahead.attachments }]);
+      }
+      this.sentAhead.delete(m.command_uuid);
+      this.set({ queued: this.queuedLabels() });
+    }
+  }
+  /** Gives one message to Claude Code to start a turn with. */
   handOver(item) {
     this.used = true;
-    const content = item.attachments.length ? [...item.attachments.map((a) => ({ type: "image", source: { type: "base64", media_type: a.mediaType, data: a.data } })), { type: "text", text: item.text }] : item.text;
-    const msg = { type: "user", message: { role: "user", content }, parent_tool_use_id: null, priority: "next", timestamp: (/* @__PURE__ */ new Date()).toISOString() };
+    const uuid = randomUUID();
+    const msg = this.userMessage(item, uuid);
+    if (this.live) this.sentAhead.set(uuid, { ...item, read: false });
     this.turnDone = 0;
     this.msgTokens = 0;
     this.mergeable = this.quietResults;
-    this.set({ state: "thinking", activity: null, error: null, turnTokens: null, queued: this.followUps.map(followLabel) });
+    this.set({ state: "thinking", activity: null, error: null, turnTokens: null, queued: this.queuedLabels() });
     this.input.push(msg);
   }
   /** The streamed copy of the reply, sent to the window at most STREAM_EMIT_MS apart. */
@@ -4096,6 +4168,8 @@ var ChatSession = class extends EventEmitter4 {
     this.clearStream();
     const lostRecords = this.followUps.filter((f) => "shell" in f).length;
     if (lostRecords) log("chat", `session ${this.id} ended with ${lostRecords} command record(s) not yet written`);
+    const unread = [...[...this.sentAhead.values()].filter((m) => !m.read), ...this.followUps.filter((f) => !("shell" in f))].map(({ text, attachments }) => ({ text, attachments }));
+    this.sentAhead.clear();
     this.followUps = [];
     for (const p of this.pending.values()) p.resolve({ behavior: "deny", message: "The session ended." });
     this.pending.clear();
@@ -4105,10 +4179,12 @@ var ChatSession = class extends EventEmitter4 {
       log("chat", `session ${this.id} ended with an error: ${err.message}`);
       this.set({ agents, state: "error", activity: null, permission: null, streamingText: "", queued: [], error: { ...errorFor(err.message), title: isAuthError(err.message) ? "Claude Code's sign-in has expired" : "Claude Code stopped" } });
     } else this.set({ agents, state: this.status.state === "error" ? "error" : "idle", activity: null, permission: null, streamingText: "", queued: [] });
+    if (unread.length) this.emit("returned", unread);
     this.emit("ended");
   }
   handle(m) {
     this.touch();
+    if (m.type === "command_lifecycle") return this.lifecycle(m);
     switch (m.type) {
       case "system":
         if (this.agentRuns.handle(m)) {
@@ -4120,6 +4196,9 @@ var ChatSession = class extends EventEmitter4 {
           const before = this.id;
           this.id = m.session_id;
           this.set({ model: m.model, permissionMode: m.permissionMode });
+          const caps = m.capabilities;
+          this.live = Array.isArray(caps) && caps.includes("msg_lifecycle_v1") && caps.includes("interrupt_cancel_queued_v1");
+          if (this.live && this.busy) this.sendHeldAhead();
           if (isNew) this.emit("created", this.id);
           else if (before && before !== m.session_id) {
             this.pastIds.push(before);
@@ -4185,11 +4264,13 @@ var ChatSession = class extends EventEmitter4 {
         this.mergeable = 0;
         this.clearStream();
         if (this.agentRuns.turnEnded()) this.set({ agents: this.agentRuns.list() });
-        if (m.subtype === "success") this.set({ state: "idle", activity: null, streamingText: "" });
+        const stopped = this.stopped && m.subtype === "error_during_execution" && Date.now() - this.stoppedAt < STOP_RESULT_MS;
+        this.stopped = false;
+        if (m.subtype === "success" || stopped) this.set({ state: "idle", activity: null, streamingText: "" });
         else {
-          const errors = "errors" in m && Array.isArray(m.errors) ? m.errors.join(" ") : "";
+          const errors = "errors" in m && Array.isArray(m.errors) ? m.errors.map((x) => stripDiagnostics(String(x))).filter(Boolean).join(" ") : "";
           const said = this.status.error;
-          this.set({ state: "error", activity: null, streamingText: "", error: said?.kind === "auth" ? said : errorFor(errors || m.subtype) });
+          this.set({ state: "error", activity: null, streamingText: "", error: said?.kind === "auth" ? said : errorFor(errors || (m.subtype === "error_during_execution" ? "" : m.subtype)) });
         }
         this.nextFollowUp();
         void this.refreshContext();
@@ -4355,16 +4436,37 @@ ${JSON.stringify(input, null, 2).slice(0, 1200)}`;
   }
   // ------------------------------------------------------------ controls
   async interrupt() {
+    const held = this.followUps.filter((f) => !("shell" in f));
     this.followUps = this.followUps.filter((f) => "shell" in f);
     this.clearStream();
-    this.set({ queued: this.followUps.map(followLabel) });
+    this.stopping = true;
+    if (this.busy) {
+      this.stopped = true;
+      this.stoppedAt = Date.now();
+    }
     try {
       for (const [id, p] of [...this.pending.entries()]) this.respond(id, "deny", !!p.request.questions);
-      await this.q?.interrupt();
-      this.set({ state: "idle", activity: null, streamingText: "", queued: this.followUps.map(followLabel) });
+      const q = this.q;
+      const receipt = this.live ? await q?.interrupt({ cancelQueued: true }) : await q?.interrupt();
+      for (const uuid of receipt?.cancelled ?? []) {
+        const a = this.sentAhead.get(uuid);
+        if (a) a.cancelled = true;
+      }
+      this.set({ state: "idle", activity: null, streamingText: "" });
     } catch (e) {
       log("chat", `interrupt failed: ${e.message}`);
+    } finally {
+      this.stopping = false;
     }
+    const back = [];
+    for (const [uuid, a] of [...this.sentAhead]) {
+      if (!a.cancelled) continue;
+      this.sentAhead.delete(uuid);
+      if (!a.read) back.push({ text: a.text, attachments: a.attachments });
+    }
+    back.push(...held.map(({ text, attachments }) => ({ text, attachments })));
+    this.set({ queued: this.queuedLabels() });
+    if (back.length) this.emit("returned", back);
   }
   /** What an agent handed back, for when its log can't be read or mustn't be shown as it is. */
   agentResult(agentId) {
@@ -4512,8 +4614,10 @@ function errorFor(msg) {
   if (isAuthError(msg)) return { title: "Claude Code's sign-in has expired", body: "Sign in again (or type /login), then press Retry. The conversation is saved up to here.", kind: "auth" };
   return { title: "Claude stopped before finishing", body: plainError(msg) };
 }
+var stripDiagnostics = (s) => s.replace(/\[[a-z_]+_diagnostic\][^\n]*/gi, "").trim();
 function plainError(msg) {
-  const m = msg.trim();
+  const m = stripDiagnostics(msg);
+  if (!m) return "The conversation is saved up to here.";
   if (/ENOENT|not found|spawn/i.test(m)) return "Claude Code could not be started on this PC. Check that it is installed, then try again.";
   return `${m.slice(0, 280)}${m.length > 280 ? "\u2026" : ""} The conversation is saved up to here.`;
 }
@@ -5108,6 +5212,10 @@ var ChatManager = class extends EventEmitter5 {
       } else this.emit("status", st);
     });
     s.on("permission", (p) => this.emit("permission", p));
+    s.on("returned", (items) => {
+      if (s.id) this.emit("returned", s.id, items);
+      else log("chat", `${items.length} unread message(s) of a new chat couldn't be handed back: it has no id yet`);
+    });
     s.on("rekeyed", (before, after) => {
       if (this.sessions.get(before) === s) {
         this.sessions.delete(before);
@@ -6849,6 +6957,7 @@ void app3.whenReady().then(async () => {
   registerProtocol();
   let lastBusy = /* @__PURE__ */ new Set();
   let usageAfterReply = null;
+  chat.on("returned", (id, items) => broadcast("chat-returned", { conversationId: id, items }));
   chat.on("status", (st) => {
     broadcast("chat-status", st);
     alerts.note(st);

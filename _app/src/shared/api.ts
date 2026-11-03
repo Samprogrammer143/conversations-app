@@ -150,6 +150,8 @@ export interface ConversationsApi {
   /** A sign-in ended in the browser, without a code from the window. */
   on(event: "signin-finished", cb: (r: { id: string; ok: boolean; email?: string | null; err?: string | null }) => void): () => void;
   on(event: "chat-status", cb: (s: ChatStatus) => void): () => void;
+  /** Messages Claude never read (Stop called them off, or its session ended): for the chat's message box. */
+  on(event: "chat-returned", cb: (r: { conversationId: string; items: { text: string; attachments: Attachment[] }[] }) => void): () => void;
   on(event: "open-conversation", cb: (id: string) => void): () => void;
   /** Alert mode: `raised`, the window came forward for this chat; otherwise you are in another chat here. */
   on(event: "alert", cb: (a: { id: string; raised: boolean; text: string; why: "finished" | "stopped" | "needs-you" }) => void): () => void;
@@ -224,4 +226,4 @@ export const CHANNELS = [
 
 export type Channel = (typeof CHANNELS)[number];
 
-export const EVENTS = ["index-changed", "sync-status", "chat-status", "open-conversation", "settings-changed", "toast", "window-state", "chat-pending", "update-ready", "usage", "workspaces-changed", "signin-finished", "alert"] as const;
+export const EVENTS = ["index-changed", "sync-status", "chat-status", "chat-returned", "open-conversation", "settings-changed", "toast", "window-state", "chat-pending", "update-ready", "usage", "workspaces-changed", "signin-finished", "alert"] as const;

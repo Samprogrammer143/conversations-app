@@ -40,13 +40,16 @@ describe("follow-ups", () => {
     expect(s.status.state).toBe("thinking");
   });
 
-  it("are cancelled by Stop, and never reach Claude Code", async () => {
+  it("are called off by Stop, never reach Claude Code, and go back to the message box", async () => {
     const { s, x, fake } = session();
+    const back: unknown[] = [];
+    s.on("returned", (r) => back.push(...r));
     s.send("first");
     s.send("second");
     await s.interrupt();
     expect(fake.interrupt).toHaveBeenCalled();
     expect(s.status.queued).toEqual([]);
+    expect(back).toEqual([{ text: "second", attachments: [] }]);
     x.handle({ type: "result", subtype: "success" });
     expect(x.input.items.length).toBe(1);
   });
@@ -297,5 +300,170 @@ describe("agents", () => {
     expect(stopTask).toHaveBeenCalledWith("a1");
     stopTask.mockRejectedValueOnce(new Error("no such task"));
     expect(await s.stopAgent("a1")).toBe(false);
+  });
+});
+
+describe("messages sent while Claude works", () => {
+  const LIVE = ["interrupt_receipt_v1", "interrupt_cancel_queued_v1", "msg_lifecycle_v1"];
+  const init = (capabilities: string[] = LIVE) => ({ type: "system", subtype: "init", session_id: "11111111-2222-4333-8444-555555555555", model: "m", permissionMode: "default", capabilities });
+  const life = (command_uuid: string, state: string) => ({ type: "command_lifecycle", command_uuid, state, uuid: "x", session_id: "s" });
+  const img = { name: "shot.png", mediaType: "image/png" as const, data: "AAAA" };
+  type Pushed = { uuid?: string; priority?: string; origin?: { kind: string }; message: { content: unknown } };
+  const pushed = (x: { input: { items: unknown[] } }) => x.input.items as Pushed[];
+  function working(capabilities?: string[]) {
+    const t = session();
+    t.x.handle(init(capabilities));
+    t.s.send("first");
+    // Claude Code says it has started on the turn's own message, as it does.
+    const first = (t.x.input.items as Pushed[])[0]?.uuid;
+    if (first) t.x.handle(life(first, "started"));
+    const returned: { text: string; attachments: unknown[] }[][] = [];
+    t.s.on("returned", (r) => returned.push(r));
+    return { ...t, returned };
+  }
+
+  it("go to Claude Code at once, marked as yours, so Claude reads them at its next step", () => {
+    const { s, x } = working();
+    s.send("second", [img]);
+    expect(pushed(x)).toHaveLength(2);
+    const m = pushed(x)[1];
+    expect(m).toMatchObject({ priority: "next", origin: { kind: "human" } });
+    expect(m.uuid).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.stringify(m.message.content)).toContain("AAAA");
+    expect(s.status.queued).toEqual(["second"]);
+    expect(s.status.state).toBe("thinking");
+  });
+  it("count as read once Claude Code says Claude has started on them", () => {
+    const { s, x } = working();
+    s.send("second");
+    const id = pushed(x)[1].uuid!;
+    x.handle(life(id, "queued"));
+    expect(s.status.queued).toEqual(["second"]);
+    x.handle(life(id, "started"));
+    expect(s.status.queued).toEqual([]);
+    x.handle(life(id, "completed"));
+    expect(s.status.queued).toEqual([]);
+  });
+  it("one Claude gets to only after its turn has ended starts a turn of its own", () => {
+    const { s, x } = working();
+    s.send("second");
+    const id = pushed(x)[1].uuid!;
+    x.handle({ type: "result", subtype: "success" });
+    expect(s.status.state).toBe("idle");
+    x.handle(life(id, "started"));
+    expect(s.status.state).toBe("thinking");
+    expect(s.busy).toBe(true);
+  });
+  it("Stop calls off the ones Claude hasn't read and hands them back, words and images, in order", async () => {
+    const { s, x, fake, returned } = working();
+    s.send("one");
+    s.send("two", [img]);
+    s.send("read already");
+    const [, a, b, c] = pushed(x).map((m) => m.uuid!);
+    x.handle(life(c, "started"));
+    fake.interrupt.mockImplementationOnce(async () => {
+      // Claude Code says so as it cancels them, before its answer arrives.
+      x.handle(life(b, "cancelled"));
+      return { still_queued: [], cancelled: [a, b] } as never;
+    });
+    await s.interrupt();
+    expect(fake.interrupt).toHaveBeenCalledWith({ cancelQueued: true });
+    expect(returned).toEqual([[{ text: "one", attachments: [] }, { text: "two", attachments: [img] }]]);
+    expect(s.status.queued).toEqual([]);
+    x.handle(life(a, "cancelled"));
+    expect(returned).toHaveLength(1);
+  });
+  it("one Claude Code cancels on its own goes back too", () => {
+    const { s, x, returned } = working();
+    s.send("two");
+    x.handle(life(pushed(x)[1].uuid!, "cancelled"));
+    expect(returned).toEqual([[{ text: "two", attachments: [] }]]);
+    expect(s.status.queued).toEqual([]);
+  });
+  it("an older Claude Code: they wait for the turn's end as before, and Stop hands them back instead of losing them", async () => {
+    const { s, x, fake, returned } = working([]);
+    s.send("second", [img]);
+    expect(pushed(x)).toHaveLength(1);
+    expect(s.status.queued).toEqual(["second"]);
+    await s.interrupt();
+    expect(fake.interrupt).toHaveBeenCalledWith();
+    expect(returned).toEqual([[{ text: "second", attachments: [img] }]]);
+  });
+  it("held while Claude Code starts, then sent at once when it says it reads them", () => {
+    const { s, x } = session();
+    s.send("first");
+    s.send("while starting");
+    expect(pushed(x)).toHaveLength(1);
+    x.handle(init());
+    expect(pushed(x)).toHaveLength(2);
+    expect(pushed(x)[1].message.content).toBe("while starting");
+  });
+  it("behind a '!' command's record still waiting, a message waits too, so they keep their order", () => {
+    const { s, x } = working();
+    s.appendShell(["<bash-input>ls</bash-input>", "<bash-stdout>a</bash-stdout>"], "! ls");
+    s.send("after the command");
+    expect(pushed(x)).toHaveLength(1);
+    expect(s.status.queued).toEqual(["! ls", "after the command"]);
+  });
+  it("one handed over between turns is followed too, so Stop hands it back", async () => {
+    const { s, x, fake, returned } = working();
+    x.handle({ type: "result", subtype: "success" });
+    s.send("between turns");
+    const id = pushed(x)[1].uuid!;
+    expect(s.status.queued).toEqual(["between turns"]);
+    fake.interrupt.mockImplementationOnce(async () => ({ still_queued: [], cancelled: [id] }) as never);
+    await s.interrupt();
+    expect(returned).toEqual([[{ text: "between turns", attachments: [] }]]);
+  });
+  it("after one held message goes, the rest go ahead too", () => {
+    const { s, x } = working();
+    s.appendShell(["<bash-input>ls</bash-input>", "<bash-stdout>a</bash-stdout>"], "! ls");
+    s.send("second");
+    s.send("third");
+    x.handle({ type: "result", subtype: "success" });
+    const texts = pushed(x).slice(1).map((m) => m.message.content);
+    expect(texts.filter((t) => t === "second" || t === "third")).toEqual(["second", "third"]);
+  });
+  it("sent again right after Stop: the stopped turn's late end still isn't an error", async () => {
+    const { s, x } = working();
+    await s.interrupt();
+    s.send("again");
+    x.handle({ type: "result", subtype: "error_during_execution", errors: ["[ede_diagnostic] result_type=user"] });
+    expect(s.status.error).toBe(null);
+    expect(s.status.state).not.toBe("error");
+  });
+  it("a Stop that never reported its end doesn't hide a real failure later", async () => {
+    const { s, x } = working();
+    await s.interrupt();
+    s.send("again");
+    x.handle({ type: "result", subtype: "error_max_turns", errors: ["Reached the maximum number of turns"] });
+    expect(s.status.state).toBe("error");
+  });
+  it("Claude Code's notes are left out one by one, keeping the real error", () => {
+    const { x, s } = working();
+    x.handle({ type: "result", subtype: "error_during_execution", errors: ["[ede_diagnostic] result_type=user", "API Error: 500 overloaded"] });
+    expect(s.status.error?.body).toMatch(/^API Error: 500 overloaded/);
+  });
+  it("Stop isn't an error: the stopped turn's end doesn't show as one", async () => {
+    const { s, x } = working();
+    await s.interrupt();
+    x.handle({ type: "result", subtype: "error_during_execution", errors: ["[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"] });
+    expect(s.status.state).toBe("idle");
+    expect(s.status.error).toBe(null);
+    // A later failure is still one, and Claude Code's notes for its developers stay out of it.
+    s.send("again");
+    x.handle({ type: "result", subtype: "error_during_execution", errors: ["[ede_diagnostic] result_type=user"] });
+    expect(s.status.state).toBe("error");
+    expect(s.status.error?.body).toBe("The conversation is saved up to here.");
+  });
+  it("the session ending hands back what Claude never read", () => {
+    const { s, x, returned } = working();
+    s.send("lost?");
+    const id = pushed(x)[1].uuid!;
+    s.send("read");
+    x.handle(life(pushed(x)[2].uuid!, "started"));
+    s.close();
+    expect(returned).toEqual([[{ text: "lost?", attachments: [] }]]);
+    expect(id).toBeTruthy();
   });
 });

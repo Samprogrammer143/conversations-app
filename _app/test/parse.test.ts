@@ -266,3 +266,42 @@ describe.skipIf(!real.length)("real transcripts", () => {
     console.log(`parsed ${real.length} transcripts in ${Math.round(totalMs)} ms; slowest ${worst.file} (${worst.mb} MB) ${worst.ms} ms`);
   }, 120_000);
 });
+
+describe("a message Claude read while it worked", () => {
+  it("shows where Claude read it, counts as a prompt, and keeps its images as keys", () => {
+    const u1 = user(null, "Run the tests", 0);
+    const a1 = assistant(u1.id, [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "npm test" } }], 1);
+    const r1 = toolResult(a1.id, "t1", "ok", 1);
+    const qid = uuid();
+    const queued = { type: "attachment", uuid: qid, parentUuid: r1.id, isSidechain: false, attachment: { type: "queued_command", prompt: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "BBBB" } }, { type: "text", text: "Also check the footer" }], commandMode: "prompt", origin: { kind: "human" } }, timestamp: ts(2), cwd: HOME_CWD };
+    const a2 = assistant(qid, [{ type: "text", text: "Footer done too." }], 3);
+    const r = parseTranscript(jsonl([u1.line, a1.line, r1.line, queued, a2.line]), ctx);
+    expect(r.items.map((i) => i.kind)).toEqual(["user", "tools", "meta", "user", "text", "meta"]);
+    const u = r.items[3] as Extract<(typeof r.items)[number], { kind: "user" }>;
+    expect(u.text).toBe("Also check the footer");
+    expect(u.images).toHaveLength(1);
+    expect(u.images[0].key).toMatch(/\|\d+\|0$/);
+    expect(JSON.stringify(r.items)).not.toContain("BBBB");
+    expect(r.info.prompts).toBe(2);
+    expect(r.info.lastPrompt).toBe("Also check the footer");
+  });
+  it("leaves out what else goes through that queue: notifications and Claude Code's own", () => {
+    const u1 = user(null, "Go", 0);
+    const a1 = assistant(u1.id, [{ type: "text", text: "On it." }], 1);
+    const n1 = { type: "attachment", uuid: uuid(), parentUuid: a1.id, attachment: { type: "queued_command", prompt: "<task-notification>done</task-notification>", commandMode: "task-notification" }, timestamp: ts(2), cwd: HOME_CWD };
+    const n2 = { type: "attachment", uuid: uuid(), parentUuid: n1.uuid, attachment: { type: "queued_command", prompt: "<task-notification>x</task-notification>" }, timestamp: ts(2), cwd: HOME_CWD };
+    const n3 = { type: "attachment", uuid: uuid(), parentUuid: n2.uuid, attachment: { type: "queued_command", prompt: "Scheduled check-in", commandMode: "prompt", origin: { kind: "task-notification" } }, timestamp: ts(2), cwd: HOME_CWD };
+    const n4 = { type: "attachment", uuid: uuid(), parentUuid: n3.uuid, attachment: { type: "queued_command", prompt: "Hidden", commandMode: "prompt", isMeta: true }, timestamp: ts(2), cwd: HOME_CWD };
+    const r = parseTranscript(jsonl([u1.line, a1.line, n1, n2, n3, n4]), ctx);
+    expect(r.items.filter((i) => i.kind === "user")).toHaveLength(1);
+    expect(r.info.prompts).toBe(1);
+  });
+  it("one that is the newest thing in the file shows too (Claude hasn't answered yet)", () => {
+    const u1 = user(null, "Go", 0);
+    const a1 = assistant(u1.id, [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }], 1);
+    const r1 = toolResult(a1.id, "t1", "ok", 1);
+    const q = { type: "attachment", uuid: uuid(), parentUuid: r1.id, attachment: { type: "queued_command", prompt: "Also this", commandMode: "prompt", origin: { kind: "human" } }, timestamp: ts(2), cwd: HOME_CWD };
+    const r = parseTranscript(jsonl([u1.line, a1.line, r1.line, q]), ctx);
+    expect(r.items.filter((i) => i.kind === "user").map((i) => (i as { text: string }).text)).toEqual(["Go", "Also this"]);
+  });
+});

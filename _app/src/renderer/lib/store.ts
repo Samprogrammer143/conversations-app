@@ -2,7 +2,7 @@
 // action shows its result immediately; sync happens behind it.
 
 import { create } from "zustand";
-import type { WorkspaceInfo } from "../../shared/types";
+import type { Attachment, WorkspaceInfo } from "../../shared/types";
 import type { AppInfo, ComposerPrefs, ComposerState, ConversationDetail, ConversationRow, ListFilter, ListQuery, ListResult, PlanUsage, SearchResult, Settings, SidebarData, SyncStatus } from "../../shared/types";
 import { api } from "./api";
 
@@ -75,6 +75,11 @@ interface State {
   startDraft(projectId: string | null, folder?: string | null): void;
   noteSent(id: string, text: string): void;
   clearSent(id: string, texts: string[]): void;
+  /** Messages Claude never read, back into a chat's message box: their words now, their images when it shows. */
+  takeBack(id: string, items: { text: string; attachments: Attachment[] }[]): void;
+  /** Images handed back to a chat's message box, waiting for it (seq: one handing back from the next). */
+  returned: Record<string, { seq: number; images: Attachment[] }>;
+  consumeReturned(key: string): void;
 
   init(): Promise<void>;
   refresh(ids?: string[]): Promise<void>;
@@ -103,6 +108,10 @@ interface State {
 }
 
 let toastSeq = 1;
+let returnSeq = 0;
+
+/** How a message you sent shows until it reaches the conversation: its words, or what it attached. */
+export const sentLabel = (text: string, images: number) => text.trim() || `(${images === 1 ? "image" : `${images} images`})`;
 let searchTimer: number | undefined;
 let refreshTimer: number | undefined;
 
@@ -198,6 +207,29 @@ export const useStore = create<State>((set, get) => ({
     });
   },
 
+  returned: {},
+  takeBack(id, items) {
+    if (!items.length) return;
+    // Each one's bubble, as the composer showed it, goes: it was never read.
+    get().clearSent(id, items.map((i) => sentLabel(i.text, i.attachments.length)));
+    const words = items.map((i) => i.text.trim()).filter(Boolean).join("\n\n");
+    const now = get().composer.drafts[id] ?? "";
+    get().setDraft(id, [words, now.trim()].filter(Boolean).join("\n\n"));
+    const before = get().returned[id]?.images ?? [];
+    set({ returned: { ...get().returned, [id]: { seq: ++returnSeq, images: [...items.flatMap((i) => i.attachments), ...before] } } });
+    const n = items.length;
+    // Said of another chat than the one on screen, it names it.
+    const title = get().detail?.row.id === id ? null : (rowsOf(get()).find((r) => r.id === id)?.title ?? "another chat");
+    const where = title ? ` in “${title.length > 40 ? `${title.slice(0, 39)}…` : title}”` : "";
+    get().toast({ text: n === 1 ? `Claude hadn't read your message${where} yet, so it's back in the message box` : `Claude hadn't read ${n} of your messages${where} yet, so they're back in the message box`, icon: "alert", durationMs: 8000 });
+  },
+  consumeReturned(key) {
+    if (!get().returned[key]) return;
+    const next = { ...get().returned };
+    delete next[key];
+    set({ returned: next });
+  },
+
   setDraft(key, text) {
     const c = get().composer;
     const keep = text.trim() ? text : "";
@@ -252,6 +284,7 @@ export const useStore = create<State>((set, get) => ({
       refreshTimer = window.setTimeout(() => void get().refresh(ids), 60);
     });
     api.on("sync-status", (s) => set({ sync: s }));
+    api.on("chat-returned", (r) => get().takeBack(r.conversationId, r.items));
     // The network comes and goes between the sync's looks; Send follows it at once.
     const networkChanged = () => {
       const read = () => void api.sync.status().then((s) => set({ sync: s }));

@@ -1320,6 +1320,7 @@ void app.whenReady().then(async () => {
   registerProtocol();
   let lastBusy = new Set<string>();
   let usageAfterReply: NodeJS.Timeout | null = null;
+  chat.on("returned", (id: string, items: unknown) => broadcast("chat-returned", { conversationId: id, items }));
   chat.on("status", (st) => {
     broadcast("chat-status", st);
     alerts.note(st);

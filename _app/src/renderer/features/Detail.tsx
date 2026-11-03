@@ -5,7 +5,7 @@ import type { AgentRun, Attachment, ChatStatus, ClaudeQuestion, ComposerPrefs, E
 import { Icon } from "../components/Icon";
 import { Button, GlassCircle, IconButton, Spinner, Toggle, ToolbarButton } from "../components/controls";
 import { api } from "../lib/api";
-import { useStore } from "../lib/store";
+import { sentLabel, useStore } from "../lib/store";
 import { SEP, modelLabel } from "../lib/format";
 import { fitImage, fromBase64, MAX_BASE64 } from "../lib/images";
 import { Transcript } from "./Transcript";
@@ -100,17 +100,25 @@ const NO_AGENTS: AgentRun[] = [];
 /** How wide the chat's pane must be for the agent panel to sit beside the chat rather than over it. */
 const AGENTS_BESIDE_FROM = 780;
 
-function useChatStatus(id: string | null) {
+/** A chat's live status, and whether it has been heard yet (none until it has: not "nothing running"). */
+function useChatStatus(id: string | null): [ChatStatus | null, boolean] {
   const [status, setStatus] = useState<ChatStatus | null>(null);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     setStatus(null);
+    setLoaded(false);
     if (!id) return;
-    void api.chat.status(id).then(setStatus);
+    void api.chat.status(id).then((s) => {
+      setStatus(s);
+      setLoaded(true);
+    });
     return api.on("chat-status", (s) => {
-      if (s.conversationId === id) setStatus(s);
+      if (s.conversationId !== id) return;
+      setStatus(s);
+      setLoaded(true);
     });
   }, [id]);
-  return status;
+  return [status, loaded];
 }
 
 /**
@@ -367,7 +375,7 @@ function Activity({ s }: { s: ChatStatus }) {
       <span>{elapsed} s</span>
       {s.turnTokens ? <span className="tokens">↓ {tokens(s.turnTokens)} tokens</span> : null}
       <span>Esc to interrupt</span>
-      {s.queued.length > 0 && <span>· {s.queued.length} queued</span>}
+      {s.queued.length > 0 && <span>· {s.queued.length} waiting</span>}
     </div>
   );
 }
@@ -546,6 +554,17 @@ function Composer({
     };
   }, [key]);
 
+  // Messages Claude never read, handed back: their words are in this chat's draft, their images come here.
+  const returned = useStore((s) => s.returned[key]);
+  useEffect(() => {
+    if (!returned) return;
+    const saved = useStore.getState().composer.drafts[key] ?? "";
+    textRef.current = saved;
+    setTextState(saved);
+    if (returned.images.length) setPending((prev) => [...returned.images.map((a, i) => ({ ...a, name: a.name || "Image", key: `back-${returned.seq}-${i}` })), ...prev].slice(0, 10));
+    useStore.getState().consumeReturned(key);
+  }, [key, returned?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const addFiles = async (files: FileList | File[]) => {
     const list = [...files];
     const read = await Promise.all(list.map(readImage));
@@ -688,7 +707,7 @@ function Composer({
     // Your next message is the end of an ended agent's time on the bar (once it has gone).
     const endedAgents = (status?.agents ?? []).filter((a) => a.status !== "running").map(agentKey);
     const sentKey = key;
-    const shown = shell ? `! ${command}` : value || `(${images.length === 1 ? "image" : `${images.length} images`})`;
+    const shown = shell ? `! ${command}` : sentLabel(value, images.length);
     setText("");
     setPending([]);
     if (id) noteSent(id, shown);
@@ -775,7 +794,7 @@ function Composer({
   const modelEfforts = (chosen && models.find((m) => m.value === chosen)?.efforts) ?? null;
   const effortChoices = modelEfforts ? EFFORTS.filter((e) => modelEfforts.includes(e.value)) : EFFORTS;
   const effortInfo = effort ? EFFORTS.find((e) => e.value === effort) : null;
-  const placeholder = !id ? "Ask Claude… (/ for commands and skills, ! for the shell)" : running ? "Queue a follow-up…" : "Reply to Claude…";
+  const placeholder = !id ? "Ask Claude… (/ for commands and skills, ! for the shell)" : running ? "Message Claude while it works…" : "Reply to Claude…";
   const contextPercent = status?.contextPercent ?? savedContextPercent;
   // "!" at the start: the message is a shell command for this chat's folder.
   const shellMode = text.trimStart().startsWith("!");
@@ -1056,7 +1075,7 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
   const [newCount, setNewCount] = useState(0);
   const footer = useRef<HTMLDivElement>(null);
   const [pad, setPad] = useState(140);
-  const status = useChatStatus(detail?.row.id ?? null);
+  const [status, statusLoaded] = useChatStatus(detail?.row.id ?? null);
   const scrollEdge = scroll.scrolled;
   const markAgentsSeen = useStore((s) => s.markAgentsSeen);
   const seenAgents = useStore((s) => s.seenAgents);
@@ -1175,6 +1194,7 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
         liveText={status?.streamingText ?? ""}
         sent={sent ?? []}
         running={running}
+        settled={statusLoaded && !running && !status?.queued.length}
         tail={status?.permission ? status.permission.questions ? <QuestionCard p={status.permission} /> : <PermissionCard p={status.permission} /> : null}
         tailKey={status?.permission?.requestId ?? null}
       />

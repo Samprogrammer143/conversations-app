@@ -808,6 +808,42 @@ export function parseTranscript(buf: Buffer, ctx: ParseContext): ParseResult {
         }
         continue;
       }
+      if (e.type === "attachment") {
+        // A message you sent while Claude worked, which it read at its next step: Claude Code
+        // records it inside the turn. (Not the queue's other users: notifications, its own.)
+        const a = (e.attachment ?? {}) as { type?: string; prompt?: unknown; commandMode?: string; isMeta?: boolean; origin?: { kind?: string } };
+        if (a.type !== "queued_command" || (a.commandMode ?? "prompt") !== "prompt" || e.isSidechain || a.isMeta || (a.origin && a.origin.kind !== "human")) continue;
+        const blocks = blocksOf(a.prompt);
+        const text = blocks
+          .filter((b) => b.type === "text")
+          .map((b) => String(b.text ?? ""))
+          .filter((t) => !isMetaText(t))
+          .join("\n\n")
+          .trim();
+        const images: ImageRef[] = [];
+        blocks.forEach((b, bi) => {
+          const src = b.source as { type?: string; media_type?: string } | undefined;
+          if (b.type === "image" && src?.type === "base64") images.push({ key: `${encodeURIComponent(ctx.sourcePath)}|${e.offset}|${bi}`, mediaType: String(src.media_type ?? "image/png") });
+        });
+        if (!text && !images.length) continue;
+        openShell = null;
+        openCommand = null;
+        closeTurn();
+        const day = localDate(e.timestamp);
+        if (day && day !== lastDay) {
+          if (lastDay !== null) items.push({ kind: "day", seq: seq++, date: day });
+          lastDay = day;
+        }
+        items.push({ kind: "user", seq: seq++, uuid: e.uuid ?? "", ts: e.timestamp ?? null, text, images, pc: ctx.machineForCwd(e.cwd) });
+        if (text) fts.push({ seq: seq - 1, role: "prompt", body: text });
+        info.prompts++;
+        const one = text.replace(/\s+/g, " ").slice(0, 200);
+        if (one) {
+          info.firstPrompt ??= one;
+          info.lastPrompt = one;
+        }
+        continue;
+      }
       if (e.type === "system") {
         if (e.subtype === "turn_duration" && typeof e.durationMs === "number") turnDuration = e.durationMs;
         else if (e.subtype === "compact_boundary") {

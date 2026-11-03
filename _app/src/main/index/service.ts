@@ -316,7 +316,8 @@ export class IndexService extends EventEmitter {
         line = Buffer.concat(chunks).toString("utf8");
       }
       const entry = JSON.parse(line);
-      const b = entry?.message?.content?.[block];
+      // A message's image, or one in a message Claude read while it worked (Claude Code keeps those in an attachment).
+      const b = entry?.message?.content?.[block] ?? entry?.attachment?.prompt?.[block];
       if (b?.type !== "image" || b.source?.type !== "base64") return null;
       return `data:${b.source.media_type || "image/png"};base64,${b.source.data}`;
     } catch {
