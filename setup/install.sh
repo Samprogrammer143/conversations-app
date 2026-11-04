@@ -18,8 +18,16 @@ set -uo pipefail
 main() {
   CHECK=0
   [ "${1:-}" = "--check" ] && CHECK=1
+  # The app's own tests run the whole set-up on GitHub's Macs (_app/test/e2e/install-mac.sh):
+  # answers come from a file there, nothing waits for a sign-in, and the app's code comes from
+  # the copy being tested. None of this is used otherwise.
+  TEST=0
+  if [ "${CONVERSATIONS_TEST:-}" = 1 ]; then
+    TEST=1
+    exec 3< "${CONVERSATIONS_ANSWERS_FILE:?the test gives its answers in a file}"
+  fi
 
-  APP_REPO="https://github.com/Samprogrammer143/conversations-app.git"
+  APP_REPO="${CONVERSATIONS_APP_REPO_URL:-https://github.com/Samprogrammer143/conversations-app.git}"
   RELEASES="https://github.com/Samprogrammer143/conversations-app/releases/latest/download"
   SUPPORT="$HOME/Library/Application Support"
   APP_DIR="$SUPPORT/conversations-app"
@@ -39,7 +47,7 @@ main() {
 
   echo
   green "Conversations is set up. Open it from Applications, or with Spotlight (Cmd+Space, then Conversations)."
-  [ $CHECK = 1 ] || open -a "$APP" 2>/dev/null || true
+  [ $CHECK = 1 ] || [ "${CONVERSATIONS_NO_OPEN:-}" = 1 ] || open -a "$APP" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------- 1. tools
@@ -117,8 +125,13 @@ the_app() {
     fi
     ditto -x -k "$zip" "$tmp/unpacked" || stop "The download couldn't be unpacked. Run this again."
     [ -d "$tmp/unpacked/Conversations.app" ] || stop "The download doesn't hold the app. Run this again."
-    # A copy that's running is closed first, and comes back after.
-    osascript -e 'tell application "Conversations" to quit' >/dev/null 2>&1 || true
+    # A copy that's running is closed first, and comes back after. (Only asked when one runs:
+    # naming an app that isn't there makes macOS ask where it is.)
+    if pgrep -xq Conversations; then
+      osascript -e 'tell application id "com.samcan.conversations" to quit' >/dev/null 2>&1 || true
+      local i
+      for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -xq Conversations || break; sleep 1; done
+    fi
     mkdir -p "$dir"
     rm -rf "$APP"
     mv "$tmp/unpacked/Conversations.app" "$APP" || stop "Conversations couldn't be put in $dir."
@@ -198,7 +211,8 @@ this_mac() {
   while true; do
     ask "Repository address (https://github.com/you/claude-conversations):" remote
     remote="$(printf '%s' "$remote" | tr -d '[:space:]')"
-    if ! printf '%s' "$remote" | grep -Eq '^(https://[^/]+/.+|git@[^:]+:.+)$'; then
+    # (file:/// as on Windows: a repository on this Mac or a shared drive.)
+    if ! printf '%s' "$remote" | grep -Eq '^(https://[^/]+/.+|git@[^:]+:.+|file:///.+)$'; then
       say "That doesn't look like a repository address."
       continue
     fi
@@ -347,6 +361,8 @@ sign_in() {
     done_ "Signed in"
   elif [ $CHECK = 1 ]; then
     todo "would start Claude Code so you can sign in"
+  elif [ $TEST = 1 ]; then
+    todo "(test: the Claude sign-in is left out)"
   else
     say "Sign in with your own Claude account: Claude Code starts now. Type /exit once you're in."
     if [ -n "${LAUNCHER:-}" ]; then "$HOME/.local/bin/$LAUNCHER" < /dev/tty || true; else "$CLAUDE" < /dev/tty || true; fi
@@ -367,7 +383,12 @@ stop() { echo; printf '\033[31m%s\033[0m\n' "$1"; echo; exit 1; }
 ask() {
   local answer=""
   printf '      %s ' "$1"
-  { read -r answer < /dev/tty; } 2>/dev/null || stop "This needs a few answers typed in Terminal. Run it in a Terminal window."
+  if [ "${TEST:-0}" = 1 ]; then
+    read -r answer <&3 || stop "(test: no answer left for \"$1\")"
+    echo "$answer"
+  else
+    { read -r answer < /dev/tty; } 2>/dev/null || stop "This needs a few answers typed in Terminal. Run it in a Terminal window."
+  fi
   printf -v "$2" '%s' "$answer"
 }
 
