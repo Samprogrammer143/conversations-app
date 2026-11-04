@@ -150,6 +150,19 @@ describe("the verification review's gaps", () => {
     expect(classifyCommand("cd ..; npm test > new.txt", CWD, { exists }).destructive).toBe(true);
   });
 
+  it("reads a Mac's folders as a Mac does", () => {
+    const MAC = "/Users/alex/Projects/website";
+    const exists = (p: string) => p === "/Users/alex/Projects/website/README.md" || p === "/Users/alex/notes.txt";
+    expect(classifyCommand("echo hi > README.md", MAC, { exists }).consequence).toBe("Overwrites README.md. It can't be undone.");
+    expect(classifyCommand("echo hi > new.txt", MAC, { exists }).destructive).toBe(false);
+    expect(classifyCommand("echo hi > /Users/alex/notes.txt", MAC, { exists }).destructive).toBe(true);
+    expect(classifyCommand("echo hi > /tmp/fresh.txt", MAC, { exists }).destructive).toBe(false);
+    // The home folder, and anything after a cd, can't be told: they count.
+    expect(classifyCommand("echo hi > ~/notes.txt", MAC, { exists }).destructive).toBe(true);
+    expect(classifyCommand("cd ..; echo hi > new.txt", MAC, { exists }).destructive).toBe(true);
+    expect(classifyCommand("rm -rf ./build", MAC, { exists }).consequence).toMatch(/^Deletes .*build/);
+  });
+
   it("UPDATE without WHERE", () => {
     expect(said("psql -c \"UPDATE leads SET status = 'lost'\"")).toBe("Changes every row in leads. It can't be undone.");
     expect(classifyCommand("psql -c \"UPDATE leads SET status = 'lost' WHERE id = 3\"", CWD).destructive).toBe(false);

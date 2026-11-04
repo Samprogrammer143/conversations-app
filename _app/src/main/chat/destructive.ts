@@ -237,11 +237,15 @@ function takeRedirects(words: string[]): { rest: string[]; overwrites: string[] 
 function existsHere(target: string, ctx: Ctx): boolean {
   if (!ctx.exists) return true;
   const t = target.replace(/^["']|["']$/g, "");
-  if (/^[$%~/]/.test(t) || /[*?]/.test(t)) return true;
-  const absolute = /^[a-z]:[\\/]/i.test(t) || t.startsWith("\\\\");
+  if (/^[$%~]/.test(t) || /[*?]/.test(t)) return true;
+  // A chat on a Mac (or Linux) works in a POSIX folder: its paths are read that way.
+  const posix = ctx.cwd.startsWith("/");
+  // (On Windows a path starting with / is Git Bash's (/c/...): it can't be told.)
+  if (!posix && t.startsWith("/")) return true;
+  const absolute = posix ? t.startsWith("/") : /^[a-z]:[\\/]/i.test(t) || t.startsWith("\\\\");
   if (!absolute && ctx.movesAround) return true;
   try {
-    return ctx.exists(absolute ? t : path.win32.resolve(ctx.cwd, t));
+    return ctx.exists(absolute ? t : (posix ? path.posix : path.win32).resolve(ctx.cwd, t));
   } catch {
     return true;
   }
