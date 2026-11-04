@@ -165,8 +165,19 @@ app_repo() {
 
 this_mac() {
   step 4 "This Mac's conversations (your own private repository)"
+  ACTIVE_CLAUDE="$CLAUDE_DIR"
+  LAUNCHER=""
   if [ -f "$SYNC_HOME/config.json" ] && grep -q '"remote"' "$SYNC_HOME/config.json"; then
     done_ "Already set up: $(sed -n 's/.*"remote": *"\([^"]*\)".*/\1/p' "$SYNC_HOME/config.json" | head -1)"
+    return
+  fi
+  # A workspace set up earlier with its own Claude folder ("keep them out" below).
+  local own
+  own="$( [ -x "${APP_EXE:-}" ] || command -v node >/dev/null 2>&1 && MODE=own registry_js 2>/dev/null)"
+  if [ -n "$own" ]; then
+    ACTIVE_CLAUDE="$CLAUDE_DIR-$own"
+    LAUNCHER="claude-$own"
+    done_ "Already set up, with its own Claude folder ($ACTIVE_CLAUDE)"
     return
   fi
   case "$(cd "$CLAUDE_DIR" 2>/dev/null && pwd -P)" in
@@ -198,19 +209,87 @@ this_mac() {
     break
   done
 
+  local workspace=""
+  while [ -z "$workspace" ]; do ask "What should Conversations call it? (e.g. Work)" workspace; done
+
   github_login "$remote"
 
-  local chats
+  # Claude Code may have been used on this Mac before (another account, other work).
+  local chats keep_out=0
   chats="$(find "$CLAUDE_DIR/projects" -name '*.jsonl' -not -path '*/subagents/*' 2>/dev/null | wc -l | tr -d ' ')"
   if [ "${chats:-0}" -gt 0 ]; then
-    say "This Mac has $chats Claude Code chats already. They'll be uploaded to that repository too."
-    ask "Go ahead? [Y/n]" yn
-    case "$yn" in
-      [nN]*) stop "Nothing was set up. To keep those chats out, set this Mac up from the app instead: Add workspace, in the sidebar." ;;
-    esac
+    echo
+    say "This Mac already has $chats Claude Code chats (in $CLAUDE_DIR)."
+    say "  1  Bring them into $workspace: they upload to its repository."
+    say "  2  Keep them out: $workspace gets a fresh Claude folder and its own sign-in. The"
+    say "     old chats stay in Claude Code as they are, and Conversations doesn't show them."
+    local pick=""
+    while [ "$pick" != 1 ] && [ "$pick" != 2 ]; do ask "1 or 2:" pick; done
+    [ "$pick" = 2 ] && keep_out=1
   fi
-  node_run "$APP_DIR/_sync/install.mjs" --remote "$remote" --machine "$name" || stop "The sync couldn't be set up (the lines above say why). Fix that, then run this again."
-  done_ "Set up as $name"
+
+  say "Connecting ..."
+  if [ $keep_out = 0 ]; then
+    node_run "$APP_DIR/_sync/install.mjs" --remote "$remote" --machine "$name" || stop "Connecting the repository didn't work (the lines above say why). Check the address and that you can open it on github.com, then run this again."
+    # The name the app shows for this workspace (only the first time).
+    WS_NAME="$workspace" MODE=first registry_js
+  else
+    # A workspace of its own: its own Claude folder, sync folder and app data, as the app's
+    # "Add workspace" makes them; the usual Claude folder is left out of Conversations here.
+    local id
+    id="$(WS_NAME="$workspace" MODE=id registry_js)"
+    [ -n "$id" ] || stop "The workspace couldn't be named. Run this again."
+    ACTIVE_CLAUDE="$CLAUDE_DIR-$id"
+    mkdir -p "$ACTIVE_CLAUDE"
+    CLAUDE_CONFIG_DIR="$ACTIVE_CLAUDE" CLAUDE_SYNC_HOME="$SYNC_HOME-$id" node_run "$APP_DIR/_sync/install.mjs" --remote "$remote" --machine "$name" || stop "Connecting the repository didn't work (the lines above say why). Check the address and that you can open it on github.com, then run this again."
+    WS_ID="$id" WS_NAME="$workspace" WS_REMOTE="$remote" WS_CLAUDE="$ACTIVE_CLAUDE" WS_SYNC="$SYNC_HOME-$id" WS_EXE="${CLAUDE:-claude}" MODE=keep-out registry_js || stop "The workspace couldn't be recorded. Run this again."
+    LAUNCHER="claude-$id"
+    done_ "$workspace has its own Claude folder. In Terminal: $LAUNCHER (plain claude keeps the old chats)"
+  fi
+  done_ "This Mac is \"$name\" and $workspace syncs with $remote"
+}
+
+# The app's list of workspaces (workspaces.json in its data folder), read and written as the
+# app does, by the app's own Node (JSON and quoting done properly, not by hand in shell):
+#   MODE=own       print the id of a workspace set up with its own Claude folder, if any
+#   MODE=first     name the first workspace, when there's no list yet
+#   MODE=id        print a free id for WS_NAME ("Work" -> "work"), as the app makes one
+#   MODE=keep-out  record WS_ID as the current workspace, leave the usual Claude folder out,
+#                  and write its claude-<id> command in ~/.local/bin
+registry_js() {
+  REGISTRY="$SUPPORT/Conversations/workspaces.json" SYNC_HOME="$SYNC_HOME" node_run -e '
+const fs = require("fs"), path = require("path"), os = require("os");
+const e = process.env, f = e.REGISTRY;
+let reg = null;
+try { reg = JSON.parse(fs.readFileSync(f, "utf8")); } catch {}
+const extra = (reg && Array.isArray(reg.extra)) ? reg.extra : [];
+const save = (v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(v, null, 2) + "\n"); };
+if (e.MODE === "own") {
+  const w = extra.find((x) => fs.existsSync(path.join(`${e.SYNC_HOME}-${x.id}`, "repo", ".git")));
+  if (w) console.log(w.id);
+} else if (e.MODE === "first") {
+  if (!reg) save({ current: "main", mainName: e.WS_NAME, extra: [] });
+} else if (e.MODE === "id") {
+  let base = e.WS_NAME.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (base.length > 30) base = base.slice(0, 30).replace(/-+$/g, "");
+  if (!base) base = "workspace";
+  const taken = ["main", ...extra.map((x) => x.id)];
+  let id = base === "main" ? "main-2" : base;
+  for (let i = 2; taken.includes(id); i++) id = `${base}-${i}`;
+  console.log(id);
+} else if (e.MODE === "keep-out") {
+  const id = e.WS_ID;
+  const off = [...new Set([...((reg && reg.disconnected) || []), "main"])].filter((x) => x !== id);
+  save({ current: id, mainName: (reg && reg.mainName) || "Earlier Claude Code chats", extra: [...extra.filter((x) => x.id !== id), { id, name: e.WS_NAME, remote: e.WS_REMOTE }], disconnected: off });
+  const sq = (s) => "\x27" + s.replace(/\x27/g, "\x27\\\x27\x27") + "\x27";
+  const bin = path.join(os.homedir(), ".local", "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  const exe = e.WS_EXE === "claude" ? "claude" : sq(e.WS_EXE);
+  const body = ["#!/bin/sh", `# Claude Code in the ${e.WS_NAME.replace(/[\r\n]/g, " ")} workspace. Written by Conversations.`, `export CLAUDE_CONFIG_DIR=${sq(e.WS_CLAUDE)}`, `export CLAUDE_SYNC_HOME=${sq(e.WS_SYNC)}`, `exec ${exe} "$@"`, ""].join("\n");
+  fs.writeFileSync(path.join(bin, `claude-${id}`), body, { mode: 0o755 });
+  fs.chmodSync(path.join(bin, `claude-${id}`), 0o755);
+}
+'
 }
 
 # "public", "private" or "unknown", as the Windows set-up and the engine decide (a 404 is private).
@@ -260,14 +339,17 @@ github_login() {
 
 sign_in() {
   step 5 "Claude"
-  # (Claude Code keeps a Mac's login in the Keychain; its account record says it signed in.)
-  if grep -q '"oauthAccount"' "$HOME/.claude.json" 2>/dev/null || [ -f "$CLAUDE_DIR/.credentials.json" ]; then
+  # (Claude Code keeps a Mac's login in the Keychain; its account record says it signed in.
+  # The record is beside the usual Claude folder, and inside a workspace's own one.)
+  local active="${ACTIVE_CLAUDE:-$CLAUDE_DIR}" record="$HOME/.claude.json"
+  [ "$active" != "$CLAUDE_DIR" ] && record="$active/.claude.json"
+  if grep -q '"oauthAccount"' "$record" 2>/dev/null || [ -f "$active/.credentials.json" ]; then
     done_ "Signed in"
   elif [ $CHECK = 1 ]; then
     todo "would start Claude Code so you can sign in"
   else
     say "Sign in with your own Claude account: Claude Code starts now. Type /exit once you're in."
-    "$CLAUDE" < /dev/tty || true
+    if [ -n "${LAUNCHER:-}" ]; then "$HOME/.local/bin/$LAUNCHER" < /dev/tty || true; else "$CLAUDE" < /dev/tty || true; fi
   fi
 }
 
