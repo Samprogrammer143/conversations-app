@@ -169,6 +169,42 @@ function npmCommand() {
   return { cmd: "npm", pre: [], shell: false };
 }
 
+/**
+ * What `npm ci` above does, without npm: each package the lock file needs (not the dev,
+ * optional or peer ones npm leaves out there) is fetched from the registry address the
+ * lock records, checked against the hash it records, and unpacked into node_modules.
+ * curl and tar come with macOS and Windows. Answers in spawnSync's shape.
+ */
+export function installWithoutNpm(dir, { fetch = (url, file) => spawnSync("curl", ["-fsSL", "--retry", "2", "-o", file, url], { encoding: "utf8", windowsHide: true, timeout: 5 * 60_000 }) } = {}) {
+  const fail = (stderr) => ({ status: 1, stderr });
+  let lock;
+  try {
+    lock = JSON.parse(fs.readFileSync(path.join(dir, "package-lock.json"), "utf8"));
+  } catch (e) {
+    return fail(`could not read the lock file: ${e.message}`);
+  }
+  const wanted = Object.entries(lock.packages || {}).filter(([k, v]) => k.startsWith("node_modules/") && !v.dev && !v.optional && !v.peer && !v.link);
+  for (const [key, v] of wanted) {
+    // Only the public registry, only with a hash to check, and only into node_modules.
+    if (!/^https:\/\/registry\.npmjs\.org\/\S+\.tgz$/.test(v.resolved || "") || !/^sha512-[A-Za-z0-9+/=]+$/.test(v.integrity || "") || key.split("/").some((p) => p === ".." || p === "")) return fail(`${key} has no registry address and hash in the lock file`);
+    const file = path.join(dir, `pkg-${crypto.randomUUID()}.tgz`);
+    const got = fetch(v.resolved, file);
+    if (got.status !== 0 || !fs.existsSync(file)) return fail(`could not download ${key}: ${String(got.stderr || got.error?.message || "").trim()}`);
+    const sum = `sha512-${crypto.createHash("sha512").update(fs.readFileSync(file)).digest("base64")}`;
+    if (sum !== v.integrity) {
+      fs.rmSync(file, { force: true });
+      return fail(`${key} isn't what the lock file says it should be (its hash differs)`);
+    }
+    const dest = path.join(dir, ...key.split("/"));
+    fs.mkdirSync(dest, { recursive: true });
+    // npm's tarballs keep everything in a "package" folder.
+    const x = spawnSync("tar", ["-xzf", file, "-C", dest, "--strip-components=1"], { encoding: "utf8", windowsHide: true, timeout: 2 * 60_000 });
+    fs.rmSync(file, { force: true });
+    if (x.status !== 0) return fail(`could not unpack ${key}: ${String(x.stderr || x.error?.message || "").trim()}`);
+  }
+  return { status: 0, stderr: "" };
+}
+
 /** Installs the run-time packages for the app's current lock file, when they are not yet. */
 export function ensureRuntime() {
   const dir = runtimeDirFor();
@@ -188,12 +224,14 @@ export function ensureRuntime() {
   // Exactly the locked versions, no install scripts, and no optional platform builds of
   // Claude Code: the app always runs the claude this PC already has.
   const npm = npmCommand();
-  const r = spawnSync(npm.cmd, [...npm.pre, "ci", "--omit=dev", "--omit=optional", "--legacy-peer-deps", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], { cwd: tmp, encoding: "utf8", windowsHide: true, shell: npm.shell, env: { ...process.env, npm_config_update_notifier: "false" }, timeout: 10 * 60_000 });
+  let r = spawnSync(npm.cmd, [...npm.pre, "ci", "--omit=dev", "--omit=optional", "--legacy-peer-deps", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], { cwd: tmp, encoding: "utf8", windowsHide: true, shell: npm.shell, env: { ...process.env, npm_config_update_notifier: "false" }, timeout: 10 * 60_000 });
+  // No npm on this Mac (it needs no Node: the app runs this engine itself). (Windows' set-up installs Node.)
+  if (r.error?.code === "ENOENT" && process.platform !== "win32") r = installWithoutNpm(tmp);
   if (r.status !== 0) {
     fs.rmSync(tmp, { recursive: true, force: true });
     const err = ((r.stderr || "") + (r.error?.message || "")).trim().split(/\r?\n/).slice(-3).join(" ");
     log(`could not install the app's run-time packages: ${err}`);
-    return { ok: false, offline: /ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ECONNRE/i.test(err), err };
+    return { ok: false, offline: /ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ECONNRE|Could not resolve host|Failed to connect|timed out/i.test(err), err };
   }
   fs.writeFileSync(path.join(tmp, ".ready"), new Date().toISOString());
   try {

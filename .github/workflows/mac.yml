@@ -75,6 +75,14 @@ jobs:
         continue-on-error: true
         run: npm run dist:mac 2>&1 | tee ../out/package.txt; exit ${PIPESTATUS[0]}
 
+      - name: The Mac set-up script (check only)
+        id: setup
+        continue-on-error: true
+        working-directory: .
+        run: |
+          bash -n setup/install.sh
+          bash setup/install.sh --check 2>&1 | tee out/setup.txt; exit ${PIPESTATUS[0]}
+
       - name: Check the packaged app
         if: steps.package.outcome == 'success'
         continue-on-error: true
@@ -104,9 +112,9 @@ jobs:
           retention-days: 7
 
       - name: Fail if anything failed
-        if: steps.unit.outcome == 'failure' || steps.sync.outcome == 'failure' || steps.e2e.outcome == 'failure' || steps.package.outcome == 'failure'
+        if: steps.unit.outcome == 'failure' || steps.sync.outcome == 'failure' || steps.e2e.outcome == 'failure' || steps.package.outcome == 'failure' || steps.setup.outcome == 'failure'
         run: |
-          echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} e2e=${{ steps.e2e.outcome }} package=${{ steps.package.outcome }}"
+          echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} e2e=${{ steps.e2e.outcome }} package=${{ steps.package.outcome }} setup=${{ steps.setup.outcome }}"
           exit 1
 
   windows:

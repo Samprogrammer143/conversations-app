@@ -832,7 +832,14 @@ const sH = readJsonT(path.join(HH, ".claude", "settings.json")) ?? { hooks: {} }
 const cmdsH = Object.values(sH.hooks ?? {}).flat().flatMap((g) => g.hooks.map((h) => h.command));
 const skillH = fs.existsSync(path.join(HH, ".claude", "skills", "push", "SKILL.md")) ? fs.readFileSync(path.join(HH, ".claude", "skills", "push", "SKILL.md"), "utf8") : "";
 const TOOL_H = `"$HOME/${LOCAL_REL.join("/")}/claude-conversation-sync/repo/_sync/sync.mjs"`;
-check("hooks: install names the tool from $HOME when it is in its usual place", r.status === 0 && cmdsH.length === 3 && cmdsH.every((c) => c.startsWith(`node ${TOOL_H} hook `)) && skillH.includes(TOOL_H), r.stdout + r.stderr + cmdsH.join("\n"));
+// (A Mac runs it with conversations-node, which needs no Node of its own: see install.mjs.)
+const RUN_H = process.platform === "darwin" ? '"$HOME/.local/bin/conversations-node"' : "node";
+check("hooks: install names the tool from $HOME when it is in its usual place", r.status === 0 && cmdsH.length === 3 && cmdsH.every((c) => c.startsWith(`${RUN_H} ${TOOL_H} hook `)) && skillH.includes(TOOL_H), r.stdout + r.stderr + cmdsH.join("\n"));
+if (process.platform === "darwin") {
+  const shim = path.join(HH, ".local", "bin", "conversations-node");
+  const st = fs.existsSync(shim) ? fs.statSync(shim) : null;
+  check("hooks: on a Mac, conversations-node is written, runnable, and the skills may run only it", !!st && (st.mode & 0o111) !== 0 && fs.readFileSync(shim, "utf8").includes("ELECTRON_RUN_AS_NODE=1") && skillH.includes("allowed-tools: Bash(conversations-node:*)") && skillH.includes(`\`conversations-node ${TOOL_H}`) && !/\bnode:\*/.test(skillH.replace("conversations-node:*", "")), skillH.slice(0, 400));
+}
 const gitBash = (() => {
   if (process.platform !== "win32") return "sh";
   const ex = spawnSync("git", ["--exec-path"], { encoding: "utf8" }).stdout.trim();
@@ -1290,6 +1297,39 @@ check("live: a transcript dated hours in the future is not treated as live", has
   const movedNow = jsonOf(run(B, ["pull", IDN, "--cwd", chosen, "--json", "--into-cwd"], live));
   check("move: straight after that download it still moves", movedNow?.ok && !fs.existsSync(TB2) && fs.readFileSync(movedNow.dest, "utf8").includes("newer on GitHub"), JSON.stringify(movedNow));
   check("move: no temporary file is left", !fs.readdirSync(path.dirname(movedNow?.dest ?? TB2)).some((f) => f.endsWith(".tmp")));
+}
+
+// ---- 60. Without npm (a Mac needs no Node), the run-time packages come straight from the
+// registry address the lock file records, only when they match its hash
+if (process.platform !== "win32") {
+  const D = path.join(T, "no-npm");
+  fs.rmSync(D, { recursive: true, force: true });
+  const src = path.join(D, "src", "package");
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, "package.json"), JSON.stringify({ name: "@x/sdk", version: "1.0.0" }));
+  fs.writeFileSync(path.join(src, "sdk.mjs"), "export const ok = 1;\n");
+  const tgz = path.join(D, "sdk.tgz");
+  spawnSync("tar", ["-czf", tgz, "-C", path.join(D, "src"), "package"]);
+  const sum = `sha512-${(await import("node:crypto")).createHash("sha512").update(fs.readFileSync(tgz)).digest("base64")}`;
+  const tryLock = (name, sdk) => {
+    const dir = path.join(D, name);
+    fs.mkdirSync(dir, { recursive: true });
+    const optional = { optional: true, resolved: "https://registry.npmjs.org/@x/sdk-linux/-/sdk-linux-1.0.0.tgz", integrity: sum };
+    fs.writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/@x/sdk": sdk, "node_modules/@x/sdk-linux": optional } }));
+    const code = `const e = await import(${JSON.stringify(ENGINE_URL)}); const fs = await import("node:fs"); const asked = [];
+const r = e.installWithoutNpm(${JSON.stringify(dir)}, { fetch: (url, file) => { asked.push(url); fs.copyFileSync(${JSON.stringify(tgz)}, file); return { status: 0 }; } });
+console.log(JSON.stringify({ ...r, asked }));`;
+    const out = spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8" });
+    let res = null;
+    try { res = JSON.parse(out.stdout.trim()); } catch {}
+    return { dir, res, err: out.stderr };
+  };
+  const good = tryLock("good", { version: "1.0.0", resolved: "https://registry.npmjs.org/@x/sdk/-/sdk-1.0.0.tgz", integrity: sum });
+  check("no npm: the locked package is fetched, checked and unpacked, and nothing optional", good.res?.status === 0 && good.res.asked.length === 1 && fs.existsSync(path.join(good.dir, "node_modules", "@x", "sdk", "sdk.mjs")) && !fs.existsSync(path.join(good.dir, "node_modules", "@x", "sdk-linux")) && !fs.readdirSync(good.dir).some((f) => f.endsWith(".tgz")), JSON.stringify(good.res) + good.err);
+  const bad = tryLock("bad", { version: "1.0.0", resolved: "https://registry.npmjs.org/@x/sdk/-/sdk-1.0.0.tgz", integrity: "sha512-AAAA" });
+  check("no npm: a download that doesn't match the lock file's hash is refused", bad.res?.status === 1 && /hash/.test(bad.res.stderr) && !fs.existsSync(path.join(bad.dir, "node_modules", "@x", "sdk", "sdk.mjs")), JSON.stringify(bad.res) + bad.err);
+  const elsewhere = tryLock("elsewhere", { version: "1.0.0", resolved: "https://example.com/sdk-1.0.0.tgz", integrity: sum });
+  check("no npm: only the public registry is used", elsewhere.res?.status === 1 && elsewhere.res.asked.length === 0, JSON.stringify(elsewhere.res) + elsewhere.err);
 }
 
 for (const x of results) console.log(`${x.ok ? "PASS" : "FAIL"}  ${x.name}${x.ok || !x.detail ? "" : `\n      ${String(x.detail).trim().slice(0, 500).replace(/\n/g, "\n      ")}`}`);

@@ -249,6 +249,37 @@ function toolPath() {
 }
 const SYNC = toolPath();
 
+// What runs the tool. On a Mac, which needs no Node of its own, it's `conversations-node` in
+// ~/.local/bin (beside Claude Code's own `claude`): the Conversations app's Node (Electron
+// run as Node, as VS Code's `code` command does), or else a node on PATH. Elsewhere, node.
+const MAC = process.platform === "darwin";
+const NODE_SHIM = path.join(HOME, ".local", "bin", "conversations-node");
+function nodeShimScript(apps) {
+  const sq = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+  return [
+    "#!/bin/sh",
+    "# Runs Conversations' sync for Claude Code's hooks and the /push and /pull skills: with the",
+    "# Conversations app's own Node (Electron run as Node), else a node on PATH.",
+    "# Written by Conversations' installer (_sync/install.mjs).",
+    `for exe in ${apps.map(sq).join(" ")}; do`,
+    '  if [ -x "$exe" ]; then ELECTRON_RUN_AS_NODE=1 exec "$exe" "$@"; fi',
+    "done",
+    'if command -v node >/dev/null 2>&1; then exec node "$@"; fi',
+    "echo \"Conversations isn't installed, and there's no Node.js to run its sync with.\" >&2",
+    "exit 1",
+    "",
+  ].join("\n");
+}
+if (MAC) {
+  // The app this installer runs in first (when it does), then the usual places for it.
+  const running = /^.*?\.app\/Contents\/MacOS\/[^/]+$/.test(process.execPath) ? [process.execPath] : [];
+  const apps = [...new Set([...running, "/Applications/Conversations.app/Contents/MacOS/Conversations", path.join(HOME, "Applications", "Conversations.app", "Contents", "MacOS", "Conversations")])];
+  fs.mkdirSync(path.dirname(NODE_SHIM), { recursive: true });
+  fs.writeFileSync(NODE_SHIM, nodeShimScript(apps), { mode: 0o755 });
+  fs.chmodSync(NODE_SHIM, 0o755);
+}
+const RUN = MAC ? `"$HOME/${fwd(path.relative(HOME, NODE_SHIM))}"` : "node";
+
 // 3. Machine config.
 const configPath = path.join(SYNC_DIR, "config.json");
 let config = {};
@@ -271,7 +302,9 @@ for (const name of ["push", "pull"]) {
   }
   fs.mkdirSync(dest, { recursive: true });
   const src = fs.readFileSync(path.join(TOOL_DIR, "skills", name, "SKILL.md"), "utf8");
-  fs.writeFileSync(destFile, src.replaceAll("{{SYNC}}", SYNC));
+  // (On a Mac the skills run the tool with conversations-node, and may run only that.)
+  const text = MAC ? src.replaceAll("Bash(node:*)", "Bash(conversations-node:*)").replaceAll('`node "{{SYNC}}"', '`conversations-node "{{SYNC}}"') : src;
+  fs.writeFileSync(destFile, text.replaceAll("{{SYNC}}", SYNC));
 }
 
 // 5. Hooks in the Claude settings (existing settings are kept; a backup is written first).
@@ -297,7 +330,7 @@ for (const [event, [arg, timeout]] of Object.entries(wanted)) {
   // A workspace's hooks name its sync folder (a terminal's Claude Code has no CLAUDE_SYNC_HOME
   // of its own), as an argument: it works in every shell a hook may run in.
   const home = process.env.CLAUDE_SYNC_HOME && (remoteArg || hadHome) ? ` --sync-home "${fwd(SYNC_DIR)}"` : "";
-  kept.push({ hooks: [{ type: "command", command: `node "${SYNC}" hook ${arg}${home}`, timeout }] });
+  kept.push({ hooks: [{ type: "command", command: `${RUN} "${SYNC}" hook ${arg}${home}`, timeout }] });
   settings.hooks[event] = kept;
 }
 // Written only when something changed. The first backup keeps the settings from before
