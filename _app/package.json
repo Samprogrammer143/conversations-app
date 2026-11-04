@@ -16,7 +16,8 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "dist": "node scripts/build.mjs && electron-builder --win nsis --publish never",
-    "dist:public": "node scripts/dist-public.mjs"
+    "dist:public": "node scripts/dist-public.mjs",
+    "dist:mac": "node scripts/dist-public.mjs --mac"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",
@@ -98,6 +99,22 @@
       "shortcutName": "Conversations",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon-mac.png",
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "darkModeSupport": true,
+      "artifactName": "${productName}-mac-${arch}.${ext}"
     },
     "protocols": [
       {

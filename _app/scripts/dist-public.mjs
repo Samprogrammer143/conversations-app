@@ -1,9 +1,11 @@
 // The installer to publish, and the download that goes with it.
-//   node scripts/dist-public.mjs
+//   node scripts/dist-public.mjs          Windows: Conversations-Setup.zip
+//   node scripts/dist-public.mjs --mac    macOS (on a Mac): Conversations-mac-arm64.zip and -x64.zip
 // The same app as `npm run dist`, without Claude's Agent SDK inside: its licence doesn't let
 // anyone pass it on, so the set-up installs it from npm on each PC instead (the engine's
-// ensureRuntime). The download is a zip of the installer, the set-up files and the licence:
-// unzip it and double-click "Set up Conversations.cmd".
+// ensureRuntime). The Windows download is a zip of the installer, the set-up files and the
+// licence: unzip it and double-click "Set up Conversations.cmd". The Mac downloads are the
+// app alone, zipped: setup/install.sh fetches the one for the Mac it runs on.
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -20,6 +22,10 @@ const built = spawnSync(process.execPath, [path.join(root, "scripts", "build.mjs
 if (built.status !== 0) process.exit(built.status ?? 1);
 
 const builder = require("electron-builder");
+if (process.argv.includes("--mac")) {
+  await mac();
+  process.exit(0);
+}
 const config = {
   ...pkg.build,
   directories: { ...pkg.build.directories, output: out },
@@ -55,3 +61,31 @@ const ps = (s) => `'${s.replace(/'/g, "''")}'`; // a PowerShell string: ' double
 const z = spawnSync("powershell", ["-NoProfile", "-Command", `Compress-Archive -Path (Join-Path ${ps(stage)} '*') -DestinationPath ${ps(zip)} -Force`], { stdio: "inherit" });
 if (z.status !== 0) process.exit(z.status ?? 1);
 console.log(`\n${zip} (${(fs.statSync(zip).size / 1048576).toFixed(1)} MB)`);
+
+// The Mac app, for Apple silicon and for Intel. Unsigned (no paid Apple account): the
+// install script gives it a local signature on the Mac it lands on, and since it comes
+// through Terminal rather than a browser, macOS doesn't hold it back. electron-builder
+// fetches Electron for each architecture itself (node_modules has only this Mac's).
+async function mac() {
+  if (process.platform !== "darwin") throw new Error("the Mac app can only be built on a Mac (CI does it: .github/workflows/mac.yml)");
+  const config = {
+    ...pkg.build,
+    directories: { ...pkg.build.directories, output: out },
+    extraResources: pkg.build.extraResources.filter((r) => !String(r.from).includes("claude-agent-sdk")),
+    afterPack: async (ctx) => {
+      const res = path.join(ctx.appOutDir, `${pkg.build.productName}.app`, "Contents", "Resources");
+      for (const p of ["sdk", "default_app.asar"]) fs.rmSync(path.join(res, p), { recursive: true, force: true });
+    },
+  };
+  fs.rmSync(out, { recursive: true, force: true });
+  await builder.build({ projectDir: root, targets: builder.Platform.MAC.createTarget("zip", builder.Arch.arm64, builder.Arch.x64), config, publish: "never" });
+  for (const arch of ["arm64", "x64"]) {
+    const zip = path.join(out, `${pkg.build.productName}-mac-${arch}.zip`);
+    if (!fs.existsSync(zip)) throw new Error(`no ${zip}`);
+    const res = path.join(out, arch === "x64" ? "mac" : `mac-${arch}`, `${pkg.build.productName}.app`, "Contents", "Resources");
+    if (!fs.existsSync(res)) throw new Error(`no app at ${res}`);
+    const sdk = fs.readdirSync(res, { recursive: true }).some((f) => String(f).includes("claude-agent-sdk"));
+    if (sdk) throw new Error(`Claude's Agent SDK is inside the ${arch} Mac app`);
+    console.log(`${zip} (${(fs.statSync(zip).size / 1048576).toFixed(1)} MB)`);
+  }
+}

@@ -1,0 +1,100 @@
+# The Mac version, built and tested on GitHub's Macs (free for a public repository).
+# Runs on every push to the mac branch; nothing here touches main or anyone's install.
+# Everything it makes (test results, screenshots, the app zips) is kept as the run's
+# artifacts for a week.
+name: Mac
+
+on:
+  push:
+    branches: [mac]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac:
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: _app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: _app/package-lock.json
+
+      - name: Git identity for the sync tests
+        run: |
+          git config --global user.name "Conversations CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        id: unit
+        continue-on-error: true
+        run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=../out/unit.xml
+
+      - name: Sync engine tests
+        id: sync
+        continue-on-error: true
+        working-directory: _sync
+        run: |
+          mkdir -p ../out
+          node test.mjs 2>&1 | tee ../out/sync.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Build
+        run: npm run build
+
+      - name: Package the Mac app (unsigned, without the Agent SDK)
+        id: package
+        continue-on-error: true
+        run: npm run dist:mac 2>&1 | tee ../out/package.txt; exit ${PIPESTATUS[0]}
+
+      - name: Check the packaged app
+        if: steps.package.outcome == 'success'
+        continue-on-error: true
+        run: |
+          for a in mac-arm64 mac; do
+            app="release-public/$a/Conversations.app"
+            echo "== $app"
+            /usr/bin/file "$app/Contents/MacOS/Conversations"
+            codesign -dv "$app" 2>&1 || true
+            ls "$app/Contents/Resources"
+          done 2>&1 | tee ../out/app-check.txt
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: out/
+          retention-days: 7
+
+      - name: Keep the Mac apps
+        if: steps.package.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-apps
+          path: _app/release-public/*.zip
+          retention-days: 7
+
+      - name: Fail if anything failed
+        if: steps.unit.outcome == 'failure' || steps.sync.outcome == 'failure' || steps.package.outcome == 'failure'
+        run: |
+          echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} package=${{ steps.package.outcome }}"
+          exit 1
