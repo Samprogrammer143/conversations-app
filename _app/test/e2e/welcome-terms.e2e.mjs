@@ -26,8 +26,9 @@ fs.writeFileSync(settingsFile, JSON.stringify({ welcomed: false, syncAutomatical
 const env = launchEnv({ CLAUDE_CONFIG_DIR: claudeDir, CONVERSATIONS_DATA_DIR: dataDir });
 const saved = () => JSON.parse(fs.readFileSync(settingsFile, "utf8"));
 const launch = () => electron.launch({ args: [root], cwd: root, env, timeout: 60_000 });
-// Get started, or Continue without chat when this PC has no Claude Code.
-const goOn = ".welcome-window .btn-primary:not(:has(.spinner)), .welcome-window .row-actions .btn-plain";
+// Get started, or Continue without chat when this PC has no Claude Code. (Not Check again,
+// beside it then: that only looks for Claude Code again, and never goes on.)
+const goOn = ".welcome-window .btn-primary:not(.row-actions > *), .welcome-window .row-actions .btn-plain";
 
 try {
   // 1. Closed without accepting.
