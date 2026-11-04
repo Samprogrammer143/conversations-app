@@ -48,6 +48,7 @@ describe("which programs are Claude Code on a Mac", () => {
     expect(processNameFromPs("claude --resume abc\n")).toBe("claude");
     expect(processNameFromPs("/Users/alex/.local/bin/claude")).toBe("claude");
     expect(processNameFromPs("node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js")).toBe("claude");
+    expect(processNameFromPs("/Users/alex/.local/share/claude/versions/2.1.318 --resume abc")).toBe("claude");
     expect(processNameFromPs("/usr/bin/vim notes.txt")).toBe("vim");
     expect(processNameFromPs("")).toBeNull();
   });

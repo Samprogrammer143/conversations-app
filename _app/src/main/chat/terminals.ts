@@ -111,7 +111,8 @@ export function processNameFromPs(args: string): string | null {
   const line = args.trim();
   if (!line) return null;
   const first = line.split(/\s+/)[0];
-  if (/(^|\/)claude$/.test(first) || /\/claude-code\/|\/bin\/claude(\s|$)/.test(line)) return "claude";
+  // (Also started by its own versioned file, ~/.local/share/claude/versions/2.1.x.)
+  if (/(^|\/)claude$/.test(first) || /\/claude-code\/|\/bin\/claude(\s|$)|\/claude\/versions\/[^/\s]+(\s|$)/.test(line)) return "claude";
   return first.split("/").pop() || "?";
 }
 

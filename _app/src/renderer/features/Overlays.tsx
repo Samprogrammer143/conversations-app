@@ -657,7 +657,7 @@ function WelcomeContent({ info, pcs, total, onDone, onClose }: { info: AppInfo; 
             <Icon name={info.syncSetUp ? "circle-check" : "triangle-alert"} className={info.syncSetUp ? "ok" : "bad"} />
             <div>
               <div className="t1">{info.syncSetUp ? "Sync repository connected" : `Sync isn't set up on this ${pcWord()}`}</div>
-              <div className="t2">{info.syncSetUp ? `${repoLabel(info.repo)}${SEP}private` : `Run Set up Conversations on this ${pcWord()}, with your conversations repository`}</div>
+              <div className="t2">{info.syncSetUp ? `${repoLabel(info.repo)}${SEP}private` : isMac() ? "Run the set-up command from conversations.tidewaystudios.com in Terminal, with your conversations repository" : `Run Set up Conversations on this ${pcWord()}, with your conversations repository`}</div>
             </div>
           </div>
           <div className="check-row">

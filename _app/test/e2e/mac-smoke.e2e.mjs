@@ -28,8 +28,16 @@ fs.mkdirSync(path.join(scratch, ".claude"), { recursive: true });
 fs.mkdirSync(dataDir, { recursive: true });
 fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ welcomed: true, termsAcceptedAt: new Date().toISOString(), syncAutomatically: false, startAtLogin: false }));
 const env = launchEnv({ CLAUDE_CONFIG_DIR: path.join(scratch, ".claude"), CLAUDE_SYNC_HOME: path.join(scratch, "sync"), CONVERSATIONS_DATA_DIR: dataDir, CONVERSATIONS_TEST_NO_RELAUNCH: "1" });
-// As the Finder starts an app: only the system's folders on PATH (the app reads the rest from the login shell).
-if (mac) env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+// As the Finder starts an app: only the system's folders on PATH (the app reads the rest from the
+// login shell). The test's home folder has a .zshrc adding a folder of its own, so the check
+// below can tell the shell was read, not just the usual folders added.
+const shellOnly = path.join(scratch, "only-from-zshrc");
+if (mac) {
+  env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+  env.HOME = scratch;
+  env.SHELL = "/bin/zsh";
+  fs.writeFileSync(path.join(scratch, ".zshrc"), `export PATH="${shellOnly}:$PATH"\n`);
+}
 delete env.CONVERSATIONS_LOGIN_PATH;
 
 const app = await electron.launch({ args: [root], cwd: root, env, timeout: 90_000 });
@@ -45,8 +53,16 @@ try {
   check("the Electron profile is inside the app's data folder", userData === path.join(dataDir, "electron"), userData);
 
   if (mac) {
-    const mainPath = await app.evaluate(() => process.env.PATH);
-    check("PATH has the usual Mac tool folders, not just the system's", /(^|:)\/opt\/homebrew\/bin(:|$)/.test(mainPath) && /(^|:)\/usr\/local\/bin(:|$)/.test(mainPath), mainPath);
+    // The shell is read in the background: its answer can take a moment.
+    let mainPath = "";
+    for (let i = 0; i < 30; i++) {
+      mainPath = await app.evaluate(() => process.env.PATH);
+      if (mainPath.split(":").includes(shellOnly)) break;
+      await w.waitForTimeout(500);
+    }
+    check("PATH has what the login shell adds (its .zshrc read)", mainPath.split(":").includes(shellOnly), mainPath);
+    check("...and the usual Mac tool folders", /(^|:)\/opt\/homebrew\/bin(:|$)/.test(mainPath) && /(^|:)\/usr\/local\/bin(:|$)/.test(mainPath), mainPath);
+    check("...and keeps it for the next start", fs.existsSync(path.join(dataDir, "login-path.json")) && fs.readFileSync(path.join(dataDir, "login-path.json"), "utf8").includes(shellOnly));
 
     const menu = await app.evaluate(({ Menu }) => (Menu.getApplicationMenu()?.items ?? []).map((i) => ({ label: i.label, role: i.role, items: (i.submenu?.items ?? []).map((s) => s.role || s.label) })));
     const edit = menu.find((m) => m.role === "editmenu" || m.label === "Edit");

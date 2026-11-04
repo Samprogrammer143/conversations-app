@@ -8,6 +8,7 @@ import path from "node:path";
 import { app, dialog, type BrowserWindow } from "electron";
 import { hasWindowsTerminal, refreshClaude } from "./claude";
 import { encodePowerShell, focusScript, macFocusCommand, macTerminalCommand, terminalCommand } from "./launch";
+import { openTerminal } from "./mac";
 import { handOver, type PullOutcome } from "./handover";
 import { folderForTranscript, safeFolderName } from "./resume-folder";
 import { sessionProcesses } from "./chat/terminals";
@@ -64,7 +65,9 @@ const isMac = process.platform === "darwin";
 const TERMINAL = isMac ? "Terminal" : "Windows Terminal";
 
 export function launchInTerminal(folder: string, exe: string, args: string[]): void {
-  const c = isMac ? macTerminalCommand(folder, exe, args) : terminalCommand(folder, exe, args, hasWindowsTerminal());
+  // (A Mac: osascript, whose answer says whether macOS let Conversations open Terminal.)
+  if (isMac) return openTerminal(macTerminalCommand(folder, exe, args), "carry on in Claude Code");
+  const c = terminalCommand(folder, exe, args, hasWindowsTerminal());
   const child = spawn(c.file, c.args, { cwd: folder, detached: true, stdio: "ignore", windowsHide: c.file !== "wt.exe" });
   child.on("error", (e) => log("cli", `could not start ${c.file}: ${e.message}`));
   child.unref();

@@ -1,10 +1,10 @@
 // A Mac app started from the Finder, the Dock or at login gets launchd's PATH:
 // /usr/bin:/bin:/usr/sbin:/sbin. The user's own tools (Homebrew's git, node and npm,
 // Claude Code in ~/.local/bin, whatever their MCP servers run) are on the PATH their login
-// shell sets up, so that is read once, at start, and everything the app starts inherits it.
-// Only PATH is taken from the shell. Elsewhere this does nothing.
+// shell sets up, so that is read from the shell, and everything the app starts after that
+// inherits it. Only PATH is taken from the shell. Elsewhere this does nothing.
 
-import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,22 +31,74 @@ export function mergePath(shellPath: string | null, current: string | undefined,
   return [...new Set(parts.map((p) => p.trim()).filter(Boolean))].join(":");
 }
 
-export function useLoginShellPath(): void {
-  // Once per app: what it starts inherits both the PATH and this mark.
-  if (process.platform !== "darwin" || process.env.CONVERSATIONS_LOGIN_PATH) return;
-  process.env.CONVERSATIONS_LOGIN_PATH = "1";
-  let shellPath: string | null = null;
-  const shell = process.env.SHELL && fs.existsSync(process.env.SHELL) ? process.env.SHELL : "/bin/zsh";
-  try {
-    // Interactive and login, as Terminal starts it, so .zshrc's additions (nvm and the like)
-    // count too. No input, and a time limit, in case something in it waits for one.
-    const out = execFileSync(shell, ["-ilc", `printf '%s%s%s' '${MARK}' "$PATH" '${MARK}'`], {
-      encoding: "utf8",
-      timeout: 4000,
-      stdio: ["ignore", "pipe", "ignore"],
-      env: { ...process.env, DISABLE_AUTO_UPDATE: "true", ZSH_DISABLE_COMPFIX: "true" },
+/**
+ * The login shell's PATH, asked as Terminal starts it (interactive and login, so .zshrc's
+ * additions such as nvm count too). The shell is stopped the moment it has printed PATH, so
+ * an rc file that leaves something running in the background can't keep it waiting, and
+ * after `timeoutMs` at the most. Null if it can't tell.
+ */
+export function readLoginShellPath(shell = process.env.SHELL && fs.existsSync(process.env.SHELL) ? process.env.SHELL : "/bin/zsh", timeoutMs = 10_000): Promise<string | null> {
+  return new Promise((resolve) => {
+    let out = "";
+    let done = false;
+    let child: ReturnType<typeof spawn>;
+    try {
+      // A process group of its own, so what the rc files start goes with it.
+      child = spawn(shell, ["-ilc", `printf '%s%s%s' '${MARK}' "$PATH" '${MARK}'`], {
+        stdio: ["ignore", "pipe", "ignore"],
+        detached: true,
+        env: { ...process.env, DISABLE_AUTO_UPDATE: "true", ZSH_DISABLE_COMPFIX: "true" },
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    const finish = (value: string | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(parseShellPath(out)), timeoutMs);
+    child.stdout?.on("data", (d) => {
+      out += d;
+      const value = parseShellPath(out);
+      if (value) finish(value);
     });
-    shellPath = parseShellPath(out);
+    child.on("error", () => finish(null));
+    child.on("close", () => finish(parseShellPath(out)));
+  });
+}
+
+/**
+ * Gives the app the user's PATH without holding up its start: the PATH the shell gave last
+ * time (kept in `cacheFile`) is used at once, and the shell is asked again in the background.
+ * When it answers, PATH is updated for everything started from then on, and kept for next time.
+ */
+export function useLoginShellPath(cacheFile?: string): Promise<void> {
+  // Once per app: what it starts inherits both the PATH and this mark.
+  if (process.platform !== "darwin" || process.env.CONVERSATIONS_LOGIN_PATH) return Promise.resolve();
+  process.env.CONVERSATIONS_LOGIN_PATH = "1";
+  const given = process.env.PATH;
+  let remembered: string | null = null;
+  try {
+    if (cacheFile) remembered = JSON.parse(fs.readFileSync(cacheFile, "utf8"))?.path ?? null;
   } catch {}
-  process.env.PATH = mergePath(shellPath, process.env.PATH, usualMacFolders());
+  process.env.PATH = mergePath(remembered, given, usualMacFolders());
+  return readLoginShellPath().then((fresh) => {
+    if (!fresh) return;
+    process.env.PATH = mergePath(fresh, given, usualMacFolders());
+    if (!cacheFile) return;
+    try {
+      fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+      fs.writeFileSync(cacheFile, JSON.stringify({ path: fresh, at: new Date().toISOString() }));
+    } catch {}
+  });
 }

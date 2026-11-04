@@ -5,8 +5,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { app, Menu, type MenuItemConstructorOptions } from "electron";
+import { execFile } from "node:child_process";
+import { app, dialog, Menu, type MenuItemConstructorOptions } from "electron";
 import { log } from "./log";
 import { macTerminalLine, shQuote } from "./launch";
 import { defaultDataDir } from "../shared/dirs";
@@ -45,6 +45,8 @@ export function launchAgentPlist(bundle: string): string {
     '<plist version="1.0">',
     "<dict>",
     `  <key>Label</key><string>${AGENT}</string>`,
+    // (So macOS's Login Items list shows it as Conversations, not "open".)
+    "  <key>AssociatedBundleIdentifiers</key><string>com.samcan.conversations</string>",
     "  <key>ProgramArguments</key>",
     "  <array>",
     ...args.map((a) => `    <string>${xml(a)}</string>`),
@@ -98,11 +100,26 @@ export function macGitHubSignIn(): { ok: boolean; err?: string } {
   const gh = findGh();
   if (!gh) return { ok: false, err: "Signing in to GitHub on a Mac uses GitHub's own tool: install it (brew install gh, or cli.github.com), then try again." };
   const q = shQuote(gh);
-  const c = macTerminalLine(`${q} auth login --hostname github.com --git-protocol https --web && ${q} auth setup-git --hostname github.com`);
-  const child = spawn(c.file, c.args, { detached: true, stdio: "ignore" });
-  child.on("error", (e) => log("app", `could not open Terminal to sign in to GitHub: ${e.message}`));
-  child.unref();
+  openTerminal(macTerminalLine(`${q} auth login --hostname github.com --git-protocol https --web && ${q} auth setup-git --hostname github.com`), "sign in to GitHub");
   return { ok: false, err: "Finish signing in to GitHub in the Terminal window that opened, then choose Sync now." };
+}
+
+/**
+ * Runs an osascript command that opens Terminal. The first time, macOS asks whether
+ * Conversations may control Terminal; if that was refused, it says where to allow it
+ * rather than nothing happening.
+ */
+export function openTerminal(c: { file: string; args: string[] }, what: string): void {
+  execFile(c.file, c.args, { timeout: 60_000 }, (err, _out, stderr) => {
+    if (!err) return;
+    log("app", `could not open Terminal to ${what}: ${String(stderr || err.message).trim().split("\n").pop()}`);
+    const refused = /-1743|not allowed|not authori[sz]ed/i.test(String(stderr) + err.message);
+    void dialog.showMessageBox({
+      type: "warning",
+      message: refused ? "Conversations isn't allowed to open Terminal" : "Terminal didn't open",
+      detail: refused ? "Allow it in System Settings, Privacy & Security, Automation: turn on Terminal under Conversations. Then try again." : `Conversations couldn't open Terminal to ${what}. Try again in a moment.`,
+    });
+  });
 }
 
 // ------------------------------------------------------------ the app menu
@@ -130,7 +147,8 @@ export function macAppMenu(actions: { settings: () => void; quit: () => void; qu
     { role: "editMenu" },
     // Reload and the developer tools only while developing: a reload loses the window's state.
     { label: "View", submenu: [...(app.isPackaged ? [] : ([{ role: "reload" }, { role: "toggleDevTools" }, { type: "separator" }] as MenuItemConstructorOptions[])), { role: "togglefullscreen" }] },
-    { role: "windowMenu" },
+    // (The Window menu's own role has no Close: Cmd+W needs it here.)
+    { role: "window", submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }, { type: "separator" }, { role: "front" }] },
   ];
   return Menu.buildFromTemplate(template);
 }

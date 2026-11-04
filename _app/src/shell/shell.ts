@@ -15,14 +15,15 @@ import { useLoginShellPath } from "../shared/login-path";
 // 2: the app comes from the app's own repository (1 took it from the conversations repository).
 const SHELL_VERSION = "2.0.0";
 
-// A Mac app started from the Finder or the Dock gets only the system's own folders on
-// PATH: git from Homebrew, Claude Code's hooks and its MCP servers need the user's.
-useLoginShellPath();
-
 const appRepo = () => process.env.CONVERSATIONS_APP_HOME || defaultAppHome();
 // A PC that was reinstalled before its sync moved: the app is still in its conversations repository.
 const oldRepo = () => path.join(process.env.CLAUDE_SYNC_HOME || defaultSyncHome(), "repo");
 const dataDir = () => process.env.CONVERSATIONS_DATA_DIR || defaultDataDir();
+
+// A Mac app started from the Finder or the Dock gets only the system's own folders on
+// PATH: git from Homebrew, Claude Code's hooks and its MCP servers need the user's. (In the
+// background: the start doesn't wait for the shell.)
+void useLoginShellPath(path.join(dataDir(), "login-path.json"));
 
 function log(msg: string) {
   try {

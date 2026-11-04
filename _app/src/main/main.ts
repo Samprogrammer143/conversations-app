@@ -48,8 +48,8 @@ import { useLoginShellPath } from "../shared/login-path";
 import { PC } from "./words";
 
 // A Mac app started from the Finder has only the system's folders on PATH (the installed
-// app's shell has done this already; development and tests start here).
-useLoginShellPath();
+// app's shell has done this already; development and tests start here). In the background.
+void useLoginShellPath(path.join(appDataDir(), "login-path.json"));
 
 // A programming mistake must never take the tray agent (and sync) down with it.
 // Logged, never shown as a dialog: the window shows nothing and the app carries on.

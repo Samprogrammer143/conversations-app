@@ -15,7 +15,7 @@
 
 import { PC } from "./words";
 
-export const OPEN_ON_THIS_PC = `It's open in Claude Code on this ${PC} — switch to that window.`;
+export const OPEN_ON_THIS_PC = `It's open in Claude Code on this ${PC}: switch to that window.`;
 export const WRITTEN_JUST_NOW = `It was written to on this ${PC} in the last two minutes. If Claude Code has it open, switch to that window; otherwise try again in a moment.`;
 export const NOT_HERE = `That conversation isn't on this ${PC} yet, and it couldn't be downloaded.`;
 export const NO_FOLDER = "This chat couldn't be moved to that folder. It may not have finished uploading from the other PC: try again in a few minutes.";
