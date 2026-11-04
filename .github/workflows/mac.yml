@@ -218,45 +218,43 @@ jobs:
   # above have passed on the same commit; the two zips are replaced each time. The release is
   # never made "latest": that is the Windows download. (The app's code updates itself from
   # main, so what's in these zips, Electron's shell, rarely changes.)
+  # Publishes the Mac app zips that were tested above (Apple silicon's from the Apple silicon
+  # Mac, Intel's from the Intel one) to the mac-app release, once every test has passed on
+  # this commit. It builds nothing and installs no packages: only gh, which comes with
+  # GitHub's runners, ever holds the write access. The release is never marked latest, so
+  # the Windows download link (releases/latest/download/...) can't change.
   publish-mac:
-    needs: mac
+    needs: [mac, windows]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: macos-15
-    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
-    defaults:
-      run:
-        working-directory: _app
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: _app/package-lock.json
-
-      - name: Install
-        run: npm ci
-
-      - name: Package the Mac app (unsigned, without the Agent SDK)
-        run: npm run dist:mac
+      - name: The tested Mac apps
+        run: |
+          gh run download "$GITHUB_RUN_ID" -n mac-apps-macos-15 -D arm
+          gh run download "$GITHUB_RUN_ID" -n mac-apps-macos-15-intel -D intel
+          mkdir up
+          cp arm/Conversations-mac-arm64.zip intel/Conversations-mac-x64.zip up/
+          ls -l up
 
       - name: Publish to the mac-app release (never "latest")
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
-          gh release view mac-app >/dev/null 2>&1 || gh release create mac-app --target "$GITHUB_SHA" --title "Conversations for Mac" --notes "The Mac app, installed by the Terminal command on conversations.tidewaystudios.com and updated automatically from main." --latest=false
-          gh release upload mac-app _app/release-public/Conversations-mac-arm64.zip _app/release-public/Conversations-mac-x64.zip --clobber
+          notes="The Mac app, installed by the Terminal command on conversations.tidewaystudios.com. Built from ${GITHUB_SHA::7}; its code then updates itself from main."
+          gh release view mac-app >/dev/null 2>&1 || gh release create mac-app --target "$GITHUB_SHA" --title "Conversations for Mac" --notes "$notes" --latest=false
+          gh release upload mac-app up/Conversations-mac-arm64.zip up/Conversations-mac-x64.zip --clobber
+          gh release edit mac-app --notes "$notes" --latest=false
 
-      # The addresses the set-up itself downloads from (read from install.sh).
+      # The addresses the set-up itself downloads from (read from this commit's install.sh).
       - name: The set-up can download them
-        working-directory: .
         run: |
-          base="$(grep -Eo 'https://github\.com/[^"]+/releases/download/mac-app' setup/install.sh | head -1)"
+          curl -sf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/setup/install.sh" > install.sh
+          base="$(grep -Eo 'https://github\.com/[^"]+/releases/download/mac-app' install.sh | head -1)"
           [ -n "$base" ] || { echo "setup/install.sh doesn't download from the mac-app release."; exit 1; }
           for a in arm64 x64; do
             curl -sfIL --retry 3 -o /dev/null "$base/Conversations-mac-$a.zip" || { echo "Not downloadable: $base/Conversations-mac-$a.zip"; exit 1; }

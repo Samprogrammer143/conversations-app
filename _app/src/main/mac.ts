@@ -110,7 +110,8 @@ export function macGitHubSignIn(): { ok: boolean; err?: string } {
  * rather than nothing happening.
  */
 export function openTerminal(c: { file: string; args: string[] }, what: string): void {
-  execFile(c.file, c.args, { timeout: 60_000 }, (err, _out, stderr) => {
+  // (Up to three minutes: the first time, osascript waits while macOS asks you whether to allow it.)
+  execFile(c.file, c.args, { timeout: 180_000 }, (err, _out, stderr) => {
     if (!err) return;
     log("app", `could not open Terminal to ${what}: ${String(stderr || err.message).trim().split("\n").pop()}`);
     const refused = /-1743|not allowed|not authori[sz]ed/i.test(String(stderr) + err.message);

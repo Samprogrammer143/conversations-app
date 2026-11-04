@@ -30,6 +30,8 @@ ZIP="$ROOT/_app/release-public/Conversations-mac-$arch.zip"
 
 WORK="$(mktemp -d)"
 FAILED=0
+# (Never end a check with "... | grep -q": under pipefail the writer's SIGPIPE, when grep stops at
+# its first match, fails a check that matched. Write to a file, or use case, instead.)
 check() {
   if eval "$2" >/dev/null 2>&1; then echo "PASS  $1"; else echo "FAIL  $1"; FAILED=$((FAILED + 1)); fi
 }
@@ -64,7 +66,7 @@ APP=/Applications/Conversations.app
 SUP="$HOME/Library/Application Support"
 check "the app is in Applications" '[ -x "$APP/Contents/MacOS/Conversations" ]'
 check "...with a whole, valid signature" 'codesign --verify --deep --strict "$APP"'
-check "...and nothing marks it as downloaded" '! xattr -r "$APP" | grep -q com.apple.quarantine'
+check "...and nothing marks it as downloaded" '[ -z "$(xattr -r "$APP" 2>/dev/null | grep com.apple.quarantine)" ]'
 check "Claude Code is installed (Anthropic's installer, no Node)" '[ -x "$HOME/.local/bin/claude" ] || command -v claude'
 check "the app's code is copied" '[ -d "$SUP/conversations-app/.git" ]'
 check "Claude's Agent SDK was fetched, without npm" 'ls "$SUP"/conversations-app-runtime/*/.ready && ls "$SUP"/conversations-app-runtime/*/node_modules/@anthropic-ai/claude-agent-sdk/package.json'
@@ -83,8 +85,8 @@ check "a Stop hook runs as Claude Code would run it" 'echo "{\"session_id\":\"$S
 # problem: the chat is uploaded through conversations-node and looked for where it lands.
 PUSHED="$(env -i HOME="$HOME" PATH="$BARE_PATH" "$HOME/.local/bin/conversations-node" "$SUP/conversations-app/_sync/sync.mjs" push --session "$SID" --cwd /Users/someone/site --json 2>&1)"
 printf '%s\n' "$PUSHED" > "$OUT/push-1.txt"
-check "the earlier chat uploads through conversations-node" 'printf "%s" "$PUSHED" | grep -q "\"ok\":true"'
-check "...and the repository has it" 'git --git-dir="$WORK/chats.git" log --all --name-only --format= | grep -q "$SID"'
+check "the earlier chat uploads through conversations-node" 'case "$PUSHED" in *"\"ok\":true"*) true ;; *) false ;; esac'
+check "...and the repository has it" 'git --git-dir="$WORK/chats.git" log --all --name-only --format= > "$WORK/pushed-files" && grep -q "$SID" "$WORK/pushed-files"'
 
 # The set-up opened the app at the end (as launchd does: the system's PATH only).
 for i in $(seq 1 45); do grep -q "starting" "$SUP/Conversations/app.log" 2>/dev/null && break; sleep 2; done
@@ -116,7 +118,7 @@ check "the set-up finished" '[ $code = 0 ]'
 check "the workspace has its own Claude folder" '[ -d "$H2/.claude-work" ] && grep -q "conversations-node" "$H2/.claude-work/settings.json"'
 check "...and its own sync, with its repository" 'grep -q "work.git" "$SUP2/claude-conversation-sync-work/config.json"'
 check "the earlier chats' folder is left as it was" '[ ! -f "$SUP2/claude-conversation-sync/config.json" ] && ! grep -q conversations-node "$H2/.claude/settings.json"'
-check "the app's list makes it current and leaves the earlier chats out" 'grep -q "\"current\": \"work\"" "$SUP2/Conversations/workspaces.json" && grep -A2 "\"disconnected\"" "$SUP2/Conversations/workspaces.json" | grep -q "\"main\""'
+check "the app's list makes it current and leaves the earlier chats out" 'grep -q "\"current\": \"work\"" "$SUP2/Conversations/workspaces.json" && grep -A2 "\"disconnected\"" "$SUP2/Conversations/workspaces.json" > "$WORK/disconnected" && grep -q "\"main\"" "$WORK/disconnected"'
 check "claude-work starts Claude Code in it" '[ -x "$H2/.local/bin/claude-work" ] && grep -q "CLAUDE_CONFIG_DIR=.*\.claude-work" "$H2/.local/bin/claude-work"'
 check "claude-work runs" 'env -i HOME="$H2" PATH="$BARE_PATH" "$H2/.local/bin/claude-work" --version'
 check "a new Terminal window finds claude-work (~/.local/bin is on its PATH)" 'env -i HOME="$H2" PATH="$BARE_PATH" /bin/zsh -lc "command -v claude-work"'
