@@ -5,8 +5,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { app, Menu, type MenuItemConstructorOptions } from "electron";
 import { log } from "./log";
+import { macTerminalLine, shQuote } from "./launch";
+import { defaultDataDir } from "../shared/dirs";
 
 export const isMac = process.platform === "darwin";
 
@@ -70,6 +73,36 @@ export function setStartAtLogin(on: boolean): void {
   } catch (e) {
     log("app", `could not ${on ? "set" : "clear"} start at login: ${(e as Error).message}`);
   }
+}
+
+// ------------------------------------------------------------ GitHub sign-in
+
+/** GitHub's own command line tool: on PATH, from Homebrew, or the copy the Mac set-up fetched. */
+export function findGh(envPath = process.env.PATH ?? "", dataDir = defaultDataDir()): string | null {
+  const dirs = [...envPath.split(":").filter((d) => d.startsWith("/")), "/opt/homebrew/bin", "/usr/local/bin", path.posix.join(dataDir, "gh")];
+  for (const d of dirs) {
+    const p = path.posix.join(d, "gh");
+    try {
+      if (fs.statSync(p).isFile()) return p;
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * Signing in to GitHub on a Mac, which has no Git Credential Manager (Windows' git brings
+ * it): gh signs in through the browser in a Terminal window and hands git the login.
+ * Answers with what to tell you, as the Windows sign-in's result does.
+ */
+export function macGitHubSignIn(): { ok: boolean; err?: string } {
+  const gh = findGh();
+  if (!gh) return { ok: false, err: "Signing in to GitHub on a Mac uses GitHub's own tool: install it (brew install gh, or cli.github.com), then try again." };
+  const q = shQuote(gh);
+  const c = macTerminalLine(`${q} auth login --hostname github.com --git-protocol https --web && ${q} auth setup-git --hostname github.com`);
+  const child = spawn(c.file, c.args, { detached: true, stdio: "ignore" });
+  child.on("error", (e) => log("app", `could not open Terminal to sign in to GitHub: ${e.message}`));
+  child.unref();
+  return { ok: false, err: "Finish signing in to GitHub in the Terminal window that opened, then choose Sync now." };
 }
 
 // ------------------------------------------------------------ the app menu

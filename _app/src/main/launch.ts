@@ -20,7 +20,11 @@ export const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
  * line goes to AppleScript as an argument (argv), never inside the script's own text.
  */
 export function macTerminalCommand(folder: string, exe: string, args: string[]): { file: string; args: string[] } {
-  const line = `cd ${shQuote(folder)} && exec ${[exe, ...args].map(shQuote).join(" ")}`;
+  return macTerminalLine(`cd ${shQuote(folder)} && exec ${[exe, ...args].map(shQuote).join(" ")}`);
+}
+
+/** A Mac: a new Terminal window running this shell line (already quoted by the caller). */
+export function macTerminalLine(line: string): { file: string; args: string[] } {
   const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
   return { file: "/usr/bin/osascript", args: [...script.flatMap((l) => ["-e", l]), line] };
 }

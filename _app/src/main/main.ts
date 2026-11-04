@@ -43,7 +43,7 @@ import { cleanStages, writeRunningMark } from "../shell/stages";
 import { log, logPath } from "./log";
 import { loadSdk, sdkLoadedFrom } from "./chat/sdk";
 import { authStatus, cancelAllLogins, cancelLogin, loginEnded, signingIn, startLogin, submitLoginCode } from "./auth";
-import { isMac, macAppMenu, setStartAtLogin, trayIconFile } from "./mac";
+import { isMac, macAppMenu, macGitHubSignIn, setStartAtLogin, trayIconFile } from "./mac";
 import { useLoginShellPath } from "../shared/login-path";
 import { PC } from "./words";
 
@@ -922,7 +922,8 @@ function registerIpc() {
 
   handle("sync:status", () => scheduler.status());
   handle("sync:now", () => scheduler.syncNow());
-  handle("sync:signIn", () => scheduler.signIn());
+  // (A Mac signs in with GitHub's own tool, in Terminal: it has no Git Credential Manager.)
+  handle("sync:signIn", () => (isMac ? macGitHubSignIn() : scheduler.signIn()));
   handle("sync:setPaused", (paused: unknown) => scheduler.setPaused(paused === true));
   handle("sync:openLog", () => shell.openPath(path.join(syncDir(), "sync.log")));
   handle("sync:setUploadQuiet", (seconds: unknown) => scheduler.setUploadQuiet(typeof seconds === "number" ? seconds : NaN));

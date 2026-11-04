@@ -15,7 +15,7 @@ vi.mock("../src/main/log", () => ({ log: () => {} }));
 
 const { mergePath, parseShellPath, usualMacFolders } = await import("../src/shared/login-path");
 const { knownCandidates, onPath } = await import("../src/main/claude");
-const { appBundle, launchAgentPlist, trayIconFile } = await import("../src/main/mac");
+const { appBundle, findGh, launchAgentPlist, trayIconFile } = await import("../src/main/mac");
 const { launcherScript } = await import("../src/main/workspace-actions");
 const { flyoutBounds } = await import("../src/main/windows");
 const { profilePrefix } = await import("../src/main/index/indexer");
@@ -116,6 +116,14 @@ describe("start at login on a Mac", () => {
     expect(plist).toContain("<key>RunAtLoad</key><true/>");
     expect(plist).toContain("/Users/a&amp;b/Applications/Conversations.app");
     expect(plist).not.toContain("a&b");
+  });
+});
+
+describe("GitHub's sign-in tool on a Mac", () => {
+  it("is a gh program, or nothing", () => {
+    // (Homebrew's folders are always looked in: a test Mac may have gh there.)
+    const gh = findGh("/no/such/folder", "/no/such/data");
+    expect(gh === null || gh.endsWith("/gh")).toBe(true);
   });
 });
 

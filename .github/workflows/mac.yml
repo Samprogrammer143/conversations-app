@@ -68,7 +68,10 @@ jobs:
       - name: The app on a Mac (window test, with screenshots)
         id: e2e
         continue-on-error: true
-        run: node test/e2e/mac-smoke.e2e.mjs ../out/shots 2>&1 | tee ../out/e2e.txt; exit ${PIPESTATUS[0]}
+        run: |
+          node test/e2e/mac-smoke.e2e.mjs ../out/shots 2>&1 | tee ../out/e2e.txt; a=${PIPESTATUS[0]}
+          node test/e2e/welcome-terms.e2e.mjs 2>&1 | tee -a ../out/e2e.txt; b=${PIPESTATUS[0]}
+          exit $((a || b))
 
       - name: Package the Mac app (unsigned, without the Agent SDK)
         id: package
@@ -164,7 +167,10 @@ jobs:
       - name: The app on Windows (window test, with screenshots)
         id: e2e
         continue-on-error: true
-        run: node test/e2e/mac-smoke.e2e.mjs ../out/shots 2>&1 | tee ../out/e2e.txt; exit ${PIPESTATUS[0]}
+        run: |
+          node test/e2e/mac-smoke.e2e.mjs ../out/shots 2>&1 | tee ../out/e2e.txt; a=${PIPESTATUS[0]}
+          node test/e2e/welcome-terms.e2e.mjs 2>&1 | tee -a ../out/e2e.txt; b=${PIPESTATUS[0]}
+          exit $((a || b))
 
       - name: Keep the results
         if: always()
