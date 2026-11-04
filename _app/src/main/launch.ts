@@ -12,6 +12,44 @@ export const psQuote = (s: string) => `'${s.replace(PS_SINGLE_QUOTES, (q) => q +
 /** A PowerShell script as -EncodedCommand takes it (UTF-16LE, base64). */
 export const encodePowerShell = (script: string) => Buffer.from(script, "utf16le").toString("base64");
 
+/** POSIX shell single-quoted string: nothing inside is expanded, and a ' is closed, escaped and reopened. */
+export const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * A Mac: a new window of the Terminal app, running Claude Code in the folder. The command
+ * line goes to AppleScript as an argument (argv), never inside the script's own text.
+ */
+export function macTerminalCommand(folder: string, exe: string, args: string[]): { file: string; args: string[] } {
+  const line = `cd ${shQuote(folder)} && exec ${[exe, ...args].map(shQuote).join(" ")}`;
+  const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
+  return { file: "/usr/bin/osascript", args: [...script.flatMap((l) => ["-e", l]), line] };
+}
+
+/**
+ * A Mac: the Terminal window and tab running on this terminal device (ps's tty, "ttys003")
+ * comes to the front. Other terminal apps are left as they are.
+ */
+export function macFocusCommand(tty: string): { file: string; args: string[] } | null {
+  if (!/^ttys\d+$/.test(tty)) return null;
+  const script = [
+    "on run argv",
+    'tell application "Terminal"',
+    "repeat with w in windows",
+    "repeat with t in tabs of w",
+    "if tty of t is (item 1 of argv) then",
+    "set selected of t to true",
+    "set index of w to 1",
+    "activate",
+    "return",
+    "end if",
+    "end repeat",
+    "end repeat",
+    "end tell",
+    "end run",
+  ];
+  return { file: "/usr/bin/osascript", args: [...script.flatMap((l) => ["-e", l]), `/dev/${tty}`] };
+}
+
 /** Windows Terminal when it is there; otherwise a plain console window through Start-Process. */
 export function terminalCommand(folder: string, exe: string, args: string[], useWt: boolean): { file: string; args: string[] } {
   // wt reads ";" as "new tab": use it only when nothing passed to it has one.

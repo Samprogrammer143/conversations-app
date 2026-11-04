@@ -3,11 +3,11 @@
 // handover.ts; this file connects them to the PC.
 
 import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import path from "node:path";
 import { app, dialog, type BrowserWindow } from "electron";
 import { hasWindowsTerminal, refreshClaude } from "./claude";
-import { encodePowerShell, focusScript, terminalCommand } from "./launch";
+import { encodePowerShell, focusScript, macFocusCommand, macTerminalCommand, terminalCommand } from "./launch";
 import { handOver, type PullOutcome } from "./handover";
 import { folderForTranscript, safeFolderName } from "./resume-folder";
 import { sessionProcesses } from "./chat/terminals";
@@ -58,15 +58,20 @@ export function isGenericFolder(p: string): boolean {
   return (["downloads", "desktop", "home"] as const).some((n) => same(p, app.getPath(n)));
 }
 
+const isMac = process.platform === "darwin";
+/** The terminal Claude Code opens in, as the messages name it. */
+const TERMINAL = isMac ? "Terminal" : "Windows Terminal";
+
 export function launchInTerminal(folder: string, exe: string, args: string[]): void {
-  const c = terminalCommand(folder, exe, args, hasWindowsTerminal());
+  const c = isMac ? macTerminalCommand(folder, exe, args) : terminalCommand(folder, exe, args, hasWindowsTerminal());
   const child = spawn(c.file, c.args, { cwd: folder, detached: true, stdio: "ignore", windowsHide: c.file !== "wt.exe" });
   child.on("error", (e) => log("cli", `could not start ${c.file}: ${e.message}`));
   child.unref();
 }
 
-/** Best effort: the window of a running Claude Code comes to the front (Windows Terminal: its window, not the tab). */
+/** Best effort: the window of a running Claude Code comes to the front (Windows Terminal: its window, not the tab; a Mac's Terminal: its tab). */
 export function focusProcessWindow(pid: number) {
+  if (isMac) return focusOnMac(pid);
   if (process.platform !== "win32") return;
   let script: string;
   try {
@@ -78,6 +83,19 @@ export function focusProcessWindow(pid: number) {
   const timer = setTimeout(() => child.kill(), 15_000);
   child.on("error", () => clearTimeout(timer));
   child.on("close", () => clearTimeout(timer));
+}
+
+/** The Terminal tab Claude Code runs in, found by its terminal device. */
+function focusOnMac(pid: number) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  execFile("ps", ["-o", "tty=", "-p", String(pid)], { timeout: 5000 }, (err, out) => {
+    const c = err ? null : macFocusCommand(String(out).trim());
+    if (!c) return;
+    const child = spawn(c.file, c.args, { stdio: "ignore" });
+    const timer = setTimeout(() => child.kill(), 15_000);
+    child.on("error", () => clearTimeout(timer));
+    child.on("close", () => clearTimeout(timer));
+  });
 }
 
 const isDir = (p: string | null | undefined): p is string => {
@@ -160,7 +178,7 @@ export async function openInCli(args: {
     if (!r.ok) log("cli", `Open in CLI for ${args.id.slice(0, 8)} refused: ${r.message}`);
     return { ok: r.ok, message: r.message };
   } catch (e) {
-    return { ok: false, message: `Couldn't start Windows Terminal: ${(e as Error).message}` };
+    return { ok: false, message: `Couldn't start ${TERMINAL}: ${(e as Error).message}` };
   }
 }
 
@@ -168,5 +186,5 @@ export async function newChatInCli(folder: string): Promise<{ ok: boolean; messa
   const claude = await refreshClaude();
   if (!claude.found || !claude.path) return { ok: false, message: "Claude Code isn't installed on this PC" };
   launchInTerminal(folder, process.env.CONVERSATIONS_CLAUDE_LAUNCHER || claude.path, []);
-  return { ok: true, message: "Claude Code started in Windows Terminal" };
+  return { ok: true, message: `Claude Code started in ${TERMINAL}` };
 }

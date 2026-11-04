@@ -19,6 +19,39 @@ const { appBundle, launchAgentPlist, trayIconFile } = await import("../src/main/
 const { launcherScript } = await import("../src/main/workspace-actions");
 const { flyoutBounds } = await import("../src/main/windows");
 const { profilePrefix } = await import("../src/main/index/indexer");
+const { macFocusCommand, macTerminalCommand, shQuote } = await import("../src/main/launch");
+const { processNameFromPs } = await import("../src/main/chat/terminals");
+
+describe("Open in Terminal on a Mac", () => {
+  it("passes the command to AppleScript as an argument, quoted for the shell", () => {
+    const c = macTerminalCommand("/Users/alex/it's a & b", "/Users/alex/.local/bin/claude", ["--resume", "abc"]);
+    expect(c.file).toBe("/usr/bin/osascript");
+    const line = c.args[c.args.length - 1];
+    expect(line).toBe(`cd '/Users/alex/it'\\''s a & b' && exec '/Users/alex/.local/bin/claude' '--resume' 'abc'`);
+    // The script's own text never contains the folder.
+    expect(c.args.slice(0, -1).join(" ")).not.toContain("alex");
+    expect(c.args.filter((a) => a === "-e").length).toBe(6);
+  });
+  it("quotes for a POSIX shell", () => {
+    expect(shQuote("plain")).toBe("'plain'");
+    expect(shQuote("$HOME `x` \"y\"")).toBe(`'$HOME \`x\` "y"'`);
+  });
+  it("brings a Terminal tab forward only for a real terminal device", () => {
+    expect(macFocusCommand("ttys003")?.args.at(-1)).toBe("/dev/ttys003");
+    expect(macFocusCommand("??")).toBeNull();
+    expect(macFocusCommand("ttys003; rm -rf ~")).toBeNull();
+  });
+});
+
+describe("which programs are Claude Code on a Mac", () => {
+  it("reads the name it was started with, not the versioned file", () => {
+    expect(processNameFromPs("claude --resume abc\n")).toBe("claude");
+    expect(processNameFromPs("/Users/alex/.local/bin/claude")).toBe("claude");
+    expect(processNameFromPs("node /usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js")).toBe("claude");
+    expect(processNameFromPs("/usr/bin/vim notes.txt")).toBe("vim");
+    expect(processNameFromPs("")).toBeNull();
+  });
+});
 
 describe("the login shell's PATH", () => {
   it("is read from between the marks, whatever the shell prints around it", () => {

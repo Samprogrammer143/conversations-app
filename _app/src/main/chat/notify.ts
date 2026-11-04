@@ -1,6 +1,6 @@
-// The one Windows notification the app raises: Claude is blocked on an approval
-// and no window is open. Deny works straight from the notification; Allow only
-// from the review card, so a destructive command is never approved blind.
+// The one notification the app raises: Claude is blocked on an approval and no
+// window is open. Deny works straight from the notification; Allow only from the
+// review card, so a destructive command is never approved blind.
 
 import path from "node:path";
 import { app, Notification } from "electron";
@@ -31,7 +31,7 @@ const shown = new Map<string, Notification>();
  * `workspace`: the one this copy of the app is in. A button starts the app with the link,
  * and the link names the workspace, so it reaches the window where Claude is waiting.
  */
-export function notifyApproval(p: PermissionRequest, conversationTitle: string, onClick: () => void, workspace = "main") {
+export function notifyApproval(p: PermissionRequest, conversationTitle: string, onClick: () => void, workspace = "main", onDeny?: () => void, onFailed?: () => void) {
   if (shown.has(p.requestId) || !Notification.isSupported()) return;
   const id = `${encodeURIComponent(p.requestId)}?ws=${encodeURIComponent(workspace)}`;
   const what = p.body ? ` (${p.body.split("\n")[0].slice(0, 80)})` : "";
@@ -53,10 +53,16 @@ export function notifyApproval(p: PermissionRequest, conversationTitle: string, 
   </actions>
 </toast>`
         : undefined,
+    // A Mac's buttons are the notification's own (it shows them as an alert: see
+    // NSUserNotificationAlertStyle in package.json); a click on the rest opens the review.
+    ...(process.platform === "darwin" && !asking && onDeny ? { actions: [{ type: "button" as const, text: "Deny" }], closeButtonText: "Later" } : {}),
   });
   n.on("click", onClick);
+  n.on("action", () => onDeny?.());
   n.on("failed", () => {
     if (shown.get(p.requestId) === n) shown.delete(p.requestId);
+    // (A Mac app that isn't signed by a paid Apple account may not be allowed to notify.)
+    onFailed?.();
   });
   n.show();
   // Kept while the request is waiting (so it is never raised twice); removed when

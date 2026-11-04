@@ -243,7 +243,13 @@ const TOOL_DIR = HERE;
 // "$HOME" inside double quotes, and Git Bash hands node a Windows path.
 function toolPath() {
   const abs = path.join(TOOL_DIR, "sync.mjs");
-  const rel = path.relative(HOME, abs);
+  // (This file's own path has its links resolved, so the home folder's are too: a Mac's
+  // /var is /private/var, and a home folder can be a link.)
+  let home = HOME;
+  try {
+    home = fs.realpathSync(HOME);
+  } catch {}
+  const rel = path.relative(home, abs);
   const usual = !process.env.CLAUDE_SYNC_HOME && same(SYNC_DIR, defaultSyncDir()) && rel && !rel.startsWith("..") && !path.isAbsolute(rel);
   return usual ? `$HOME/${fwd(rel)}` : fwd(abs);
 }

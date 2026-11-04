@@ -114,7 +114,15 @@
       "category": "public.app-category.developer-tools",
       "identity": null,
       "darkModeSupport": true,
-      "artifactName": "${productName}-mac-${arch}.${ext}"
+      "minimumSystemVersion": "12.0",
+      "artifactName": "${productName}-mac-${arch}.${ext}",
+      "extendInfo": {
+        "NSUserNotificationAlertStyle": "alert",
+        "NSAppleEventsUsageDescription": "Conversations opens Terminal to carry on a chat in Claude Code.",
+        "NSDocumentsFolderUsageDescription": "Claude Code works in your project folders, and Conversations shows their chats.",
+        "NSDesktopFolderUsageDescription": "Claude Code works in your project folders, and Conversations shows their chats.",
+        "NSDownloadsFolderUsageDescription": "Claude Code works in your project folders, and Conversations shows their chats."
+      }
     },
     "protocols": [
       {

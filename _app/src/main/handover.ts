@@ -18,7 +18,7 @@ export const WRITTEN_JUST_NOW = "It was written to on this PC in the last two mi
 export const NOT_HERE = "That conversation isn't on this PC yet, and it couldn't be downloaded.";
 export const NO_FOLDER = "This chat couldn't be moved to that folder. It may not have finished uploading from the other PC: try again in a few minutes.";
 export const NEEDS_FOLDER = "This chat needs a folder to work in on this PC.";
-export const CONTINUING = "Continuing in Windows Terminal";
+export const CONTINUING = process.platform === "darwin" ? "Continuing in Terminal" : "Continuing in Windows Terminal";
 
 /** What a pull of one conversation said. live: the engine left it alone because it is in use on this PC. */
 export interface PullOutcome {

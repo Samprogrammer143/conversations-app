@@ -76,7 +76,7 @@ export const probeProcess: ProcessProbe = async (pid) => {
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "EPERM") return null;
   }
-  if (process.platform !== "win32") return "?";
+  if (process.platform !== "win32") return probePosix(pid);
   return new Promise((resolve) => {
     let out = "";
     let settled = false;
@@ -101,6 +101,42 @@ export const probeProcess: ProcessProbe = async (pid) => {
     });
   });
 };
+
+/**
+ * A Mac's (or Linux's) answer, from ps: the command line it was started with. Claude Code's
+ * native program is a file named after its version, so its name is read from how it was
+ * started ("claude", ".../bin/claude"), or an npm install's "node .../claude-code/...".
+ */
+export function processNameFromPs(args: string): string | null {
+  const line = args.trim();
+  if (!line) return null;
+  const first = line.split(/\s+/)[0];
+  if (/(^|\/)claude$/.test(first) || /\/claude-code\/|\/bin\/claude(\s|$)/.test(line)) return "claude";
+  return first.split("/").pop() || "?";
+}
+
+function probePosix(pid: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    let out = "";
+    let settled = false;
+    const done = (v: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const child = spawn("ps", ["-o", "args=", "-p", String(pid)], { stdio: ["ignore", "pipe", "ignore"] });
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {}
+      done("?");
+    }, 5000);
+    child.stdout.on("data", (d) => (out += d));
+    child.on("error", () => done("?"));
+    child.on("close", () => done(processNameFromPs(out)));
+  });
+}
 
 const isClaude = (image: string | null) => image === "?" || (!!image && /^claude(\.exe)?$/i.test(image));
 

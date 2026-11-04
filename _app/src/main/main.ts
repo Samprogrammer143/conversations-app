@@ -1213,6 +1213,8 @@ function updateTrayBadge(onlyIfChanged = false) {
   pruneApprovals(new Set(waiting.map((p) => p.requestId)));
   if (!tray) return;
   tray.setImage(appIcon(trayIconFile(waiting.length > 0)));
+  // A Mac's Dock icon says it too: how many are waiting.
+  if (isMac) app.dock?.setBadge(waiting.length ? String(waiting.length) : "");
   tray.setToolTip(waiting.length ? `${appLabel()} · ${waiting.every((p) => p.questions) ? "Claude has a question" : "Claude needs your approval"}` : appLabel());
   broadcast("chat-pending", waiting);
 }
@@ -1428,7 +1430,14 @@ void app.whenReady().then(async () => {
     const raisedNow = lastRaisedId === p.conversationId && Date.now() - lastRaisedAt < 2000;
     if (!watching && !raisedNow) {
       const title = (index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(p.conversationId) as { title?: string } | undefined)?.title ?? "A conversation";
-      notifyApproval(p, title, () => openConversation(p.conversationId), currentWorkspace().id);
+      // (On a Mac the notification's own Deny button answers here. If the Mac won't show
+      // the notification, the Dock icon bounces once: its badge already counts what's waiting.)
+      const deny = () => {
+        clearApproval(p.requestId);
+        chat.respond(p.requestId, "deny");
+        updateTrayBadge();
+      };
+      notifyApproval(p, title, () => openConversation(p.conversationId), currentWorkspace().id, deny, () => isMac && app.dock?.bounce("informational"));
     }
   });
 
