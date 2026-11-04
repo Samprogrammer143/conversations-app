@@ -671,8 +671,8 @@ function writeLauncher(w) {
 
 // src/main/main.ts
 import fs28 from "node:fs";
-import { execFile as execFile3, spawn as spawn10 } from "node:child_process";
-import path29 from "node:path";
+import { execFile as execFile3, spawn as spawn11 } from "node:child_process";
+import path30 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/main/alert.ts
@@ -2234,8 +2234,8 @@ function flyoutBounds(area, screenBounds, trayBounds, height) {
 
 // src/main/cli.ts
 import fs17 from "node:fs";
-import { execFile as execFile2, spawn as spawn6 } from "node:child_process";
-import path16 from "node:path";
+import { execFile as execFile2, spawn as spawn7 } from "node:child_process";
+import path17 from "node:path";
 import { app as app2, dialog as dialog2 } from "electron";
 
 // src/main/launch.ts
@@ -2407,6 +2407,38 @@ function macAppMenu(actions) {
   return Menu.buildFromTemplate(template);
 }
 
+// src/main/pointer.ts
+import { spawn as spawn5 } from "node:child_process";
+import path14 from "node:path";
+var NUDGE = [
+  "Add-Type -AssemblyName System.Windows.Forms",
+  "$p = [System.Windows.Forms.Cursor]::Position",
+  "[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(($p.X + 1), $p.Y)",
+  "if ([System.Windows.Forms.Cursor]::Position.X -eq $p.X) { [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(($p.X - 1), $p.Y) }",
+  "[System.Windows.Forms.Cursor]::Position = $p"
+].join("\n");
+var powershell = () => path14.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+function showPointer(timeoutMs = 800, platform = process.platform, run3 = spawn5) {
+  if (platform !== "win32") return Promise.resolve();
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    try {
+      const child = run3(powershell(), ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(NUDGE)], { windowsHide: true, stdio: "ignore" });
+      child.on("error", finish);
+      child.on("exit", finish);
+    } catch {
+      finish();
+    }
+  });
+}
+
 // src/main/handover.ts
 var OPEN_ON_THIS_PC = `It's open in Claude Code on this ${PC}: switch to that window.`;
 var WRITTEN_JUST_NOW = `It was written to on this ${PC} in the last two minutes. If Claude Code has it open, switch to that window; otherwise try again in a moment.`;
@@ -2458,14 +2490,14 @@ async function handOver(id, where, deps) {
 
 // src/main/resume-folder.ts
 import fs15 from "node:fs";
-import path14 from "node:path";
+import path15 from "node:path";
 function safeFolderName(label) {
   const name = label.replace(/[^\p{L}\p{N} ._-]/gu, "").trim().replace(/[. ]+$/, "");
   if (!name || /^\.+$/.test(name) || /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(name)) return "Conversations project";
   return name;
 }
 function encodeCwd(cwd) {
-  return path14.resolve(cwd).replace(/[^A-Za-z0-9]/g, "-");
+  return path15.resolve(cwd).replace(/[^A-Za-z0-9]/g, "-");
 }
 function cwdMatchesFolder(cwd, folderName) {
   const enc = encodeCwd(cwd).toLowerCase();
@@ -2508,7 +2540,7 @@ function recordedCwds(transcript, bytes = 256 * 1024) {
   return out;
 }
 function folderForTranscript(transcript, candidates, exists2 = isDir) {
-  const name = path14.basename(path14.dirname(transcript));
+  const name = path15.basename(path15.dirname(transcript));
   const fits = (c) => !!c && cwdMatchesFolder(c, name) && exists2(c);
   for (const c of candidates) if (fits(c)) return c;
   const all = [...candidates, ...recordedCwds(transcript)];
@@ -2517,22 +2549,22 @@ function folderForTranscript(transcript, candidates, exists2 = isDir) {
   return null;
 }
 function ancestors(p) {
-  if (!p || !path14.isAbsolute(p)) return [];
+  if (!p || !path15.isAbsolute(p)) return [];
   const out = [];
-  for (let dir = path14.dirname(path14.resolve(p)); dir !== path14.dirname(dir); dir = path14.dirname(dir)) out.push(dir);
+  for (let dir = path15.dirname(path15.resolve(p)); dir !== path15.dirname(dir); dir = path15.dirname(dir)) out.push(dir);
   return out;
 }
 
 // src/main/chat/terminals.ts
 import fs16 from "node:fs";
 import os10 from "node:os";
-import path15 from "node:path";
-import { spawn as spawn5 } from "node:child_process";
+import path16 from "node:path";
+import { spawn as spawn6 } from "node:child_process";
 function thisPidDomain() {
   return `${process.platform}:${os10.hostname().toLowerCase()}`;
 }
 function registryDir() {
-  return path15.join(claudeDir(), "sessions");
+  return path16.join(claudeDir(), "sessions");
 }
 var str = (v) => typeof v === "string" ? v : null;
 function readRegistry2(dir = registryDir()) {
@@ -2546,7 +2578,7 @@ function readRegistry2(dir = registryDir()) {
   for (const n of names) {
     if (!/^\d+\.json$/.test(n)) continue;
     try {
-      const v = JSON.parse(fs16.readFileSync(path15.join(dir, n), "utf8"));
+      const v = JSON.parse(fs16.readFileSync(path16.join(dir, n), "utf8"));
       if (typeof v?.pid !== "number" || typeof v?.sessionId !== "string") continue;
       out.push({ pid: v.pid, sessionId: v.sessionId, cwd: str(v.cwd), kind: str(v.kind), entrypoint: str(v.entrypoint), pidDomain: str(v.pidDomain), status: str(v.status) });
     } catch {
@@ -2575,7 +2607,7 @@ var probeProcess = async (pid) => {
       clearTimeout(timer);
       resolve(v);
     };
-    const child = spawn5("tasklist.exe", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawn6("tasklist.exe", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
     const timer = setTimeout(() => {
       try {
         child.kill();
@@ -2608,7 +2640,7 @@ function probePosix(pid) {
       clearTimeout(timer);
       resolve(v);
     };
-    const child = spawn5("ps", ["-o", "args=", "-p", String(pid)], { stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawn6("ps", ["-o", "args=", "-p", String(pid)], { stdio: ["ignore", "pipe", "ignore"] });
     const timer = setTimeout(() => {
       try {
         child.kill();
@@ -2666,10 +2698,11 @@ async function chooseFolder(win, projectLabel, fromOtherPc = true) {
     cancelId: 2,
     noLink: true
   };
+  await showPointer();
   const { response } = win ? await dialog2.showMessageBox(win, ask) : await dialog2.showMessageBox(ask);
   if (response === 2) return null;
   if (response === 1) {
-    const base = path16.join(app2.getPath("documents"), safeFolderName(projectLabel));
+    const base = path17.join(app2.getPath("documents"), safeFolderName(projectLabel));
     let dir = base;
     try {
       for (let i = 2; fs17.existsSync(dir) && (!fs17.statSync(dir).isDirectory() || fs17.readdirSync(dir).length); i++) dir = `${base} ${i}`;
@@ -2681,11 +2714,12 @@ async function chooseFolder(win, projectLabel, fromOtherPc = true) {
     }
   }
   const opts = { title: `Your copy of ${projectLabel}`, properties: ["openDirectory"], buttonLabel: "Use this folder" };
+  await showPointer();
   const r = win ? await dialog2.showOpenDialog(win, opts) : await dialog2.showOpenDialog(opts);
   return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
 }
 function isGenericFolder(p) {
-  const same = (a, b) => path16.resolve(a).toLowerCase() === path16.resolve(b).toLowerCase();
+  const same = (a, b) => path17.resolve(a).toLowerCase() === path17.resolve(b).toLowerCase();
   return ["downloads", "desktop", "home"].some((n) => same(p, app2.getPath(n)));
 }
 var isMac3 = process.platform === "darwin";
@@ -2693,7 +2727,7 @@ var TERMINAL = isMac3 ? "Terminal" : "Windows Terminal";
 function launchInTerminal(folder, exe, args) {
   if (isMac3) return openTerminal(macTerminalCommand(folder, exe, args), "carry on in Claude Code");
   const c = terminalCommand(folder, exe, args, hasWindowsTerminal());
-  const child = spawn6(c.file, c.args, { cwd: folder, detached: true, stdio: "ignore", windowsHide: c.file !== "wt.exe" });
+  const child = spawn7(c.file, c.args, { cwd: folder, detached: true, stdio: "ignore", windowsHide: c.file !== "wt.exe" });
   child.on("error", (e) => log("cli", `could not start ${c.file}: ${e.message}`));
   child.unref();
 }
@@ -2706,7 +2740,7 @@ function focusProcessWindow(pid) {
   } catch {
     return;
   }
-  const child = spawn6("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)], { windowsHide: true, stdio: "ignore" });
+  const child = spawn7("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)], { windowsHide: true, stdio: "ignore" });
   const timer = setTimeout(() => child.kill(), 15e3);
   child.on("error", () => clearTimeout(timer));
   child.on("close", () => clearTimeout(timer));
@@ -2716,7 +2750,7 @@ function focusOnMac(pid) {
   execFile2("ps", ["-o", "tty=", "-p", String(pid)], { timeout: 5e3 }, (err, out) => {
     const c = err ? null : macFocusCommand(String(out).trim());
     if (!c) return;
-    const child = spawn6(c.file, c.args, { stdio: "ignore" });
+    const child = spawn7(c.file, c.args, { stdio: "ignore" });
     const timer = setTimeout(() => child.kill(), 15e3);
     child.on("error", () => clearTimeout(timer));
     child.on("close", () => clearTimeout(timer));
@@ -2793,7 +2827,7 @@ async function newChatInCli(folder) {
 }
 
 // src/main/chat/manager.ts
-import path23 from "node:path";
+import path24 from "node:path";
 import { EventEmitter as EventEmitter5 } from "node:events";
 import fs23 from "node:fs";
 
@@ -2803,31 +2837,31 @@ import os11 from "node:os";
 // src/main/chat/sdk.ts
 import crypto from "node:crypto";
 import fs18 from "node:fs";
-import path17 from "node:path";
+import path18 from "node:path";
 import { pathToFileURL } from "node:url";
-var PKG = path17.join("node_modules", "@anthropic-ai", "claude-agent-sdk");
+var PKG = path18.join("node_modules", "@anthropic-ai", "claude-agent-sdk");
 var mod = null;
 var loadedFrom = null;
-var hasSdk = (dir) => fs18.existsSync(path17.join(dir, "package.json")) && fs18.existsSync(path17.join(dir, "sdk.mjs"));
+var hasSdk = (dir) => fs18.existsSync(path18.join(dir, "package.json")) && fs18.existsSync(path18.join(dir, "sdk.mjs"));
 function sdkCandidates(installDir, resourcesDir = null) {
   const out = [];
   if (process.env.CONVERSATIONS_SDK_DIR) out.push(process.env.CONVERSATIONS_SDK_DIR);
-  if (installDir && !resourcesDir) out.push(path17.join(installDir, PKG));
+  if (installDir && !resourcesDir) out.push(path18.join(installDir, PKG));
   const appDir = appRepoDir();
   const root = `${appDir}-runtime`;
   try {
-    const lock = fs18.readFileSync(path17.join(appDir, "_app", "runtime", "package-lock.json"));
+    const lock = fs18.readFileSync(path18.join(appDir, "_app", "runtime", "package-lock.json"));
     const hash = crypto.createHash("sha256").update(lock).digest("hex").slice(0, 12);
-    if (fs18.existsSync(path17.join(root, hash, ".ready"))) out.push(path17.join(root, hash, PKG));
+    if (fs18.existsSync(path18.join(root, hash, ".ready"))) out.push(path18.join(root, hash, PKG));
   } catch {
   }
   try {
-    const dirs = fs18.readdirSync(root).map((n) => path17.join(root, n)).filter((d) => fs18.existsSync(path17.join(d, ".ready"))).sort((a, b) => fs18.statSync(b).mtimeMs - fs18.statSync(a).mtimeMs);
-    for (const d of dirs) out.push(path17.join(d, PKG));
+    const dirs = fs18.readdirSync(root).map((n) => path18.join(root, n)).filter((d) => fs18.existsSync(path18.join(d, ".ready"))).sort((a, b) => fs18.statSync(b).mtimeMs - fs18.statSync(a).mtimeMs);
+    for (const d of dirs) out.push(path18.join(d, PKG));
   } catch {
   }
-  if (resourcesDir) out.push(path17.join(resourcesDir, "sdk", PKG));
-  if (installDir) out.push(path17.join(installDir, PKG));
+  if (resourcesDir) out.push(path18.join(resourcesDir, "sdk", PKG));
+  if (installDir) out.push(path18.join(installDir, PKG));
   return [...new Set(out)];
 }
 async function loadSdk(installDir, resourcesDir = null) {
@@ -2836,7 +2870,7 @@ async function loadSdk(installDir, resourcesDir = null) {
   for (const dir of sdkCandidates(installDir, resourcesDir)) {
     if (!hasSdk(dir)) continue;
     try {
-      mod = await import(pathToFileURL(path17.join(dir, "sdk.mjs")).href);
+      mod = await import(pathToFileURL(path18.join(dir, "sdk.mjs")).href);
       loadedFrom = dir;
       return { ok: true, from: dir };
     } catch (e) {
@@ -2894,9 +2928,9 @@ async function probeMcp(claudePath, cwd, waitMs = 8e3) {
 // src/main/chat/models.ts
 import fs19 from "node:fs";
 import os12 from "node:os";
-import path18 from "node:path";
+import path19 from "node:path";
 var MAX_AGE_MS = 12 * 60 * 60 * 1e3;
-var file2 = () => path18.join(appDataDir(), "models.json");
+var file2 = () => path19.join(appDataDir(), "models.json");
 function toChoices(list) {
   return list.filter((m) => m.value && m.displayName).map((m) => ({
     value: m.value,
@@ -3000,13 +3034,13 @@ function refresh(claudePath) {
 
 // src/main/chat/session.ts
 import fs21 from "node:fs";
-import path21 from "node:path";
+import path22 from "node:path";
 import { randomUUID } from "node:crypto";
 import { EventEmitter as EventEmitter4 } from "node:events";
 
 // src/main/chat/agents.ts
 import fs20 from "node:fs";
-import path19 from "node:path";
+import path20 from "node:path";
 
 // src/main/index/parse.ts
 function splitLines(buf, startOffset = 0) {
@@ -3388,7 +3422,7 @@ function mergeAgentLogs(parts) {
   const steps = parts.flatMap((p, i) => i < parts.length - 1 ? p.steps.map((s) => ({ ...s, pending: false })) : p.steps);
   return { brief: parts.find((p) => p.brief)?.brief ?? null, report: [...parts].reverse().find((p) => p.report)?.report ?? null, total: parts.reduce((n, p) => n + p.total, 0), steps: steps.slice(-MAX_STEPS) };
 }
-var agentLogFile = (transcript, agentId) => path19.join(path19.dirname(transcript), path19.basename(transcript, ".jsonl"), "subagents", `agent-${agentId}.jsonl`);
+var agentLogFile = (transcript, agentId) => path20.join(path20.dirname(transcript), path20.basename(transcript, ".jsonl"), "subagents", `agent-${agentId}.jsonl`);
 var logs = /* @__PURE__ */ new Map();
 function applyLines(st, buf) {
   const end = buf.lastIndexOf(10);
@@ -3449,7 +3483,7 @@ async function readOnce(file4) {
 }
 
 // src/main/chat/destructive.ts
-import path20 from "node:path";
+import path21 from "node:path";
 var SAFE = { destructive: false, deletesFiles: false, consequence: null };
 function serverName(tool) {
   const s = tool.split("__")[1] ?? tool;
@@ -3501,7 +3535,7 @@ function splitCommands(line) {
   endCommand();
   return out;
 }
-var commandName = (w) => path20.win32.basename(w).toLowerCase().replace(/\.(exe|cmd|bat|com|ps1)$/, "");
+var commandName = (w) => path21.win32.basename(w).toLowerCase().replace(/\.(exe|cmd|bat|com|ps1)$/, "");
 var PREFIXES = /* @__PURE__ */ new Set(["sudo", "time", "nohup", "exec", "command", "call", "start", "xargs", "env", "npx", "bunx", "pnpx", "!"]);
 var KEYWORDS = /* @__PURE__ */ new Set(["if", "then", "else", "elif", "do", "while", "until", "for", "foreach", "where-object", "foreach-object", "%", "?"]);
 var KNOWN = /* @__PURE__ */ new Set(["rm", "unlink", "shred", "rimraf", "del", "erase", "rd", "rmdir", "remove-item", "ri", "clear-content", "clc", "set-content", "out-file", "git", "find", "format", "format-volume", "dd", "robocopy", "reg", "powershell", "pwsh", "cmd", "bash", "sh", "zsh", "wsl", "iex", "invoke-expression"]);
@@ -3510,7 +3544,7 @@ var CLOUD_CLIS = { az: "Azure", aws: "AWS", gcloud: "Google Cloud", gsutil: "Goo
 var CLOUD_VERB = /^(delete|destroy|remove|rm|rb|purge|uninstall|wipe|drop|truncate)$|^(delete|remove|destroy)-|:(destroy|reset|delete|remove)$/;
 function shortTarget(t, cwd) {
   const clean = t.replace(/^["']|["']$/g, "").replace(/[\\/]+$/, "");
-  if (["", ".", "*", "./*", ".\\*", "*.*"].includes(clean)) return `everything in ${path20.win32.basename(cwd) || cwd}`;
+  if (["", ".", "*", "./*", ".\\*", "*.*"].includes(clean)) return `everything in ${path21.win32.basename(cwd) || cwd}`;
   const parts = clean.split(/[\\/]+/).filter(Boolean);
   const s = parts.length > 2 ? parts.slice(-2).join("/") : parts.join("/");
   return s.length > 56 ? `${s.slice(0, 26)}\u2026${s.slice(-26)}` : s;
@@ -3605,7 +3639,7 @@ function existsHere(target, ctx2) {
   const absolute = posix ? t.startsWith("/") : /^[a-z]:[\\/]/i.test(t) || t.startsWith("\\\\");
   if (!absolute && ctx2.movesAround) return true;
   try {
-    return ctx2.exists(absolute ? t : (posix ? path20.posix : path20.win32).resolve(ctx2.cwd, t));
+    return ctx2.exists(absolute ? t : (posix ? path21.posix : path21.win32).resolve(ctx2.cwd, t));
   } catch {
     return true;
   }
@@ -4021,7 +4055,7 @@ var MOVES = /* @__PURE__ */ new Set(["cd", "chdir", "pushd", "popd", "set-locati
 function classifyCommand(command, cwd, opts = {}) {
   const fx = newEffects();
   const commands = splitCommands(command);
-  const ctx2 = { cwd, folder: path20.win32.basename(cwd) || cwd, movesAround: commands.some((c) => MOVES.has(commandName(c[0] ?? ""))), exists: opts.exists };
+  const ctx2 = { cwd, folder: path21.win32.basename(cwd) || cwd, movesAround: commands.some((c) => MOVES.has(commandName(c[0] ?? ""))), exists: opts.exists };
   for (const words of commands) analyse(words, ctx2, fx, 0);
   if (commands.some((c) => c.some((w) => SQL_CLIENTS.has(commandName(w))))) sqlEffects(command, fx);
   const destructive = fx.deletes.length > 0 || fx.deletesUnnamed || fx.sentences.length > 0;
@@ -4549,7 +4583,7 @@ var ChatSession = class extends EventEmitter4 {
         conversationId: this.id ?? "",
         toolName,
         title: questions.length === 1 ? "Claude has a question" : `Claude has ${questions.length} questions`,
-        context: [`in ${path21.basename(this.cwd)}`, this.opts.machine].join("  \xB7  "),
+        context: [`in ${path22.basename(this.cwd)}`, this.opts.machine].join("  \xB7  "),
         body: questions[0].question.trim().slice(0, 1e3),
         consequence: null,
         destructive: false,
@@ -4567,7 +4601,7 @@ var ChatSession = class extends EventEmitter4 {
     const command = typeof input.command === "string" ? input.command : null;
     const verdict = classifyTool(toolName, input, this.cwd, { exists: (p) => fs21.existsSync(p) });
     const destructive = verdict.destructive || !!o.defaultToNo;
-    const folder = path21.basename(this.cwd);
+    const folder = path22.basename(this.cwd);
     const shell3 = SHELLS[toolName];
     const file4 = String(input.file_path ?? input.notebook_path ?? input.path ?? "");
     let title = o.title || `Allow ${o.displayName ?? toolName}?`;
@@ -4874,8 +4908,8 @@ function plainError(msg) {
 import crypto2 from "node:crypto";
 import fs22 from "node:fs";
 import os13 from "node:os";
-import path22 from "node:path";
-import { spawn as spawn7 } from "node:child_process";
+import path23 from "node:path";
+import { spawn as spawn8 } from "node:child_process";
 var MAX_OUTPUT = 3e4;
 var TIME_LIMIT_MS = 10 * 6e4;
 var exists = (p) => {
@@ -4892,18 +4926,18 @@ function findShell(env = process.env, platform = process.platform) {
   }
   const candidates = [];
   if (env.CLAUDE_CODE_GIT_BASH_PATH) candidates.push(env.CLAUDE_CODE_GIT_BASH_PATH);
-  for (const dir of (env.PATH ?? env.Path ?? "").split(path22.delimiter)) {
+  for (const dir of (env.PATH ?? env.Path ?? "").split(path23.delimiter)) {
     if (!dir) continue;
-    if (exists(path22.join(dir, "git.exe"))) {
-      candidates.push(path22.join(dir, "..", "bin", "bash.exe"), path22.join(dir, "bash.exe"));
+    if (exists(path23.join(dir, "git.exe"))) {
+      candidates.push(path23.join(dir, "..", "bin", "bash.exe"), path23.join(dir, "bash.exe"));
     }
   }
-  for (const root of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && path22.join(env.LOCALAPPDATA, "Programs")]) {
-    if (root) candidates.push(path22.join(root, "Git", "bin", "bash.exe"));
+  for (const root of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && path23.join(env.LOCALAPPDATA, "Programs")]) {
+    if (root) candidates.push(path23.join(root, "Git", "bin", "bash.exe"));
   }
-  const bash = candidates.map((c) => path22.resolve(c)).find(exists);
+  const bash = candidates.map((c) => path23.resolve(c)).find(exists);
   if (bash) return { file: bash, args: (c) => ["-c", c], name: "bash" };
-  const ps = path22.join(env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const ps = path23.join(env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   if (exists(ps)) return { file: ps, args: (c) => ["-NoProfile", "-NonInteractive", "-Command", c], name: "powershell" };
   return null;
 }
@@ -4950,7 +4984,7 @@ function shellMessages(command, r) {
 function runQuietly(file4, args) {
   return new Promise((resolve) => {
     try {
-      const p = spawn7(file4, args, { windowsHide: true, stdio: "ignore" });
+      const p = spawn8(file4, args, { windowsHide: true, stdio: "ignore" });
       const t = setTimeout(() => {
         p.kill();
         resolve();
@@ -4998,7 +5032,7 @@ function runShell(command, cwd, opts = {}) {
   env.CHERE_INVOKING = "1";
   let stopped = null;
   let child;
-  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path22.join(os13.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
+  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path23.join(os13.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
   let args = shell3.args(command);
   if (bashGroup) {
     env.CONVERSATIONS_SHELL_COMMAND = command;
@@ -5006,7 +5040,7 @@ function runShell(command, cwd, opts = {}) {
     args = ["-c", `echo $$ > '${pidPath}'; eval "$CONVERSATIONS_SHELL_COMMAND"`];
   }
   try {
-    child = spawn7(shell3.file, args, { cwd, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    child = spawn8(shell3.file, args, { cwd, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
   } catch (e) {
     return { done: Promise.resolve({ stdout: "", stderr: e.message, code: null, stopped: null }), stop: () => {
     } };
@@ -5050,7 +5084,7 @@ function sweepPidFiles(dir = os13.tmpdir(), olderThanMs = 6e4) {
   try {
     for (const name of fs22.readdirSync(dir)) {
       if (!/^conversations-shell-\d+-[0-9a-f-]{36}\.pid$/.test(name)) continue;
-      const f = path22.join(dir, name);
+      const f = path23.join(dir, name);
       try {
         if (Date.now() - fs22.statSync(f).mtimeMs > olderThanMs) fs22.rmSync(f, { force: true });
       } catch {
@@ -5543,7 +5577,7 @@ var ChatManager = class extends EventEmitter5 {
     const s = this.sessions.get(id) ?? this.closed.get(id);
     const parts = [];
     for (const x of [...s?.pastIds ?? [], id]) {
-      for (const t of [this.deps.localTranscript(x), s ? path23.join(projectsDir(), encodeCwd(s.cwd), `${x}.jsonl`) : null]) {
+      for (const t of [this.deps.localTranscript(x), s ? path24.join(projectsDir(), encodeCwd(s.cwd), `${x}.jsonl`) : null]) {
         const d2 = t ? await readAgentLog(agentLogFile(t, agentId)) : null;
         if (d2) {
           parts.push(d2);
@@ -5613,8 +5647,8 @@ var ChatManager = class extends EventEmitter5 {
 // src/main/chat/usage.ts
 import fs24 from "node:fs";
 import os14 from "node:os";
-import path24 from "node:path";
-var file3 = () => path24.join(appDataDir(), "usage.json");
+import path25 from "node:path";
+var file3 = () => path25.join(appDataDir(), "usage.json");
 var clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
 function meter(key, label, w) {
   if (!w || typeof w.utilization !== "number" || !Number.isFinite(w.utilization)) return null;
@@ -5703,7 +5737,7 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
 
 // src/main/composer-state.ts
 import fs25 from "node:fs";
-import path25 from "node:path";
+import path26 from "node:path";
 var MAX_KEYS = 400;
 var MAX_DRAFT = 1e5;
 var RESERVED = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
@@ -5727,7 +5761,7 @@ function put(map, key, value) {
   return next;
 }
 var ComposerStore = class {
-  constructor(file4 = path25.join(appDataDir(), "composer.json")) {
+  constructor(file4 = path26.join(appDataDir(), "composer.json")) {
     this.file = file4;
   }
   file;
@@ -5786,7 +5820,7 @@ var ComposerStore = class {
     if (!this.loaded) return;
     const tmp = `${this.file}.${process.pid}.tmp`;
     try {
-      fs25.mkdirSync(path25.dirname(this.file), { recursive: true });
+      fs25.mkdirSync(path26.dirname(this.file), { recursive: true });
       fs25.writeFileSync(tmp, JSON.stringify(this.state));
       fs25.renameSync(tmp, this.file);
     } catch (e) {
@@ -5800,13 +5834,13 @@ var ComposerStore = class {
 };
 
 // src/main/chat/notify.ts
-import path26 from "node:path";
+import path27 from "node:path";
 import { app as app3, Notification } from "electron";
 var PROTOCOL = "conversations";
 var xmlEscape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function registerProtocol() {
   if (app3.isPackaged) app3.setAsDefaultProtocolClient(PROTOCOL);
-  else if (process.env.CONVERSATIONS_REGISTER_PROTOCOL === "1") app3.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path26.resolve(process.argv[1] ?? ".")]);
+  else if (process.env.CONVERSATIONS_REGISTER_PROTOCOL === "1") app3.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path27.resolve(process.argv[1] ?? ".")]);
 }
 function parseProtocolArgs(argv) {
   const url = argv.find((a) => a.startsWith(`${PROTOCOL}://`));
@@ -5911,7 +5945,7 @@ var StartupQueue = class {
 
 // src/shell/stages.ts
 import fs26 from "node:fs";
-import path27 from "node:path";
+import path28 from "node:path";
 var RUNNING_MARK = "running.json";
 var processAlive2 = (pid) => {
   try {
@@ -5926,9 +5960,9 @@ function writeRunningMark(root, stage, pid = process.pid) {
   fs26.mkdirSync(root, { recursive: true });
   const body = JSON.stringify({ pid, stage, at: (/* @__PURE__ */ new Date()).toISOString() });
   for (const name of [ownMark(pid), RUNNING_MARK]) {
-    const tmp = path27.join(root, `${name}.${pid}.tmp`);
+    const tmp = path28.join(root, `${name}.${pid}.tmp`);
     fs26.writeFileSync(tmp, body);
-    fs26.renameSync(tmp, path27.join(root, name));
+    fs26.renameSync(tmp, path28.join(root, name));
   }
 }
 var markerNames = (root) => {
@@ -5940,7 +5974,7 @@ var markerNames = (root) => {
 };
 var readMarker = (root, f) => {
   try {
-    const m = JSON.parse(fs26.readFileSync(path27.join(root, f), "utf8"));
+    const m = JSON.parse(fs26.readFileSync(path28.join(root, f), "utf8"));
     return typeof m?.pid === "number" && typeof m?.stage === "string" ? m : null;
   } catch {
     return null;
@@ -5955,7 +5989,7 @@ function stagesToRemove(root, inUse, alive = processAlive2, keepAlso = []) {
   try {
     names = fs26.readdirSync(root).filter((d) => {
       try {
-        return fs26.statSync(path27.join(root, d)).isDirectory();
+        return fs26.statSync(path28.join(root, d)).isDirectory();
       } catch {
         return false;
       }
@@ -5963,17 +5997,17 @@ function stagesToRemove(root, inUse, alive = processAlive2, keepAlso = []) {
   } catch {
     return [];
   }
-  const keep = /* @__PURE__ */ new Set([path27.basename(inUse)]);
-  for (const mark of readRunningMarks(root, alive)) keep.add(path27.basename(mark.stage));
-  for (const k of keepAlso) keep.add(path27.basename(k));
-  const older = names.filter((d) => !keep.has(d) && !d.endsWith(".tmp")).map((d) => ({ d, t: fs26.statSync(path27.join(root, d)).mtimeMs })).sort((a, b) => b.t - a.t);
-  return older.slice(1).map((o) => path27.join(root, o.d));
+  const keep = /* @__PURE__ */ new Set([path28.basename(inUse)]);
+  for (const mark of readRunningMarks(root, alive)) keep.add(path28.basename(mark.stage));
+  for (const k of keepAlso) keep.add(path28.basename(k));
+  const older = names.filter((d) => !keep.has(d) && !d.endsWith(".tmp")).map((d) => ({ d, t: fs26.statSync(path28.join(root, d)).mtimeMs })).sort((a, b) => b.t - a.t);
+  return older.slice(1).map((o) => path28.join(root, o.d));
 }
 function cleanStages(root, inUse, alive = processAlive2, keepAlso = []) {
   const gone = [];
   for (const f of markerNames(root)) {
     const m = readMarker(root, f);
-    if (f !== RUNNING_MARK && (!m || !alive(m.pid))) fs26.rmSync(path27.join(root, f), { force: true });
+    if (f !== RUNNING_MARK && (!m || !alive(m.pid))) fs26.rmSync(path28.join(root, f), { force: true });
   }
   for (const p of stagesToRemove(root, inUse, alive, keepAlso)) {
     try {
@@ -5986,7 +6020,7 @@ function cleanStages(root, inUse, alive = processAlive2, keepAlso = []) {
 }
 
 // src/main/auth.ts
-import { spawn as spawn8 } from "node:child_process";
+import { spawn as spawn9 } from "node:child_process";
 var cache2 = /* @__PURE__ */ new Map();
 var inFlight = /* @__PURE__ */ new Map();
 var TTL = 6e4;
@@ -6023,7 +6057,7 @@ function authStatus(w, claudePath, fresh = false, timeoutMs = 5e3) {
       resolve(state);
     };
     try {
-      const child = spawn8(claudePath, ["auth", "status", "--json"], { env: authEnv(w), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawn9(claudePath, ["auth", "status", "--json"], { env: authEnv(w), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
       const timer = setTimeout(() => {
         child.kill();
         finish(null);
@@ -6060,7 +6094,7 @@ function startLogin(w, claudePath, argv = ["auth", "login", "--claudeai"]) {
   cancelLogin(w.id);
   let child;
   try {
-    child = spawn8(claudePath, argv, { env: authEnv(w), windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    child = spawn9(claudePath, argv, { env: authEnv(w), windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   } catch (e) {
     return Promise.resolve({ ok: false, err: e.message });
   }
@@ -6161,13 +6195,13 @@ function lastLine(out) {
 }
 
 // src/shared/login-path.ts
-import { spawn as spawn9 } from "node:child_process";
+import { spawn as spawn10 } from "node:child_process";
 import fs27 from "node:fs";
 import os15 from "node:os";
-import path28 from "node:path";
+import path29 from "node:path";
 var MARK = "__CONVERSATIONS_PATH__";
 function usualMacFolders(home = os15.homedir()) {
-  return ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", path28.posix.join(home, ".local", "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+  return ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", path29.posix.join(home, ".local", "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 }
 function parseShellPath(out) {
   const start = out.indexOf(MARK);
@@ -6186,7 +6220,7 @@ function readLoginShellPath(shell3 = process.env.SHELL && fs27.existsSync(proces
     let done = false;
     let child;
     try {
-      child = spawn9(shell3, ["-ilc", `printf '%s%s%s' '${MARK}' "$PATH" '${MARK}'`], {
+      child = spawn10(shell3, ["-ilc", `printf '%s%s%s' '${MARK}' "$PATH" '${MARK}'`], {
         stdio: ["ignore", "pipe", "ignore"],
         detached: true,
         env: { ...process.env, DISABLE_AUTO_UPDATE: "true", ZSH_DISABLE_COMPFIX: "true" }
@@ -6234,7 +6268,7 @@ function useLoginShellPath(cacheFile) {
     process.env.PATH = mergePath(fresh, given, usualMacFolders());
     if (!cacheFile) return;
     try {
-      fs27.mkdirSync(path28.dirname(cacheFile), { recursive: true });
+      fs27.mkdirSync(path29.dirname(cacheFile), { recursive: true });
       fs27.writeFileSync(cacheFile, JSON.stringify({ path: fresh, at: (/* @__PURE__ */ new Date()).toISOString() }));
     } catch {
     }
@@ -6242,25 +6276,25 @@ function useLoginShellPath(cacheFile) {
 }
 
 // src/main/main.ts
-void useLoginShellPath(path29.join(appDataDir(), "login-path.json"));
+void useLoginShellPath(path30.join(appDataDir(), "login-path.json"));
 process.on("uncaughtException", (e) => log("app", `uncaught exception: ${e?.stack || e}`));
 process.on("unhandledRejection", (e) => log("app", `unhandled rejection: ${e?.stack || e}`));
-var HERE = path29.dirname(fileURLToPath(import.meta.url));
-var DIST = path29.resolve(HERE, "..");
+var HERE = path30.dirname(fileURLToPath(import.meta.url));
+var DIST = path30.resolve(HERE, "..");
 var files = {
-  preload: path29.join(DIST, "preload", "preload.cjs"),
-  page: process.env.CONVERSATIONS_DEV_URL || path29.join(DIST, "renderer", "index.html")
+  preload: path30.join(DIST, "preload", "preload.cjs"),
+  page: process.env.CONVERSATIONS_DEV_URL || path30.join(DIST, "renderer", "index.html")
 };
-var RESOURCES = app4.isPackaged ? process.resourcesPath : path29.resolve(DIST, "..", "resources");
-files.icon = path29.join(RESOURCES, "icon.ico");
+var RESOURCES = app4.isPackaged ? process.resourcesPath : path30.resolve(DIST, "..", "resources");
+files.icon = path30.join(RESOURCES, "icon.ico");
 var APP_VERSION = (() => {
   try {
-    return JSON.parse(fs28.readFileSync(path29.join(DIST, "app.json"), "utf8")).version || app4.getVersion();
+    return JSON.parse(fs28.readFileSync(path30.join(DIST, "app.json"), "utf8")).version || app4.getVersion();
   } catch {
     return app4.getVersion();
   }
 })();
-if (process.env.CONVERSATIONS_DATA_DIR || isMac2) app4.setPath("userData", path29.join(appDataDir(), "electron"));
+if (process.env.CONVERSATIONS_DATA_DIR || isMac2) app4.setPath("userData", path30.join(appDataDir(), "electron"));
 if (!app4.requestSingleInstanceLock()) {
   app4.quit();
   process.exit(0);
@@ -6328,7 +6362,7 @@ var chat = new ChatManager({
   syncBeforeResume: prepareResume,
   terminalHas: (id) => isOpenInTerminal(id)
 });
-var ownedFile = () => path29.join(appDataDir(), "app-owned.json");
+var ownedFile = () => path30.join(appDataDir(), "app-owned.json");
 var ownedMarked = null;
 var ownedMarking = /* @__PURE__ */ new Set();
 async function markAppOwned(id) {
@@ -6476,7 +6510,7 @@ function makeMain(show) {
   return w;
 }
 function appIcon(name) {
-  const p = path29.join(RESOURCES, name);
+  const p = path30.join(RESOURCES, name);
   return fs28.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
 }
 function toggleFlyout() {
@@ -6549,7 +6583,7 @@ function refreshAppRepo() {
   if (engineOverridden() && !process.env.CONVERSATIONS_APP_HOME) return;
   if (Date.now() - appRefreshAt < 10 * 6e4) return;
   appRefreshAt = Date.now();
-  const child = spawn10(process.execPath, [engineScriptPath(), "app", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
+  const child = spawn11(process.execPath, [engineScriptPath(), "app", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
   child.on("error", (e) => log("app", `could not update the app's repository: ${e.message}`));
   child.on("exit", () => void retrySdk());
 }
@@ -6563,7 +6597,7 @@ async function retrySdk() {
 function checkForUpdate() {
   refreshAppRepo();
   void retrySdk();
-  const source = fs28.existsSync(path29.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
+  const source = fs28.existsSync(path30.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
   return new Promise(
     (done) => execFile3("git", ["-C", source, "show", "HEAD:_app/dist/app.json"], { windowsHide: true, timeout: 2e4 }, (err, stdout) => {
       done();
@@ -6585,7 +6619,7 @@ function openWorkspaceWindow(id, extra = []) {
   const env = baseEnv();
   for (const k of ["CONVERSATIONS_RELAUNCH", "CONVERSATIONS_BASE_ENV", "CONVERSATIONS_CLAUDE_LAUNCHER", "ELECTRON_RUN_AS_NODE"]) delete env[k];
   try {
-    const child = spawn10(process.execPath, startArgs(process.argv, id, extra), { env, detached: true, stdio: "ignore" });
+    const child = spawn11(process.execPath, startArgs(process.argv, id, extra), { env, detached: true, stdio: "ignore" });
     child.on("error", (e) => log("app", `could not open workspace ${id} in its own window: ${e.message}`));
     child.unref();
     return true;
@@ -6706,7 +6740,7 @@ function handle(channel, fn) {
 var BAD_ID = "That conversation id isn't valid";
 function isUsableFolder(p) {
   try {
-    return path29.isAbsolute(p) && fs28.statSync(p).isDirectory();
+    return path30.isAbsolute(p) && fs28.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -6733,7 +6767,7 @@ function registerIpc() {
   handle("app:openExternal", (url) => typeof url === "string" && /^https?:\/\//.test(url) ? shell2.openExternal(url) : void 0);
   handle("app:openPath", (p) => {
     try {
-      if (typeof p === "string" && path29.isAbsolute(p) && fs28.statSync(p).isDirectory()) return shell2.openPath(p);
+      if (typeof p === "string" && path30.isAbsolute(p) && fs28.statSync(p).isDirectory()) return shell2.openPath(p);
     } catch {
     }
     return "Only folders can be opened";
@@ -6828,7 +6862,7 @@ function registerIpc() {
     const forWindow = workspacesForWindow().workspaces;
     const next = all.find((w) => w.id !== id && !w.disconnected && forWindow.some((f) => f.id === w.id && f.setUp));
     if (!next) return { ok: false, err: "Add another workspace first: Conversations needs one to show" };
-    if (id === "main" && !fs28.existsSync(path29.join(appRepoDir(), ".git"))) return { ok: false, err: `This ${PC} still gets the app's updates through this workspace: it can be disconnected after its next update` };
+    if (id === "main" && !fs28.existsSync(path30.join(appRepoDir(), ".git"))) return { ok: false, err: `This ${PC} still gets the app's updates through this workspace: it can be disconnected after its next update` };
     if (id !== currentWorkspace().id) {
       if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first: right-click its tray icon, then Quit ${target.name}.` };
       setDisconnected(id, true);
@@ -6857,7 +6891,7 @@ function registerIpc() {
     log("app", `reconnected workspace ${id}`);
     broadcast("workspaces-changed", null);
     const w = listWorkspaces().workspaces.find((x) => x.id === id);
-    return { ok: true, synced: !!w && fs28.existsSync(path29.join(w.syncHome, "config.json")) };
+    return { ok: true, synced: !!w && fs28.existsSync(path30.join(w.syncHome, "config.json")) };
   });
   handle("workspace:rename", (id, name) => {
     if (!isWorkspaceId(id) || typeof name !== "string" || !name.trim()) return;
@@ -6870,6 +6904,7 @@ function registerIpc() {
   handle("app:pickFolder", async () => {
     const win = BrowserWindow2.getFocusedWindow() ?? mainWin;
     const opts = { title: "New chat in which folder?", buttonLabel: "Chat here", properties: ["openDirectory"] };
+    await showPointer();
     const r = win ? await dialog3.showOpenDialog(win, opts) : await dialog3.showOpenDialog(opts);
     const p = r.filePaths[0];
     return p && isUsableFolder(p) ? p : null;
@@ -6881,14 +6916,14 @@ function registerIpc() {
     const images = [];
     const paths = [];
     for (const p of r.filePaths) {
-      const type = IMAGE_TYPES[path29.extname(p).toLowerCase()];
+      const type = IMAGE_TYPES[path30.extname(p).toLowerCase()];
       let size = 0;
       try {
         size = fs28.statSync(p).size;
       } catch {
         continue;
       }
-      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path29.basename(p), mediaType: type, data: fs28.readFileSync(p).toString("base64") });
+      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path30.basename(p), mediaType: type, data: fs28.readFileSync(p).toString("base64") });
       else paths.push(p);
     }
     return { images, paths };
@@ -6945,7 +6980,7 @@ function registerIpc() {
   handle("sync:now", () => scheduler.syncNow());
   handle("sync:signIn", () => isMac2 ? macGitHubSignIn() : scheduler.signIn());
   handle("sync:setPaused", (paused) => scheduler.setPaused(paused === true));
-  handle("sync:openLog", () => shell2.openPath(path29.join(syncDir(), "sync.log")));
+  handle("sync:openLog", () => shell2.openPath(path30.join(syncDir(), "sync.log")));
   handle("sync:setUploadQuiet", (seconds) => scheduler.setUploadQuiet(typeof seconds === "number" ? seconds : NaN));
   handle("cli:open", async (id) => {
     if (!isUuid(id)) return { ok: false, message: BAD_ID };
@@ -7266,7 +7301,7 @@ void app4.whenReady().then(async () => {
   if (app4.isPackaged && !askedFor(process.argv)) setStartAtLogin(settings.get().startAtLogin && !needsWelcome());
   if (isMac2) {
     Menu2.setApplicationMenu(macAppMenu({ settings: () => openSettings(), quit: () => userQuit(), quitLabel: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations" }));
-    if (!app4.isPackaged) app4.dock?.setIcon(path29.join(RESOURCES, "icon-mac.png"));
+    if (!app4.isPackaged) app4.dock?.setIcon(path30.join(RESOURCES, "icon-mac.png"));
   }
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   electronSession.defaultSession.setPermissionCheckHandler(() => false);
@@ -7274,7 +7309,7 @@ void app4.whenReady().then(async () => {
   registerIpc();
   log("app", `starting ${APP_VERSION} on ${thisMachine()}; data in ${appDataDir()}`);
   try {
-    await index.start(path29.join(HERE, "index-worker.mjs"));
+    await index.start(path30.join(HERE, "index-worker.mjs"));
     index.watchLive(liveConversationIds);
   } catch (e) {
     log("index", `the index is not available: ${e.stack || e}`);
@@ -7304,11 +7339,11 @@ void app4.whenReady().then(async () => {
   setTimeout(checkForUpdate, 15e3).unref();
   setInterval(checkForUpdate, 2 * 6e4).unref();
   const mainHere = listWorkspaces().workspaces[0];
-  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs28.existsSync(path29.join(mainHere.syncHome, "config.json"))) {
+  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs28.existsSync(path30.join(mainHere.syncHome, "config.json"))) {
     const keepMainCurrent = () => {
       const open = openNow();
       if (open.includes("main") || open.some((id) => id < currentWorkspace().id)) return;
-      const child = spawn10(process.execPath, [baseEngine(), "pull-all", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
+      const child = spawn11(process.execPath, [baseEngine(), "pull-all", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
       child.on("error", (e) => log("sync", `main workspace sync could not start: ${e.message}`));
     };
     setTimeout(keepMainCurrent, 45e3).unref();

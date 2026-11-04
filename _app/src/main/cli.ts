@@ -9,6 +9,7 @@ import { app, dialog, type BrowserWindow } from "electron";
 import { hasWindowsTerminal, refreshClaude } from "./claude";
 import { encodePowerShell, focusScript, macFocusCommand, macTerminalCommand, terminalCommand } from "./launch";
 import { openTerminal } from "./mac";
+import { showPointer } from "./pointer";
 import { handOver, type PullOutcome } from "./handover";
 import { folderForTranscript, safeFolderName } from "./resume-folder";
 import { sessionProcesses } from "./chat/terminals";
@@ -34,6 +35,9 @@ export async function chooseFolder(win: BrowserWindow | null, projectLabel: stri
     cancelId: 2,
     noLink: true,
   };
+  // (It often opens straight after typing, a message or a shortcut: the pointer would stay
+  // hidden over it. pointer.ts)
+  await showPointer();
   const { response } = win ? await dialog.showMessageBox(win, ask) : await dialog.showMessageBox(ask);
   if (response === 2) return null;
   if (response === 1) {
@@ -50,6 +54,9 @@ export async function chooseFolder(win: BrowserWindow | null, projectLabel: stri
     }
   }
   const opts = { title: `Your copy of ${projectLabel}`, properties: ["openDirectory" as const], buttonLabel: "Use this folder" };
+  // (Again: the question may have been answered with the keyboard, or the first move come
+  // too late to reach the app.)
+  await showPointer();
   const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
   return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
 }

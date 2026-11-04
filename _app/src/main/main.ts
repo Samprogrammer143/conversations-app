@@ -44,6 +44,7 @@ import { log, logPath } from "./log";
 import { loadSdk, sdkLoadedFrom } from "./chat/sdk";
 import { authStatus, cancelAllLogins, cancelLogin, loginEnded, signingIn, startLogin, submitLoginCode } from "./auth";
 import { isMac, macAppMenu, macGitHubSignIn, setStartAtLogin, trayIconFile } from "./mac";
+import { showPointer } from "./pointer";
 import { useLoginShellPath } from "../shared/login-path";
 import { PC } from "./words";
 
@@ -844,6 +845,8 @@ function registerIpc() {
   handle("app:pickFolder", async () => {
     const win = BrowserWindow.getFocusedWindow() ?? mainWin;
     const opts: Electron.OpenDialogOptions = { title: "New chat in which folder?", buttonLabel: "Chat here", properties: ["openDirectory"] };
+    // (Often opened with Enter in the search box: see pointer.ts.)
+    await showPointer();
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     const p = r.filePaths[0];
     return p && isUsableFolder(p) ? p : null;
