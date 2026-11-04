@@ -2402,7 +2402,8 @@ function macAppMenu(actions) {
     // Reload and the developer tools only while developing: a reload loses the window's state.
     { label: "View", submenu: [...app.isPackaged ? [] : [{ role: "reload" }, { role: "toggleDevTools" }, { type: "separator" }], { role: "togglefullscreen" }] },
     // (The Window menu's own role has no Close: Cmd+W needs it here.)
-    { role: "window", submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }, { type: "separator" }, { role: "front" }] }
+    { role: "window", submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }, { type: "separator" }, { role: "front" }] },
+    { role: "help", submenu: [{ label: "Report a Problem\u2026", click: actions.reportProblem }] }
   ];
   return Menu.buildFromTemplate(template);
 }
@@ -6275,6 +6276,12 @@ function useLoginShellPath(cacheFile) {
   });
 }
 
+// src/shared/links.ts
+var ISSUES_URL = "https://github.com/Samprogrammer143/conversations-app/issues";
+function reportProblemUrl(version, system) {
+  return `${ISSUES_URL}/new?${new URLSearchParams({ template: "problem.md", title: `Problem in Conversations ${version} on ${system}` }).toString()}`;
+}
+
 // src/main/main.ts
 void useLoginShellPath(path30.join(appDataDir(), "login-path.json"));
 process.on("uncaughtException", (e) => log("app", `uncaught exception: ${e?.stack || e}`));
@@ -7300,7 +7307,7 @@ void app4.whenReady().then(async () => {
   settings.on("change", applySettings);
   if (app4.isPackaged && !askedFor(process.argv)) setStartAtLogin(settings.get().startAtLogin && !needsWelcome());
   if (isMac2) {
-    Menu2.setApplicationMenu(macAppMenu({ settings: () => openSettings(), quit: () => userQuit(), quitLabel: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations" }));
+    Menu2.setApplicationMenu(macAppMenu({ settings: () => openSettings(), reportProblem: () => void shell2.openExternal(reportProblemUrl(APP_VERSION, "Mac")), quit: () => userQuit(), quitLabel: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations" }));
     if (!app4.isPackaged) app4.dock?.setIcon(path30.join(RESOURCES, "icon-mac.png"));
   }
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));

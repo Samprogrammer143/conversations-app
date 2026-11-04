@@ -117,7 +117,7 @@ const IN_APP_CLONE = samePath(path.resolve(path.dirname(SELF), ".."), APP_DIR);
 function refreshAppQuietly() {
   if (!IN_APP_CLONE) return;
   try {
-    refreshApp();
+    refreshApp({ background: true });
   } catch (e) {
     log(`could not refresh the app's repository: ${e.message || e}`);
   }

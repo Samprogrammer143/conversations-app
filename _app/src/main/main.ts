@@ -46,6 +46,7 @@ import { authStatus, cancelAllLogins, cancelLogin, loginEnded, signingIn, startL
 import { isMac, macAppMenu, macGitHubSignIn, setStartAtLogin, trayIconFile } from "./mac";
 import { showPointer } from "./pointer";
 import { useLoginShellPath } from "../shared/login-path";
+import { reportProblemUrl } from "../shared/links";
 import { PC } from "./words";
 
 // A Mac app started from the Finder has only the system's folders on PATH (the installed
@@ -1311,7 +1312,7 @@ void app.whenReady().then(async () => {
   // Not before the welcome is finished: a PC whose user didn't accept the terms doesn't start it at login.
   if (app.isPackaged && !askedFor(process.argv)) setStartAtLogin(settings.get().startAtLogin && !needsWelcome());
   if (isMac) {
-    Menu.setApplicationMenu(macAppMenu({ settings: () => openSettings(), quit: () => userQuit(), quitLabel: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations" }));
+    Menu.setApplicationMenu(macAppMenu({ settings: () => openSettings(), reportProblem: () => void shell.openExternal(reportProblemUrl(APP_VERSION, "Mac")), quit: () => userQuit(), quitLabel: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations" }));
     // (The installed app's Dock icon comes from its bundle; this is for development.)
     if (!app.isPackaged) app.dock?.setIcon(path.join(RESOURCES, "icon-mac.png"));
   }

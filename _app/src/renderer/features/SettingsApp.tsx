@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { bytes, plural } from "../lib/format";
 import { ctrlLabel, isMac, keyLabel } from "../lib/keys";
 import { pcWord } from "../lib/platform";
+import { ISSUES_URL, reportProblemUrl } from "../../shared/links";
 
 type Section = "general" | "appearance" | "sync" | "folders" | "claude" | "shortcuts";
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
@@ -131,6 +132,15 @@ export function SettingsApp() {
                 <Row label="Version">
                   <Value chevron={null}>Conversations {info.version}</Value>
                 </Row>
+              </Group>
+              <Group title="Help">
+                <button type="button" className="s-row s-link" title={ISSUES_URL} onClick={() => void api.app.openExternal(reportProblemUrl(info.version, isMac() ? "Mac" : "Windows"))}>
+                  <div className="s-text">
+                    <div className="s-label">Report a problem</div>
+                    <div className="s-detail">Opens a new issue on the app’s GitHub page, with the version filled in.</div>
+                  </div>
+                  <Value>GitHub</Value>
+                </button>
               </Group>
             </>
           )}

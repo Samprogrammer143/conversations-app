@@ -52,7 +52,13 @@ node "$env:LOCALAPPDATA\claude-conversation-sync\repo\_sync\install.mjs"
 ## How updates reach a PC
 
 - The engine (`_sync/engine.mjs`, `refreshApp`) fast-forwards the PC's copy of this
-  repository at most every ten minutes, only when it is a clean clone on `main`.
+  repository at most every ten minutes, only when it is a clean clone on `main`, to the
+  `release` branch: `main` as far as the newest commit every test passed on. GitHub's
+  workflow (`.github/workflows/mac.yml`, the `release` job) moves it there once the Mac and
+  Windows tests pass, never back, so a push to `main` reaches nobody untested. A copy just
+  made from `main` starts at `release`. If `release` is ever gone from GitHub, a copy that
+  has followed it waits for it to come back rather than taking `main`. To take a change
+  back, revert it on `main`.
 - The app's installer brings Electron and a small shell (`_app/src/shell/`). On each
   start the shell runs the newest `_app/dist` that is committed and unmodified in that
   copy, from a private staged copy; otherwise the copy it was installed with.

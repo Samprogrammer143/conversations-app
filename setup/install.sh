@@ -5,7 +5,7 @@
 #
 #   curl -fsSL https://conversations.tidewaystudios.com/install.sh | bash
 #
-# Read it first if you like: https://github.com/Samprogrammer143/conversations-app/blob/main/setup/install.sh
+# Read it first if you like: https://github.com/Samprogrammer143/conversations-app/blob/release/setup/install.sh
 # To only see what it would do:  bash install.sh --check
 #
 # The app isn't signed with a paid Apple account. Installed from Terminal it isn't held back

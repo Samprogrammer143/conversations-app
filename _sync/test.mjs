@@ -1339,5 +1339,88 @@ console.log(JSON.stringify({ ...r, asked }));`;
   check("no npm: only the public registry is used", elsewhere.res?.status === 1 && elsewhere.res.asked.length === 0, JSON.stringify(elsewhere.res) + elsewhere.err);
 }
 
+// ---- 62. The release line: a PC's copy of the app follows the release branch (main as far as
+// GitHub last tested it), and main only while there is no release branch
+{
+  const D = path.join(T, "app-release");
+  const AR = path.join(D, "remote.git");
+  fs.mkdirSync(D, { recursive: true });
+  gitq(["init", "-q", "--bare", "-b", "main", AR], D);
+  const W = path.join(D, "work");
+  gitq(["clone", "-q", AR, W], D);
+  const commit = (n) => {
+    fs.writeFileSync(path.join(W, "version.txt"), `${n}\n`);
+    gitq(["add", "."], W);
+    gitq(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", `v${n}`], W);
+    gitq(["push", "-q", "origin", "main"], W);
+    return sh("git", ["rev-parse", "HEAD"], { cwd: W }).stdout.trim();
+  };
+  const release = (sha) => gitq(["push", "-q", "origin", sha ? `${sha}:refs/heads/release` : ":refs/heads/release"], W);
+  const install = (name) => {
+    const home = path.join(D, name);
+    gitq(["clone", "-q", AR, home], D);
+    return home;
+  };
+  const refresh = (home, force = true, background = false) => {
+    const code = `const e = await import(${JSON.stringify(ENGINE_URL)}); console.log(JSON.stringify(e.refreshApp({ force: ${force}, background: ${background} })));`;
+    const out = spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8", env: envFor(A, { CONVERSATIONS_APP_HOME: home, CONVERSATIONS_APP_REPO_URL: AR }) });
+    let r = null;
+    try {
+      r = JSON.parse(out.stdout.trim().split("\n").pop());
+    } catch {}
+    const v = fs.readFileSync(path.join(home, "version.txt"), "utf8").trim();
+    const clean = sh("git", ["status", "--porcelain"], { cwd: home }).stdout.trim() === "" && sh("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: home }).stdout.trim() === "main";
+    return { r, v, clean, detail: JSON.stringify(r) + out.stderr };
+  };
+  commit(1);
+  const P1 = install("pc1");
+  const c2 = commit(2);
+  const a = refresh(P1, false);
+  check("release line: with no release branch, a copy follows main", a.r?.ok && a.r.branch === "main" && a.v === "2" && a.clean, a.detail);
+  commit(3);
+  refresh(P1);
+  // (Where every PC is when the release branch first appears: on main, ahead of it.)
+  release(c2);
+  const b = refresh(P1);
+  check("release line: a copy already ahead of the release branch is never moved back", b.r?.ok && b.r.branch === "release" && b.v === "3" && b.clean, b.detail);
+  const c4 = commit(4);
+  const c = refresh(P1);
+  check("release line: a push to main reaches nobody until the release branch has it", c.r?.ok && !c.r.updated && c.v === "3", c.detail);
+  release(c4);
+  const d = refresh(P1);
+  check("release line: once the release branch moves on, every copy follows", d.r?.ok && d.r.updated && d.v === "4" && d.clean, d.detail);
+  commit(5);
+  const P2 = install("pc2");
+  const e = refresh(P2, false);
+  check("release line: a copy just made from main starts at the release branch, not on untested commits", e.r?.ok && e.r.branch === "release" && e.v === "4" && e.clean, e.detail);
+  const f = refresh(P2);
+  check("release line: and stays there", f.r?.ok && !f.r.updated && f.v === "4", f.detail);
+  // A set-up whose first refresh fails (offline) and is run again still starts at the release branch.
+  const P3 = install("pc3");
+  gitq(["remote", "set-url", "origin", path.join(D, "nowhere.git")], P3);
+  const offline = refresh(P3, false);
+  gitq(["remote", "set-url", "origin", AR], P3);
+  const again = refresh(P3, false);
+  check("release line: a new copy whose first refresh failed starts at the release branch the next time", offline.r?.offline && again.r?.ok && again.r.branch === "release" && again.v === "4" && again.clean, offline.detail + again.detail);
+  // A half set-up copy that can't reach GitHub isn't fetched again by every hook, only every ten minutes.
+  const P5 = install("pc5");
+  gitq(["remote", "set-url", "origin", path.join(D, "nowhere.git")], P5);
+  const bg1 = refresh(P5, false, true);
+  const bg2 = refresh(P5, false, true);
+  const fg = refresh(P5, false);
+  check("release line: a new copy that keeps failing is retried in the background only every ten minutes, at once otherwise", bg1.r?.offline && bg2.r?.skipped === "recent" && fg.r?.offline, bg1.detail + bg2.detail + fg.detail);
+  // Only main and the release branch are downloaded.
+  gitq(["push", "-q", "origin", "HEAD:refs/heads/experiment"], W);
+  refresh(P1);
+  check("release line: no other branch is downloaded", sh("git", ["branch", "-r"], { cwd: P1 }).stdout.split("\n").every((b) => !b.includes("experiment")));
+  release(null);
+  commit(6);
+  const g = refresh(P1);
+  check("release line: if the release branch goes, a copy that followed it waits instead of taking untested main", g.r?.ok && g.r.skipped === "no-release" && g.v === "4" && g.clean, g.detail);
+  const P4 = install("pc4");
+  const h = refresh(P4, false);
+  check("release line: a copy that never saw a release branch follows main", h.r?.ok && h.r.branch === "main" && h.v === "6" && h.clean, h.detail);
+}
+
 for (const x of results) console.log(`${x.ok ? "PASS" : "FAIL"}  ${x.name}${x.ok || !x.detail ? "" : `\n      ${String(x.detail).trim().slice(0, 500).replace(/\n/g, "\n      ")}`}`);
 console.log(`\n${results.filter((x) => x.ok).length}/${results.length} passed`);

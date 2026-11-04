@@ -108,34 +108,72 @@ export function ensureAppClone() {
   return { ok: true, cloned: true, dir: APP_DIR, runtime: ensureRuntime() };
 }
 
+// What every installed copy follows: the release branch, which is main as far as the newest
+// commit every test passed on (GitHub's workflow moves it there, never back), so a push to
+// main reaches nobody until it has been tested. Main itself for a copy that has never seen
+// the release branch (it didn't exist yet); a copy that has follows nothing while the branch
+// is gone (deleted by mistake, say) rather than main's untested commits. Null: wait.
+const FOLLOWS_RELEASE = "conversations.followsRelease";
+export function appUpdateBranch(cwd = APP_DIR) {
+  if (appGit(["rev-parse", "--verify", "--quiet", "refs/remotes/origin/release"], cwd).ok) return "origin/release";
+  return appGit(["config", "--get", FOLLOWS_RELEASE], cwd).out === "true" ? null : "origin/main";
+}
+
 /**
  * Brings this PC's copy of the app's repository up to date: fast-forward only, at
  * most every ten minutes (force: now), and only a clean clone on main. A folder
  * someone works in, or one with commits of its own, is left alone.
  */
-export function refreshApp({ force = false } = {}) {
+export function refreshApp({ force = false, background = false } = {}) {
   if (!fs.existsSync(path.join(APP_DIR, ".git"))) return { ok: true, skipped: "no-clone" };
   const stamp = path.join(APP_DIR, ".git", "conversations-refreshed");
-  if (!force) {
+  // A copy never refreshed before has only just been made (by the set-up, or ensureAppClone).
+  // Its stamp is written only once it has reached the branch it follows, so a first refresh
+  // that fails (offline, say) is tried again from the start: by the set-up or the app at
+  // once, from a hook's background work at most every ten minutes (the "tried" stamp).
+  const first = !fs.existsSync(stamp);
+  const tried = path.join(APP_DIR, ".git", "conversations-tried");
+  const last = first ? (background ? tried : null) : stamp;
+  if (!force && last) {
     try {
-      if (Date.now() - fs.statSync(stamp).mtimeMs < APP_REFRESH_MS) return { ok: true, skipped: "recent" };
+      if (Date.now() - fs.statSync(last).mtimeMs < APP_REFRESH_MS) return { ok: true, skipped: "recent" };
     } catch {}
   }
-  try {
-    fs.writeFileSync(stamp, new Date().toISOString());
-  } catch {}
+  if (first && background) {
+    try {
+      fs.writeFileSync(tried, new Date().toISOString());
+    } catch {}
+  }
+  const stampNow = () => {
+    try {
+      fs.writeFileSync(stamp, new Date().toISOString());
+    } catch {}
+  };
+  if (!first) stampNow();
   if (appGit(["rev-parse", "--abbrev-ref", "HEAD"]).out !== "main") return { ok: true, skipped: "not-main" };
   const dirty = appGit(["status", "--porcelain", "--untracked-files=no"]);
   if (!dirty.ok || dirty.out) return { ok: true, skipped: "changed" };
   const before = appGit(["rev-parse", "HEAD"]).out;
-  const f = appGit(["fetch", "--quiet", "origin", "main"]);
+  // Only main and the release branch (no other branch is ever downloaded), and the release
+  // branch noticed as gone if it goes: a pattern matches nothing rather than failing.
+  const f = appGit(["fetch", "--quiet", "--prune", "origin", "+refs/heads/main:refs/remotes/origin/main", "+refs/heads/release*:refs/remotes/origin/release*"]);
   if (!f.ok) return { ok: false, offline: true, err: f.err };
-  const m = appGit(["merge", "--ff-only", "--quiet", "origin/main"]);
+  const target = appUpdateBranch();
+  if (!target) {
+    log("the app's release branch is gone from GitHub: waiting for it before updating the app again");
+    return { ok: true, skipped: "no-release" };
+  }
+  // A copy just made from main can be ahead of the release branch, on commits not tested yet:
+  // it starts at the release branch instead. From then on it only ever moves forward.
+  const back = first && target === "origin/release" && appGit(["merge-base", "--is-ancestor", target, "HEAD"]).ok;
+  const m = back ? appGit(["reset", "--keep", "--quiet", target]) : appGit(["merge", "--ff-only", "--quiet", target]);
   if (!m.ok) return { ok: false, err: m.err };
+  if (target === "origin/release" && appGit(["config", "--get", FOLLOWS_RELEASE]).out !== "true") appGit(["config", FOLLOWS_RELEASE, "true"]);
+  if (first) stampNow();
   const after = appGit(["rev-parse", "HEAD"]).out;
-  if (before !== after) log(`the app's repository updated to ${after.slice(0, 12)}`);
+  if (before !== after) log(`the app's repository ${back ? "started at the release branch" : "updated to"} ${after.slice(0, 12)}`);
   const runtime = ensureRuntime();
-  return { ok: true, updated: before !== after, from: before, to: after, runtime };
+  return { ok: true, updated: before !== after, from: before, to: after, branch: target.slice("origin/".length), runtime };
 }
 
 // What the app needs at run time that is not its own code (Claude's Agent SDK), as

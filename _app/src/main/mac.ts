@@ -125,7 +125,7 @@ export function openTerminal(c: { file: string; args: string[] }, what: string):
 
 // ------------------------------------------------------------ the app menu
 
-export function macAppMenu(actions: { settings: () => void; quit: () => void; quitLabel: string }): Menu {
+export function macAppMenu(actions: { settings: () => void; reportProblem: () => void; quit: () => void; quitLabel: string }): Menu {
   const name = app.name;
   const template: MenuItemConstructorOptions[] = [
     {
@@ -150,6 +150,7 @@ export function macAppMenu(actions: { settings: () => void; quit: () => void; qu
     { label: "View", submenu: [...(app.isPackaged ? [] : ([{ role: "reload" }, { role: "toggleDevTools" }, { type: "separator" }] as MenuItemConstructorOptions[])), { role: "togglefullscreen" }] },
     // (The Window menu's own role has no Close: Cmd+W needs it here.)
     { role: "window", submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }, { type: "separator" }, { role: "front" }] },
+    { role: "help", submenu: [{ label: "Report a Problem…", click: actions.reportProblem }] },
   ];
   return Menu.buildFromTemplate(template);
 }

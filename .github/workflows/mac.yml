@@ -1,11 +1,11 @@
-# The Mac version, built and tested on GitHub's Macs (free for a public repository), with
-# the same tests on Windows alongside so a Mac change can't quietly break the Windows app.
-# Runs on pushes to main and the mac branch, on pull requests, and by hand. Only on main,
-# and only once every test has passed, does it publish anything: the Mac app zips, to the
-# mac-app release the Terminal set-up downloads from (publish-mac, at the end). Nothing
-# else here touches anyone's install. Everything it makes (test results, screenshots, the
-# app zips) is kept as the run's artifacts for a week.
-name: Mac
+# The app's tests, on GitHub's Macs (free for a public repository) and on Windows, and the
+# Mac version built and tested there. Runs on pushes to main and the mac branch, on pull
+# requests, and by hand. Only on main, and only once every test has passed on the commit,
+# does it change anything anyone has: the release branch, which every installed app updates
+# from (release, at the end), and the Mac app zips the Terminal set-up downloads (publish-mac).
+# Everything it makes (test results, screenshots, the app zips) is kept as the run's
+# artifacts for a week.
+name: Test and release
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 # One run at a time for each branch or pull request: a newer push stops the one still going,
-# except on main, where a run that may be publishing the Mac app is left to finish.
+# except on main, where a run that may be releasing is left to finish (so runs finish in order).
 concurrency:
   group: mac-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -213,19 +213,54 @@ jobs:
           echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} e2e=${{ steps.e2e.outcome }}"
           exit 1
 
-  # The Mac app's permanent home: the mac-app release, which the Terminal set-up downloads
-  # from (releases/download/mac-app/...). Built again from main, and only once the Mac tests
-  # above have passed on the same commit; the two zips are replaced each time. The release is
-  # never made "latest": that is the Windows download. (The app's code updates itself from
-  # main, so what's in these zips, Electron's shell, rarely changes.)
-  # Publishes the Mac app zips that were tested above (Apple silicon's from the Apple silicon
-  # Mac, Intel's from the Intel one) to the mac-app release, once every test has passed on
-  # this commit. It builds nothing and installs no packages: only gh, which comes with
-  # GitHub's runners, ever holds the write access. The release is never marked latest, so
-  # the Windows download link (releases/latest/download/...) can't change.
-  publish-mac:
+  # The release line: the release branch, which every installed app updates itself from
+  # (the engine's refreshApp), moved up to this commit once every test above has passed on
+  # it. So a push to main reaches nobody untested. Only ever forward, as the apps only ever
+  # fast-forward: to take a change back, revert it on main and let the tests pass. A run for
+  # a commit the branch already has (a rerun of an older one) changes nothing. If GitHub had
+  # no Mac free and a test job failed for that, re-run the failed jobs.
+  release:
     needs: [mac, windows]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    # current: the release branch is at this very commit now (publish-mac goes by it).
+    outputs:
+      current: ${{ steps.move.outputs.current }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move the release branch up to this commit
+        id: move
+        run: |
+          if git rev-parse --verify --quiet origin/release >/dev/null; then
+            if git merge-base --is-ancestor "$GITHUB_SHA" origin/release; then
+              echo "The release branch already has ${GITHUB_SHA::7}."
+              [ "$(git rev-parse origin/release)" = "$GITHUB_SHA" ] && echo "current=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git merge-base --is-ancestor origin/release "$GITHUB_SHA" || { echo "The release branch has commits main doesn't: left alone."; exit 1; }
+          fi
+          git push origin "$GITHUB_SHA:refs/heads/release"
+          echo "current=true" >> "$GITHUB_OUTPUT"
+          echo "The release branch is now at ${GITHUB_SHA::7}: installed apps pick it up within ten minutes."
+
+  # Publishes the Mac app zips that were tested above (Apple silicon's from the Apple silicon
+  # Mac, Intel's from the Intel one) to the mac-app release the Terminal set-up downloads from
+  # (releases/download/mac-app/...), once every test has passed on this commit; the two zips
+  # are replaced each time. It builds nothing and installs no packages: only gh, which comes
+  # with GitHub's runners, ever holds the write access. The release is never marked latest,
+  # so the Windows download link (releases/latest/download/...) can't change. (The app's code
+  # updates itself from the release branch, so what's in these zips, Electron's shell,
+  # rarely changes.) Only when the release branch is at this commit: a re-run of an older
+  # run never puts older zips back over newer ones.
+  publish-mac:
+    needs: [release]
+    if: needs.release.outputs.current == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -245,7 +280,7 @@ jobs:
 
       - name: Publish to the mac-app release (never "latest")
         run: |
-          notes="The Mac app, installed by the Terminal command on conversations.tidewaystudios.com. Built from ${GITHUB_SHA::7}; its code then updates itself from main."
+          notes="The Mac app, installed by the Terminal command on conversations.tidewaystudios.com. Built from ${GITHUB_SHA::7}; its code then keeps itself up to date from the tested release branch."
           gh release view mac-app >/dev/null 2>&1 || gh release create mac-app --target "$GITHUB_SHA" --title "Conversations for Mac" --notes "$notes" --latest=false
           gh release upload mac-app up/Conversations-mac-arm64.zip up/Conversations-mac-x64.zip --clobber
           gh release edit mac-app --notes "$notes" --latest=false
