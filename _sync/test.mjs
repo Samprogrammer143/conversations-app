@@ -68,8 +68,15 @@ const run = (m, args, extra = {}, input) => spawnSync(process.execPath, [TOOL, .
 const hook = (m, event, payload) => run(m, ["hook", event], {}, JSON.stringify(payload));
 const remoteFile = (key, id, name = "transcript.jsonl") => {
   const c = path.join(T, "inspect");
-  fs.rmSync(c, { recursive: true, force: true });
-  gitq(["-c", "core.longpaths=true", "clone", "-q", REMOTE, c], T);
+  // (A few tries: on Windows, something scanning a file git has just written, antivirus or the
+  // indexer, can make a local clone fail with "failed to copy file" for a moment.)
+  for (let tries = 1; ; tries++) {
+    fs.rmSync(c, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    const r = sh("git", ["-c", "core.longpaths=true", "clone", "-q", REMOTE, c], { cwd: T, allowFail: true });
+    if (r.status === 0) break;
+    if (tries >= 3 || !/failed to copy file|Permission denied|being used by another process/i.test(r.stderr)) throw new Error(`git clone failed: ${r.stderr}`);
+    sleep(500);
+  }
   const p = path.join(c, key, id, name);
   return fs.existsSync(p) ? fs.readFileSync(p) : null;
 };
