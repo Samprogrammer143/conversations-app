@@ -48,7 +48,8 @@ export interface ConversationsApi {
     toggleFlyout(): Promise<void>;
     copyText(text: string): Promise<void>;
     checkClaude(): Promise<AppInfo["claude"]>;
-    finishWelcome(): Promise<void>;
+    /** Ends the welcome: only once the licence and the Claude plan's terms are accepted. */
+    finishWelcome(acceptedTerms: true): Promise<void>;
     /** Window kind this page was opened as: "main" | "settings" | "flyout". */
     windowKind(): string;
   };

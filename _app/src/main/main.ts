@@ -272,12 +272,27 @@ async function updateUsage(minGapMs = 60_000) {
 
 let welcomeWin: BrowserWindow | null = null;
 
+/**
+ * Until the welcome is finished (the licence and the Claude plan's terms accepted), every
+ * way into the app (the tray, the flyout, Settings, a start at login, a restart) leads to
+ * the welcome window instead.
+ */
+const needsWelcome = () => !settings.get().welcomed;
+
 /** First run: the welcome window alone; the main window opens when it closes. */
 function showWelcome() {
+  if (welcomeWin && !welcomeWin.isDestroyed()) {
+    // (Not shown yet: it shows itself once it has drawn.)
+    if (welcomeWin.isMinimized()) welcomeWin.restore();
+    if (welcomeWin.isVisible()) welcomeWin.focus();
+    return;
+  }
   welcomeWin = createWelcomeWindow(files);
   welcomeWin.on("closed", () => {
     welcomeWin = null;
-    if (!settings.get().welcomed) settings.set({ welcomed: true });
+    // Closed without accepting (app:finishWelcome sets welcomed): the app doesn't start,
+    // and the welcome asks again next time.
+    if (needsWelcome()) return userQuit();
     showMain();
   });
 }
@@ -289,10 +304,7 @@ function ensureMain(show: boolean): BrowserWindow {
 }
 
 function showMain() {
-  if (welcomeWin && !welcomeWin.isDestroyed()) {
-    welcomeWin.focus();
-    return;
-  }
+  if (needsWelcome() || (welcomeWin && !welcomeWin.isDestroyed())) return showWelcome();
   const w = ensureMain(true);
   if (w.isMinimized()) w.restore();
   w.show();
@@ -348,6 +360,7 @@ function appIcon(name: string) {
 
 function toggleFlyout() {
   if (!tray) return;
+  if (needsWelcome()) return showWelcome();
   flyout ??= createFlyout(files);
   if (flyout.isVisible()) {
     flyout.hide();
@@ -396,6 +409,7 @@ function buildTray() {
 }
 
 function openSettings(section?: string) {
+  if (needsWelcome()) return showWelcome();
   if (settingsWin && !settingsWin.isDestroyed()) {
     settingsWin.show();
     settingsWin.focus();
@@ -490,8 +504,9 @@ function restart({ into, others }: { into?: string; others: boolean }) {
   // The restart starts from the launch environment: the shell finds the app's code in
   // the app's repository, and the copy stays in its workspace (or goes to the one switched to).
   markRelaunch();
-  // A window that was out of sight (in the tray) comes back out of sight.
-  const extra = [...(mainWin && !mainWin.isDestroyed() && mainWin.isVisible() ? [] : ["--hidden"]), ...(others ? ["--restart-others"] : [])];
+  // A window that was out of sight (in the tray) comes back out of sight; the welcome always comes back.
+  const inSight = (mainWin && !mainWin.isDestroyed() && mainWin.isVisible()) || needsWelcome();
+  const extra = [...(inSight ? [] : ["--hidden"]), ...(others ? ["--restart-others"] : [])];
   // Tests start the app again themselves (their runner can't follow a relaunch).
   if (!process.env.CONVERSATIONS_TEST_NO_RELAUNCH) app.relaunch({ args: startArgs(process.argv, into ?? self, extra) });
   quit();
@@ -546,7 +561,7 @@ function applySettings(s: Settings, patch: Partial<Settings>) {
   if ("theme" in patch) nativeTheme.themeSource = s.theme;
   if ("startAtLogin" in patch) {
     saveStartAtLogin(s.startAtLogin);
-    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: s.startAtLogin, args: ["--hidden"] });
+    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: s.startAtLogin && !needsWelcome(), args: ["--hidden"] });
   }
   if ("theme" in patch) for (const w of [mainWin, settingsWin]) if (w && !w.isDestroyed()) setTitleBarColors(w);
   broadcast("settings-changed", s);
@@ -847,8 +862,12 @@ function registerIpc() {
     const c = await refreshClaude(true);
     return { found: c.found, version: c.version, path: c.path, signedIn: c.signedIn, defaultModel: claudeDefaultModel() };
   });
-  handle("app:finishWelcome", () => {
-    settings.set({ welcomed: true });
+  handle("app:finishWelcome", (acceptedTerms: unknown) => {
+    // Only with the box ticked: the welcome can't be finished without accepting.
+    if (acceptedTerms !== true) return;
+    settings.set({ welcomed: true, termsAcceptedAt: new Date().toISOString() });
+    // Only now does the app start at login (when that's chosen).
+    if (app.isPackaged && !askedFor(process.argv)) app.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin, args: ["--hidden"] });
     if (welcomeWin && !welcomeWin.isDestroyed()) welcomeWin.close();
   });
 
@@ -1245,7 +1264,8 @@ void app.whenReady().then(async () => {
   const loginChoice = sharedStartAtLogin();
   if (loginChoice !== null && loginChoice !== s.startAtLogin) settings.set({ startAtLogin: loginChoice });
   settings.on("change", applySettings);
-  if (app.isPackaged && !askedFor(process.argv)) app.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin, args: ["--hidden"] });
+  // Not before the welcome is finished: a PC whose user didn't accept the terms doesn't start it at login.
+  if (app.isPackaged && !askedFor(process.argv)) app.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin && !needsWelcome(), args: ["--hidden"] });
   // The window never needs the camera, microphone, notifications API and so on.
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   electronSession.defaultSession.setPermissionCheckHandler(() => false);
@@ -1372,7 +1392,8 @@ void app.whenReady().then(async () => {
 
   buildTray();
   const hidden = process.argv.includes("--hidden");
-  if (!settings.get().welcomed && !hidden) showWelcome();
+  // The welcome shows even on a start out of sight: nothing else opens until it's finished.
+  if (needsWelcome()) showWelcome();
   else ensureMain(!hidden);
   // A plain start (the Start menu, at login) also opens again the workspaces whose windows
   // were still open when the app last stopped.

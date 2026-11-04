@@ -755,6 +755,36 @@ let nrOut = [];
 try { nrOut = JSON.parse(nr.stdout.trim()); } catch {}
 check("remotes: ssh ports, GitLab subgroups and Azure DevOps each get one spelling", NR.every(([, want], i) => nrOut[i] === want), JSON.stringify(nrOut) + nr.stderr);
 
+// A public repository is refused for conversations: only GitHub's own "private": false counts.
+const pubCode = `const e = await import(${JSON.stringify(pathToFileURL(path.join(HERE, "engine.mjs")).href)});
+const answer = (status, body) => async () => ({ status, json: async () => body });
+const ask = (url, f) => e.isPublicOnGitHub(url, { fetch: f });
+const seen = (url, f) => e.githubVisibility(url, { fetch: f });
+console.log(JSON.stringify({
+  repos: ["https://github.com/Acme/Site.git", "git@github.com:Acme/Site.git", "ssh://git@ssh.github.com:443/Acme/Site.git", "https://gitlab.com/a/b", "file:///C:/x.git"].map((u) => e.githubRepoOf(u)),
+  publicRepo: await ask("https://github.com/acme/site", answer(200, { private: false })),
+  privateRepo: await ask("https://github.com/acme/site", answer(200, { private: true })),
+  notFound: await ask("https://github.com/acme/site", answer(404, {})),
+  offline: await ask("https://github.com/acme/site", async () => { throw new Error("offline"); }),
+  elsewhere: await ask("https://gitlab.com/a/b", answer(200, { private: false })),
+  visibility: [
+    await seen("https://github.com/acme/site", answer(200, { private: false })),
+    await seen("https://github.com/acme/site", answer(404, {})),
+    await seen("https://github.com/acme/site", answer(403, {})),
+    await seen("https://github.com/acme/site", async () => { throw new Error("offline"); }),
+    await seen("https://gitlab.com/a/b", answer(200, { private: false })),
+  ],
+}));`;
+const pub = spawnSync(process.execPath, ["--input-type=module", "-e", pubCode], { encoding: "utf8", env: envFor(A) });
+let pubOut = {};
+try { pubOut = JSON.parse(pub.stdout.trim()); } catch {}
+check(
+  "public repos: only GitHub saying a repository is public refuses it",
+  JSON.stringify(pubOut.repos) === JSON.stringify(["acme/site", "acme/site", "acme/site", null, null]) && pubOut.publicRepo === true && pubOut.privateRepo === false && pubOut.notFound === false && pubOut.offline === false && pubOut.elsewhere === false
+    && JSON.stringify(pubOut.visibility) === JSON.stringify(["public", "private", "unknown", "unknown", null]),
+  pub.stdout + pub.stderr,
+);
+
 const P44 = "5a5a5a5a-0000-4000-8000-000000000001";
 fs.writeFileSync(tpath(A, PA, P44), line("complete first line", PA, P44));
 run(A, ["push", "--session", P44, "--cwd", PA]);

@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultPermissionMode: "default",
   folders: {},
   welcomed: false,
+  termsAcceptedAt: null,
 };
 
 const isBool = (v: unknown) => typeof v === "boolean";
@@ -47,6 +48,8 @@ const CHECKS: { [K in keyof Settings]: (v: unknown) => boolean } = {
   defaultPermissionMode: isPermissionMode,
   folders: isFolders,
   welcomed: isBool,
+  // Set by the welcome screen's "I accept" (app:finishWelcome); kept as a date.
+  termsAcceptedAt: (v) => v === null || (typeof v === "string" && v.length <= 40 && !Number.isNaN(Date.parse(v))),
 };
 
 /** The known, well-formed part of a settings change from the window, and the names of what was refused. */

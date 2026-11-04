@@ -20,7 +20,7 @@ const api: ConversationsApi = {
     toggleFlyout: () => invoke("app:toggleFlyout"),
     copyText: (text) => invoke("app:copyText", text),
     checkClaude: () => invoke("app:checkClaude"),
-    finishWelcome: () => invoke("app:finishWelcome"),
+    finishWelcome: (acceptedTerms) => invoke("app:finishWelcome", acceptedTerms),
     windowKind: () => windowKind,
   },
   window: {

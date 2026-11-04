@@ -135,12 +135,12 @@ export function createSettingsWindow(files: WindowFiles, parent: BrowserWindow |
   return win;
 }
 
-/** First run (S6): its own 560 × 643 window. Windows draws the 8 px corners and shadow. */
+/** First run (S6): its own 560 × 715 window (with the terms to accept). Windows draws the 8 px corners and shadow. */
 export function createWelcomeWindow(files: WindowFiles): BrowserWindow {
   const c = themeColors();
   const win = new BrowserWindow({
     width: 560,
-    height: 643,
+    height: 715,
     useContentSize: true,
     show: false,
     resizable: false,

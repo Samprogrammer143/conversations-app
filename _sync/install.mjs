@@ -126,9 +126,13 @@ await import(pathToFileURL(${JSON.stringify(path.join(SYNC_DIR, "repo", "_sync",
 // changes it while a sync (a Claude Code hook, or the Conversations app) is at work there.
 let withRepoLock = (fn) => fn();
 let recover = null;
+let githubVisibility = async () => null;
+let publicRepoMessage = "That repository is public, so anyone could read your conversations in it. Make it private, then try again.";
 try {
   const engine = await import(pathToFileURL(path.join(HERE, "engine.mjs")).href);
   if (typeof engine.recoverFromConflict === "function") recover = engine.recoverFromConflict;
+  if (typeof engine.githubVisibility === "function") githubVisibility = engine.githubVisibility;
+  if (engine.PUBLIC_REPO_MESSAGE) publicRepoMessage = engine.PUBLIC_REPO_MESSAGE;
   withRepoLock = (fn) => {
     if (engine.lockHolder()) say("Waiting for the sync that is running now to finish ...");
     try {
@@ -140,6 +144,13 @@ try {
   };
 } catch (e) {
   say(`(The sync engine next to this installer could not be loaded, so it runs without the sync lock: ${e.message})`);
+}
+
+// Conversations hold code, file paths and sometimes secrets: never a repository anyone can read.
+if (remoteArg) {
+  const seen = await githubVisibility(remoteArg);
+  if (seen === "public") die(publicRepoMessage);
+  if (seen === "unknown") say("(GitHub didn't answer whether that repository is private, so it couldn't be checked. Make sure it is: anyone can read a public one.)");
 }
 
 // 2. Make sure the working clone exists, and is up to date.

@@ -568,7 +568,7 @@ export function Welcome() {
           pcs={sidebar?.devices.length ?? 1}
           total={sidebar?.total ?? 0}
           onDone={() => {
-            void api.app.finishWelcome();
+            void api.app.finishWelcome(true);
             useStore.setState({ welcome: false });
           }}
         />
@@ -577,7 +577,7 @@ export function Welcome() {
   );
 }
 
-/** The welcome window (S6): its own 560 × 643 window on first run. */
+/** The welcome window (S6): its own 560 × 715 window on first run. */
 export function WelcomeApp() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [counts, setCounts] = useState<{ pcs: number; total: number }>({ pcs: 1, total: 0 });
@@ -596,21 +596,33 @@ export function WelcomeApp() {
         pcs={counts.pcs}
         total={counts.total}
         onDone={() => {
-          void api.app.finishWelcome().then(() => window.close());
+          void api.app.finishWelcome(true).then(() => window.close());
         }}
+        onClose={() => window.close()}
       />
     </div>
   );
 }
 
+const LICENCE_URL = "https://github.com/Samprogrammer143/conversations-app/blob/main/LICENSE";
+const CLAUDE_TERMS_URL = "https://www.anthropic.com/legal";
+/** A link in the welcome text, opened in the browser. */
+const openLink = (url: string) => (e: React.MouseEvent) => {
+  e.preventDefault();
+  e.stopPropagation();
+  void api.app.openExternal(url);
+};
+
 /** "owner/name" for GitHub; a folder name for anything else (a local stand-in). */
 const repoLabel = (repo: string | null) => (!repo ? "" : /[\\:]/.test(repo) ? repo.split(/[\\/]/).filter(Boolean).pop()!.replace(/\.git$/, "") : repo);
 
-function WelcomeContent({ info, pcs, total, onDone }: { info: AppInfo; pcs: number; total: number; onDone: () => void }) {
+function WelcomeContent({ info, pcs, total, onDone, onClose }: { info: AppInfo; pcs: number; total: number; onDone: () => void; onClose?: () => void }) {
   const [claude, setClaude] = useState<AppInfo["claude"] | null>(info.claude);
   const [checking, setChecking] = useState(false);
+  // The licence and the Claude plan's terms: nothing goes on until they're accepted.
+  const [accepted, setAccepted] = useState(false);
   useEffect(() => setClaude(info.claude), [info]);
-  const done = onDone;
+  const done = () => accepted && onDone();
   const recheck = async () => {
     setChecking(true);
     setClaude(await api.app.checkClaude());
@@ -618,12 +630,12 @@ function WelcomeContent({ info, pcs, total, onDone }: { info: AppInfo; pcs: numb
   };
   return (
     <>
-        <IconButton icon="x" label="Close" className="close" onClick={done} />
+        {onClose && <IconButton icon="x" label={accepted ? "Close" : "Close: Conversations won't start until you accept"} className="close" onClick={accepted ? done : onClose} />}
         <div className="welcome-icon">
           <Icon name="message-square" size={36} strokeWidth={1.5} />
         </div>
         <h1 id="welcome-title">Welcome to Conversations</h1>
-        <p className="lede">Every Claude Code chat from all your PCs, in one place and always in sync.</p>
+        <p className="lede">Every Claude Code chat from all your PCs, in one place and kept in sync.</p>
         <div className="checklist">
           <div className="check-row">
             <Icon name={claude?.found ? "circle-check" : "triangle-alert"} className={claude?.found ? "ok" : "bad"} />
@@ -662,9 +674,25 @@ function WelcomeContent({ info, pcs, total, onDone }: { info: AppInfo; pcs: numb
             </div>
           </div>
         </div>
+        <label className="terms">
+          <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />
+          <span>
+            I accept the{" "}
+            <a href={LICENCE_URL} onClick={openLink(LICENCE_URL)}>
+              licence
+            </a>{" "}
+            and the{" "}
+            <a href={CLAUDE_TERMS_URL} onClick={openLink(CLAUDE_TERMS_URL)}>
+              terms of my Claude plan
+            </a>
+          </span>
+        </label>
+        <div className="terms-note" id="welcome-terms-note">
+          Conversations is free under the MIT licence and comes with no warranty. It runs Claude Code with your own Claude account.
+        </div>
         {claude?.found ? (
           <>
-            <Button kind="primary" className="btn-lg" onClick={done}>
+            <Button kind="primary" className="btn-lg" disabled={!accepted} aria-describedby={accepted ? undefined : "welcome-terms-note"} onClick={done}>
               Get started
             </Button>
             <div className="foot">Nothing new is uploaded until you start a chat.</div>
@@ -676,7 +704,7 @@ function WelcomeContent({ info, pcs, total, onDone }: { info: AppInfo; pcs: numb
                 {checking ? <Spinner /> : null}
                 Check again
               </Button>
-              <Button kind="plain" onClick={done}>
+              <Button kind="plain" disabled={!accepted} aria-describedby={accepted ? undefined : "welcome-terms-note"} onClick={done}>
                 Continue without chat
               </Button>
             </div>

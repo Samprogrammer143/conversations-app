@@ -1309,7 +1309,8 @@ var DEFAULT_SETTINGS = {
   defaultModel: null,
   defaultPermissionMode: "default",
   folders: {},
-  welcomed: false
+  welcomed: false,
+  termsAcceptedAt: null
 };
 var isBool = (v) => typeof v === "boolean";
 var isInt = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
@@ -1331,7 +1332,9 @@ var CHECKS = {
   defaultModel: (v) => v === null || isModelName(v),
   defaultPermissionMode: isPermissionMode,
   folders: isFolders,
-  welcomed: isBool
+  welcomed: isBool,
+  // Set by the welcome screen's "I accept" (app:finishWelcome); kept as a date.
+  termsAcceptedAt: (v) => v === null || typeof v === "string" && v.length <= 40 && !Number.isNaN(Date.parse(v))
 };
 function sanitizeSettingsPatch(patch) {
   const out = {};
@@ -2120,7 +2123,7 @@ function createWelcomeWindow(files2) {
   const c = themeColors();
   const win = new BrowserWindow({
     width: 560,
-    height: 643,
+    height: 715,
     useContentSize: true,
     show: false,
     resizable: false,
@@ -2601,7 +2604,7 @@ async function loadSdk(installDir, resourcesDir = null) {
 }
 var sdkLoadedFrom = () => loadedFrom;
 var query = ((...args) => {
-  if (!mod) throw new Error("Claude's Agent SDK isn't installed on this PC yet: the app installs it with its next update, or reinstall Conversations");
+  if (!mod) throw new Error("Claude's Agent SDK isn't installed on this PC yet. The app installs it from npm by itself while this PC is online: try again in a few minutes, or run Set up Conversations again");
   return mod.query(...args);
 });
 
@@ -6077,11 +6080,17 @@ async function updateUsage(minGapMs = 6e4) {
   return u;
 }
 var welcomeWin = null;
+var needsWelcome = () => !settings.get().welcomed;
 function showWelcome() {
+  if (welcomeWin && !welcomeWin.isDestroyed()) {
+    if (welcomeWin.isMinimized()) welcomeWin.restore();
+    if (welcomeWin.isVisible()) welcomeWin.focus();
+    return;
+  }
   welcomeWin = createWelcomeWindow(files);
   welcomeWin.on("closed", () => {
     welcomeWin = null;
-    if (!settings.get().welcomed) settings.set({ welcomed: true });
+    if (needsWelcome()) return userQuit();
     showMain();
   });
 }
@@ -6090,10 +6099,7 @@ function ensureMain(show) {
   return mainWin;
 }
 function showMain() {
-  if (welcomeWin && !welcomeWin.isDestroyed()) {
-    welcomeWin.focus();
-    return;
-  }
+  if (needsWelcome() || welcomeWin && !welcomeWin.isDestroyed()) return showWelcome();
   const w = ensureMain(true);
   if (w.isMinimized()) w.restore();
   w.show();
@@ -6140,6 +6146,7 @@ function appIcon(name) {
 }
 function toggleFlyout() {
   if (!tray) return;
+  if (needsWelcome()) return showWelcome();
   flyout ??= createFlyout(files);
   if (flyout.isVisible()) {
     flyout.hide();
@@ -6183,6 +6190,7 @@ function buildTray() {
   refreshTrayMenu();
 }
 function openSettings(section) {
+  if (needsWelcome()) return showWelcome();
   if (settingsWin && !settingsWin.isDestroyed()) {
     settingsWin.show();
     settingsWin.focus();
@@ -6251,7 +6259,8 @@ function openWorkspaceWindow(id, extra = []) {
 function restart({ into, others }) {
   const self = currentWorkspace().id;
   markRelaunch();
-  const extra = [...mainWin && !mainWin.isDestroyed() && mainWin.isVisible() ? [] : ["--hidden"], ...others ? ["--restart-others"] : []];
+  const inSight = mainWin && !mainWin.isDestroyed() && mainWin.isVisible() || needsWelcome();
+  const extra = [...inSight ? [] : ["--hidden"], ...others ? ["--restart-others"] : []];
   if (!process.env.CONVERSATIONS_TEST_NO_RELAUNCH) app3.relaunch({ args: startArgs(process.argv, into ?? self, extra) });
   quit();
 }
@@ -6296,7 +6305,7 @@ function applySettings(s, patch) {
   if ("theme" in patch) nativeTheme2.themeSource = s.theme;
   if ("startAtLogin" in patch) {
     saveStartAtLogin(s.startAtLogin);
-    if (app3.isPackaged) app3.setLoginItemSettings({ openAtLogin: s.startAtLogin, args: ["--hidden"] });
+    if (app3.isPackaged) app3.setLoginItemSettings({ openAtLogin: s.startAtLogin && !needsWelcome(), args: ["--hidden"] });
   }
   if ("theme" in patch) {
     for (const w of [mainWin, settingsWin]) if (w && !w.isDestroyed()) setTitleBarColors(w);
@@ -6558,8 +6567,10 @@ function registerIpc() {
     const c = await refreshClaude(true);
     return { found: c.found, version: c.version, path: c.path, signedIn: c.signedIn, defaultModel: claudeDefaultModel() };
   });
-  handle("app:finishWelcome", () => {
-    settings.set({ welcomed: true });
+  handle("app:finishWelcome", (acceptedTerms) => {
+    if (acceptedTerms !== true) return;
+    settings.set({ welcomed: true, termsAcceptedAt: (/* @__PURE__ */ new Date()).toISOString() });
+    if (app3.isPackaged && !askedFor(process.argv)) app3.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin, args: ["--hidden"] });
     if (welcomeWin && !welcomeWin.isDestroyed()) welcomeWin.close();
   });
   handle("list:sidebar", () => index.ready ? { ...sidebarData(index.db, ctx(), readDevices(repoDir()), folders2()), pcCount: devices().length } : null);
@@ -6898,7 +6909,7 @@ void app3.whenReady().then(async () => {
   const loginChoice = sharedStartAtLogin();
   if (loginChoice !== null && loginChoice !== s.startAtLogin) settings.set({ startAtLogin: loginChoice });
   settings.on("change", applySettings);
-  if (app3.isPackaged && !askedFor(process.argv)) app3.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin, args: ["--hidden"] });
+  if (app3.isPackaged && !askedFor(process.argv)) app3.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin && !needsWelcome(), args: ["--hidden"] });
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   electronSession.defaultSession.setPermissionCheckHandler(() => false);
   void refreshClaude();
@@ -7001,7 +7012,7 @@ void app3.whenReady().then(async () => {
   });
   buildTray();
   const hidden = process.argv.includes("--hidden");
-  if (!settings.get().welcomed && !hidden) showWelcome();
+  if (needsWelcome()) showWelcome();
   else ensureMain(!hidden);
   if (!askedFor(process.argv)) {
     const here = workspacesForWindow().workspaces;

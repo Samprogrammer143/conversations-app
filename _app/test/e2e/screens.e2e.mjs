@@ -91,6 +91,7 @@ try {
       await w.screenshot({ path: path.join(out, "S6-welcome.png") });
       console.log("saved S6-welcome");
       const next = app.waitForEvent("window", { timeout: 15_000 });
+      await w.locator(".welcome-window .terms input").check();
       await w.evaluate(() => document.querySelector(".welcome-window .btn-primary")?.click());
       const main = await next;
       await main.waitForTimeout(1500);

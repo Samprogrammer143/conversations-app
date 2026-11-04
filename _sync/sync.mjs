@@ -106,6 +106,8 @@ import {
   ensureAppClone,
   ensureRuntime,
   refreshApp,
+  githubVisibility,
+  PUBLIC_REPO_MESSAGE,
 } from "./engine.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
@@ -283,7 +285,9 @@ function doStatus(args) {
 
 // ------------------------------------------------------------------ setup
 
-function doSetup(args) {
+async function doSetup(args) {
+  // As install.mjs: conversations never go into a repository anyone can read.
+  if (args.remote && (await githubVisibility(String(args.remote))) === "public") throw new SyncError(PUBLIC_REPO_MESSAGE, "public-repo");
   const config = setup({ remote: args.remote, machine: args.machine });
   console.log(`Sync repo ready at ${REPO_DIR} (machine "${config.machine}").`);
 }
@@ -490,7 +494,7 @@ try {
     refreshAppQuietly();
   }
   else if (cmd === "status") doStatus(args);
-  else if (cmd === "setup") doSetup(args);
+  else if (cmd === "setup") await doSetup(args);
   else if (cmd === "where") console.log(SYNC_DIR);
   else if (cmd === "list") doList();
   else if (cmd === "pull-all") printJson(pullAll({ intoLocal: !args["no-local"], skip: [].concat(args.skip ?? []).filter((x) => typeof x === "string").flatMap((x) => x.split(",")).map((x) => x.trim()).filter(Boolean) }));
@@ -506,7 +510,9 @@ try {
     // Sets up this PC's copy of the app's repository and its run-time packages, or updates them.
     const clone = ensureAppClone();
     const refresh = clone.ok ? refreshApp({ force: !!args.now }) : null;
-    printJson({ ok: clone.ok && (refresh?.ok ?? true), dir: APP_DIR, clone, refresh, runtime: clone.ok ? ensureRuntime() : null });
+    // The run-time packages count too: without Claude's Agent SDK the app can't chat.
+    const runtime = clone.ok ? ensureRuntime() : null;
+    printJson({ ok: clone.ok && (refresh?.ok ?? true) && runtime?.ok !== false, dir: APP_DIR, clone, refresh, runtime });
   } else if (cmd === "share-workspace") printJson(shareWorkspace({ id: argText(args.id), name: argText(args.name), remote: argText(args.remote) }));
   else if (cmd === "version") console.log(ENGINE_VERSION);
   else fail("Usage: sync.mjs setup|push|pull|status|where|hook <event>|list|pull-all|check|signin|edit|folders|push-pending|announce|config|app|version");

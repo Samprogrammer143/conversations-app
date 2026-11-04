@@ -23,6 +23,7 @@ import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
 import zlib from "node:zlib";
+import https from "node:https";
 import { spawnSync } from "node:child_process";
 
 export const ENGINE_VERSION = 3;
@@ -905,6 +906,63 @@ export function remoteWithoutCredentials(url) {
   if (/^ssh:\/\//i.test(m[1]) && !m[2].includes(":")) return s;
   return m[1] + m[3];
 }
+
+/** "owner/name" of a repository on github.com (ssh.github.com too), from any form of its address; null anywhere else. */
+export function githubRepoOf(url) {
+  const n = normaliseRemote(url);
+  const m = n && /^(?:ssh\.)?github\.com\/([^/]+)\/([^/]+)$/.exec(n);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/**
+ * Whether anyone can read this repository, as GitHub answers without signing in: "public";
+ * "private" (GitHub says "not found", which a missing repository gets too); "unknown"
+ * (offline, rate limited, behind a proxy, or an answer that says neither); or null for a
+ * repository that isn't on github.com.
+ */
+export async function githubVisibility(url, { fetch: get = getOnce, timeoutMs = 10_000 } = {}) {
+  const repo = githubRepoOf(url);
+  if (!repo) return null;
+  if (typeof get !== "function") return "unknown";
+  try {
+    const r = await get(`https://api.github.com/repos/${repo}`, { headers: { accept: "application/vnd.github+json", "user-agent": "conversations-sync" }, timeoutMs });
+    if (r.status === 404) return "private";
+    if (r.status !== 200) return "unknown";
+    const info = await r.json();
+    return info?.private === false ? "public" : info?.private === true ? "private" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * One GET over a connection of its own, closed when it's done ({ status, json() }, as fetch
+ * gives). Not fetch: it keeps its connection open, and the process.exit() an installer makes
+ * just after (refusing a public repository) then aborts Node on Windows.
+ */
+function getOnce(url, { headers = {}, timeoutMs = 10_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { agent: false, headers, timeout: timeoutMs }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        if (body.length < 1_000_000) body += chunk;
+      });
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, json: async () => JSON.parse(body) }));
+      res.on("error", reject);
+    });
+    req.on("timeout", () => req.destroy(new Error("timed out")));
+    req.on("error", reject);
+  });
+}
+
+/** Whether GitHub says anyone can read this repository (see githubVisibility). */
+export async function isPublicOnGitHub(url, opts) {
+  return (await githubVisibility(url, opts)) === "public";
+}
+
+/** What install.mjs and setup say when a repository for conversations is public. */
+export const PUBLIC_REPO_MESSAGE = "That repository is public, so anyone could read your conversations in it. Make it private on github.com (its Settings, then Change visibility), or make a new private one, then try again.";
 
 /** Version 3 project identity: the normalised git remote, or the folder key for folders outside git. */
 export function projectIdOf(remote, key) {

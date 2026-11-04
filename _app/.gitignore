@@ -1,5 +1,6 @@
 node_modules/
 release/
+release-public/
 .vite/
 *.log
 test-results/

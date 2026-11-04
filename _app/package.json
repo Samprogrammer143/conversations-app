@@ -1,11 +1,11 @@
 {
   "name": "conversations",
   "productName": "Conversations",
-  "version": "0.5.23",
+  "version": "0.5.24",
   "private": true,
-  "description": "Every Claude Code conversation from all your PCs, in one place and always in sync.",
+  "description": "Every Claude Code conversation from all your PCs, in one place and kept in sync.",
   "author": "Samprogrammer143",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "main": "dist/main/main.mjs",
   "scripts": {
@@ -15,7 +15,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
-    "dist": "node scripts/build.mjs && electron-builder --win nsis --publish never"
+    "dist": "node scripts/build.mjs && electron-builder --win nsis --publish never",
+    "dist:public": "node scripts/dist-public.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",

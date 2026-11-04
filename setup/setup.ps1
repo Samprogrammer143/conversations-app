@@ -80,7 +80,10 @@ else {
 if ($Check) { Todo "Claude's Agent SDK would be installed from npm" }
 else {
   $r = node (Join-Path $AppDir "_sync\sync.mjs") app --json | Select-Object -Last 1
-  if ($LASTEXITCODE -ne 0 -or $r -notmatch '"ok":\s*true') { Stop-Setup "Setting up the app's code didn't finish: $r" }
+  try { $j = $r | ConvertFrom-Json } catch { $j = $null }
+  # The download doesn't carry the SDK: setup only goes on once npm has installed it.
+  if ($j -and $j.runtime -and $j.runtime.ok -eq $false) { Stop-Setup "Claude's Agent SDK couldn't be installed from npm ($($j.runtime.err)). Check the internet connection, then run this again." }
+  if ($LASTEXITCODE -ne 0 -or -not $j -or -not $j.ok) { Stop-Setup "Setting up the app's code didn't finish: $r" }
   Done "Claude's Agent SDK is installed"
 }
 
@@ -131,7 +134,20 @@ else {
   Say "      Paste its address. For a new one: make an empty, private repository on github.com first."
   while (-not $remote) {
     $remote = (Read-Host "      Repository address").Trim()
+    # A public repository is refused: conversations hold code, file paths and sometimes
+    # secrets. GitHub answers anyone about a public one, and "not found" for a private one.
     if ($remote -notmatch '^(https://[^/]+/.+|git@[^:]+:.+|file:///.+)$') { Say "      That doesn't look like a repository address (https://github.com/you/repo)."; $remote = $null }
+    elseif ($remote -match '(^|[/@])(www\.|ssh\.)?github\.com(:443)?[/:]([^/]+)/([^/]+?)(\.git)?/?$') {
+      try {
+        $info = Invoke-RestMethod "https://api.github.com/repos/$($Matches[4])/$($Matches[5])" -TimeoutSec 10 -Headers @{ "User-Agent" = "conversations-setup" }
+        if ($info.private -eq $false) { Say "      That repository is public, so anyone could read your conversations. Make it private on github.com (its Settings, then Change visibility), or paste a new private one."; $remote = $null }
+      } catch {
+        # "Not found" is how GitHub answers about a private repository; anything else means no answer.
+        $resp = $_.Exception.Response
+        $code = if ($resp) { [int]$resp.StatusCode } else { 0 }
+        if ($code -ne 404) { Say "      (GitHub didn't answer whether it's private, so it couldn't be checked. Make sure it is: anyone can read a public one.)" }
+      }
+    }
   }
   while (-not $workspace) { $workspace = (Read-Host "      What should Conversations call it? (e.g. Work)").Trim() }
 

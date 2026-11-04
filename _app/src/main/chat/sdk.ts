@@ -71,6 +71,6 @@ export const sdkLoadedFrom = () => loadedFrom;
 
 /** The SDK's query(), once loadSdk() found it. */
 export const query: typeof Sdk.query = ((...args: Parameters<typeof Sdk.query>) => {
-  if (!mod) throw new Error("Claude's Agent SDK isn't installed on this PC yet: the app installs it with its next update, or reinstall Conversations");
+  if (!mod) throw new Error("Claude's Agent SDK isn't installed on this PC yet. The app installs it from npm by itself while this PC is online: try again in a few minutes, or run Set up Conversations again");
   return mod.query(...args);
 }) as typeof Sdk.query;

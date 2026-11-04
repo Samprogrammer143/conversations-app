@@ -399,12 +399,15 @@
   box-shadow: var(--elevation-sheet);
   animation: pop-in var(--dur-slow) var(--ease-spring);
 }
-/* Its own window: Windows draws the 8 px corners and the shadow. */
+/* Its own window: Windows draws the 8 px corners and the shadow. Taller content (Claude
+   Code not found, with its command) scrolls rather than being cut off. */
 .welcome-window {
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
 }
+/* Fixed, so they stay at the top when the welcome scrolls. */
 .welcome-drag {
-  position: absolute;
+  position: fixed;
   inset: 0 56px auto 0;
   height: 44px;
 }
@@ -416,7 +419,8 @@
 }
 /* The welcome window's close button is Windows' own shape: 46 x 52, red on hover. */
 .welcome-window .close {
-  position: absolute;
+  position: fixed;
+  z-index: 1;
   top: 0;
   right: 0;
   width: 46px;
@@ -455,6 +459,39 @@
   max-width: 360px;
   font: 400 15px/24px var(--font-ui);
   letter-spacing: -0.009em;
+  color: var(--label-secondary);
+}
+/* The licence and the Claude plan's terms, under the checklist: Get started waits for it. */
+.terms {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: -12px 0 4px;
+  padding: 0 4px;
+  text-align: left;
+  font: 400 13px/18px var(--font-ui);
+  cursor: pointer;
+}
+.terms input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  accent-color: var(--bg-accent);
+  cursor: pointer;
+}
+/* The app's only native checkbox: the outlines base.css removes come back for it. */
+.terms input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.terms a {
+  color: var(--label-link);
+}
+.terms-note {
+  margin: 0 0 20px 30px;
+  text-align: left;
+  font: 400 12px/16px var(--font-ui);
   color: var(--label-secondary);
 }
 .checklist {

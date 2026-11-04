@@ -1,6 +1,6 @@
 # Conversations
 
-Every Claude Code conversation from all your PCs, in one place and always in sync.
+Every Claude Code conversation from all your PCs, in one place and kept in sync.
 A Windows app (`_app/`) and the sync engine behind it (`_sync/`), which Claude Code's
 hooks also run.
 
@@ -16,14 +16,19 @@ of your own, one per workspace (for example one per Claude account). Each PC kee
 ## Set up a PC
 
 1. Make an empty, private repository on GitHub for the conversations (or use the one
-   your other PCs already sync with).
-2. Put `setup/Set up Conversations.cmd`, `setup/setup.ps1` and the app's installer
-   (`Conversations Setup x.y.z.exe`, built with `npm run dist` in `_app/`) in one folder
-   on the PC, and double-click `Set up Conversations.cmd`.
+   your other PCs already sync with). The set-up refuses one GitHub says is public.
+2. Download `Conversations-Setup.zip` from the latest release
+   (https://github.com/Samprogrammer143/conversations-app/releases/latest), unzip it, and
+   double-click `Set up Conversations.cmd`. (Or build the same zip yourself:
+   `npm run dist:public` in `_app/` puts it in `_app/release-public/`.)
 
 It installs Git, Node and Claude Code when they are missing, copies this repository,
 installs Claude's Agent SDK from npm, connects the conversations repository, installs
-the app and opens Claude Code to sign in. Every step skips what is already done.
+the app and opens Claude Code to sign in. Every step skips what is already done. On
+first start the app asks you to accept the licence and your Claude plan's terms.
+
+Windows may warn that the installer is from an unknown publisher (it isn't signed):
+choose More info, then Run anyway.
 
 By hand, with Git and Node installed (PowerShell):
 
@@ -53,13 +58,17 @@ node "$env:LOCALAPPDATA\claude-conversation-sync\repo\_sync\install.mjs"
   copy, from a private staged copy; otherwise the copy it was installed with.
 - Claude's Agent SDK is not part of this repository (its licence doesn't allow
   shipping it here). `_app/runtime/package.json` lists the version the app needs; each
-  PC installs it from npm (`ensureRuntime`), and the installer brings a copy too. So
-  the installer you build is for your own PCs: don't publish it.
+  PC installs it from npm (`ensureRuntime`). The installer `npm run dist` builds brings
+  a copy too, so it is for your own PCs only: don't publish it. `npm run dist:public`
+  builds one without it, the one to publish.
 
 ## Licences
 
-The app's bundles include open-source libraries, fonts and icons; their licences are
-in `_app/dist/THIRD-PARTY-NOTICES.txt`, written by the build.
+The code in this repository is under the MIT licence (`LICENSE`), except the
+third-party parts the app's bundles include (open-source libraries, fonts and icons),
+which keep their own licences, listed in `_app/dist/THIRD-PARTY-NOTICES.txt` by the
+build. Claude's Agent SDK and Claude Code are Anthropic's: they aren't part of this
+repository, and come from Anthropic under Anthropic's terms.
 
 ## Develop
 

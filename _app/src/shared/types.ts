@@ -273,6 +273,8 @@ export interface Settings {
   defaultPermissionMode: "default" | "acceptEdits" | "plan" | "auto";
   folders: Record<string, string>;
   welcomed: boolean;
+  /** When the licence and the Claude plan's terms were accepted on the welcome screen (null: not yet). */
+  termsAcceptedAt: string | null;
 }
 
 // ------------------------------------------------------------------ chat
