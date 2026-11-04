@@ -280,9 +280,15 @@ if (MAC) {
   // The app this installer runs in first (when it does), then the usual places for it.
   const running = /^.*?\.app\/Contents\/MacOS\/[^/]+$/.test(process.execPath) ? [process.execPath] : [];
   const apps = [...new Set([...running, "/Applications/Conversations.app/Contents/MacOS/Conversations", path.join(HOME, "Applications", "Conversations.app", "Contents", "MacOS", "Conversations")])];
-  fs.mkdirSync(path.dirname(NODE_SHIM), { recursive: true });
-  fs.writeFileSync(NODE_SHIM, nodeShimScript(apps), { mode: 0o755 });
-  fs.chmodSync(NODE_SHIM, 0o755);
+  // Hooks can't run without it, so the install stops here when it can't be written (an
+  // ~/.local that belongs to another account, say), with one line saying so.
+  try {
+    fs.mkdirSync(path.dirname(NODE_SHIM), { recursive: true });
+    fs.writeFileSync(NODE_SHIM, nodeShimScript(apps), { mode: 0o755 });
+    fs.chmodSync(NODE_SHIM, 0o755);
+  } catch (e) {
+    die(`Couldn't write ${NODE_SHIM}, which Claude Code's hooks run the sync with (${e.code || e.message}). Make sure ~/.local/bin belongs to you, then run this again.`);
+  }
 }
 const RUN = MAC ? `"$HOME/${fwd(path.relative(HOME, NODE_SHIM))}"` : "node";
 

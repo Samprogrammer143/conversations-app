@@ -1,20 +1,26 @@
 # The Mac version, built and tested on GitHub's Macs (free for a public repository), with
 # the same tests on Windows alongside so a Mac change can't quietly break the Windows app.
-# Runs on every push to the mac branch; nothing here touches main or anyone's install.
-# Everything it makes (test results, screenshots, the app zips) is kept as the run's
-# artifacts for a week.
+# Runs on pushes to main and the mac branch, on pull requests, and by hand. Only on main,
+# and only once every test has passed, does it publish anything: the Mac app zips, to the
+# mac-app release the Terminal set-up downloads from (publish-mac, at the end). Nothing
+# else here touches anyone's install. Everything it makes (test results, screenshots, the
+# app zips) is kept as the run's artifacts for a week.
 name: Mac
 
 on:
   push:
-    branches: [mac]
+    branches: [main, mac]
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# One run at a time for each branch or pull request: a newer push stops the one still going,
+# except on main, where a run that may be publishing the Mac app is left to finish.
 concurrency:
   group: mac-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   mac:
@@ -89,6 +95,17 @@ jobs:
           bash -n setup/install.sh
           bash setup/install.sh --check 2>&1 | tee out/setup.txt; exit ${PIPESTATUS[0]}
 
+      # The set-up downloads GitHub's sign-in tool for the Mac it runs on, when it needs it:
+      # the address it finds (from install.sh itself) must be there.
+      - name: GitHub's sign-in tool can be downloaded for this Mac
+        id: gh
+        continue-on-error: true
+        working-directory: .
+        run: |
+          url="$(CONVERSATIONS_PRINT_GH_URL=1 bash setup/install.sh)" || { echo "The set-up found no address for GitHub's sign-in tool."; exit 1; }
+          echo "$url"
+          curl -sfIL --retry 3 -o /dev/null "$url" || { echo "Not downloadable: $url"; exit 1; }
+
       - name: The Mac set-up from start to finish (new users, test answers)
         id: install
         if: steps.package.outcome == 'success'
@@ -125,9 +142,9 @@ jobs:
           retention-days: 7
 
       - name: Fail if anything failed
-        if: steps.unit.outcome == 'failure' || steps.sync.outcome == 'failure' || steps.e2e.outcome == 'failure' || steps.package.outcome == 'failure' || steps.setup.outcome == 'failure' || steps.install.outcome == 'failure'
+        if: steps.unit.outcome == 'failure' || steps.sync.outcome == 'failure' || steps.e2e.outcome == 'failure' || steps.package.outcome == 'failure' || steps.setup.outcome == 'failure' || steps.gh.outcome == 'failure' || steps.install.outcome == 'failure'
         run: |
-          echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} e2e=${{ steps.e2e.outcome }} package=${{ steps.package.outcome }} setup=${{ steps.setup.outcome }} install=${{ steps.install.outcome }}"
+          echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} e2e=${{ steps.e2e.outcome }} package=${{ steps.package.outcome }} setup=${{ steps.setup.outcome }} gh=${{ steps.gh.outcome }} install=${{ steps.install.outcome }}"
           exit 1
 
   windows:
@@ -195,3 +212,53 @@ jobs:
         run: |
           echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} e2e=${{ steps.e2e.outcome }}"
           exit 1
+
+  # The Mac app's permanent home: the mac-app release, which the Terminal set-up downloads
+  # from (releases/download/mac-app/...). Built again from main, and only once the Mac tests
+  # above have passed on the same commit; the two zips are replaced each time. The release is
+  # never made "latest": that is the Windows download. (The app's code updates itself from
+  # main, so what's in these zips, Electron's shell, rarely changes.)
+  publish-mac:
+    needs: mac
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: _app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: _app/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Package the Mac app (unsigned, without the Agent SDK)
+        run: npm run dist:mac
+
+      - name: Publish to the mac-app release (never "latest")
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view mac-app >/dev/null 2>&1 || gh release create mac-app --target "$GITHUB_SHA" --title "Conversations for Mac" --notes "The Mac app, installed by the Terminal command on conversations.tidewaystudios.com and updated automatically from main." --latest=false
+          gh release upload mac-app _app/release-public/Conversations-mac-arm64.zip _app/release-public/Conversations-mac-x64.zip --clobber
+
+      # The addresses the set-up itself downloads from (read from install.sh).
+      - name: The set-up can download them
+        working-directory: .
+        run: |
+          base="$(grep -Eo 'https://github\.com/[^"]+/releases/download/mac-app' setup/install.sh | head -1)"
+          [ -n "$base" ] || { echo "setup/install.sh doesn't download from the mac-app release."; exit 1; }
+          for a in arm64 x64; do
+            curl -sfIL --retry 3 -o /dev/null "$base/Conversations-mac-$a.zip" || { echo "Not downloadable: $base/Conversations-mac-$a.zip"; exit 1; }
+            echo "OK  $base/Conversations-mac-$a.zip"
+          done

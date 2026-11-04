@@ -16,6 +16,9 @@ set -uo pipefail
 
 # Everything is in functions, run at the very end: a download cut short runs nothing.
 main() {
+  # (The app's tests check, on GitHub's Macs, that GitHub's sign-in tool can be downloaded:
+  # this prints its address for the Mac it runs on, and nothing else runs.)
+  if [ "${CONVERSATIONS_PRINT_GH_URL:-}" = 1 ]; then gh_asset_url; exit; fi
   CHECK=0
   [ "${1:-}" = "--check" ] && CHECK=1
   # The app's own tests run the whole set-up on GitHub's Macs (_app/test/e2e/install-mac.sh):
@@ -28,7 +31,9 @@ main() {
   fi
 
   APP_REPO="${CONVERSATIONS_APP_REPO_URL:-https://github.com/Samprogrammer143/conversations-app.git}"
-  RELEASES="https://github.com/Samprogrammer143/conversations-app/releases/latest/download"
+  # The Mac app's own release (mac-app), rebuilt from main once the app's tests pass there.
+  # (The latest release is the Windows download.)
+  MAC_DOWNLOADS="https://github.com/Samprogrammer143/conversations-app/releases/download/mac-app"
   SUPPORT="$HOME/Library/Application Support"
   APP_DIR="$SUPPORT/conversations-app"
   SYNC_HOME="${CLAUDE_SYNC_HOME:-$SUPPORT/claude-conversation-sync}"
@@ -54,19 +59,24 @@ main() {
 
 tools() {
   step 1 "Tools"
-  # git comes with Apple's command line tools (free; macOS installs them in a window of its own).
-  if git --version >/dev/null 2>&1; then
+  # git comes with Apple's command line tools (free; macOS installs them in a window of its own,
+  # and only an administrator may).
+  if have_git; then
     done_ "git $(git --version | awk '{print $3}')"
   elif [ $CHECK = 1 ]; then
-    todo "would install Apple's command line tools (for git)"
+    if is_admin; then todo "would install Apple's command line tools (for git)"
+    else todo "would stop: an administrator needs to install Apple's command line tools (for git)"; fi
+  elif ! is_admin; then
+    stop "This Mac needs Apple's command line tools (for git), and only an administrator can install them. Ask one to run xcode-select --install in Terminal, then run this again."
   else
     say "Installing Apple's command line tools, for git. Click Install in the window that opens."
     xcode-select --install >/dev/null 2>&1 || true
     local waited=0
-    until git --version >/dev/null 2>&1; do
+    until have_git; do
       sleep 5
       waited=$((waited + 5))
       [ $waited -ge 1800 ] && stop "git still isn't there after 30 minutes. Finish installing Apple's command line tools, then run this again."
+      [ $((waited % 60)) = 0 ] && say "Still waiting for Apple's command line tools ($((waited / 60)) min) ..."
     done
     done_ "git $(git --version | awk '{print $3}')"
   fi
@@ -83,6 +93,60 @@ tools() {
     find_claude
     [ -n "$CLAUDE" ] || stop "Claude Code was installed but can't be found. Open a new Terminal window and run this again."
     done_ "Claude Code installed"
+  fi
+  local_bin_on_path
+}
+
+# Apple's command line tools are there (xcode-select -p never opens a window; git itself
+# opens Apple's install window when they're missing, even just to say its version).
+have_git() {
+  local dev
+  dev="$(xcode-select -p 2>/dev/null)" && [ -x "$dev/usr/bin/git" ]
+}
+
+is_admin() { id -Gn | tr ' ' '\n' | grep -qx admin; }
+
+# Apple silicon or Intel. (uname -m says Intel in a Terminal running under Rosetta on Apple
+# silicon; the Mac itself says what it is.)
+mac_arch() {
+  if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ]; then echo arm64; else echo x64; fi
+}
+
+# The /push and /pull skills, and a workspace's claude-<id> command, run from ~/.local/bin,
+# so Terminal needs it on its PATH. Claude Code's installer doesn't always see to that: when
+# the shell's start-up files don't name it, one line is added (once).
+local_bin_on_path() {
+  local shell profile short f
+  shell="$(basename "${SHELL:-/bin/zsh}")"
+  if [ "$shell" = zsh ]; then
+    local zdir="${ZDOTDIR:-$HOME}"
+    grep -qs '\.local/bin' "$zdir/.zshenv" "$zdir/.zprofile" "$zdir/.zshrc" "$zdir/.zlogin" && { done_ "~/.local/bin is on Terminal's PATH"; return; }
+    profile="$zdir/.zprofile"
+  elif [ "$shell" = bash ]; then
+    grep -qs '\.local/bin' "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile" "$HOME/.bashrc" && { done_ "~/.local/bin is on Terminal's PATH"; return; }
+    # (A login bash reads only the first of these it finds, so the line goes in that one.)
+    profile="$HOME/.bash_profile"
+    for f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+      [ -f "$f" ] && { profile="$f"; break; }
+    done
+  else
+    todo "(Put ~/.local/bin on your shell's PATH: /push, /pull and claude-<workspace> need it.)"
+    return
+  fi
+  short="$profile"
+  case "$profile" in "$HOME"/*) short="~${profile#"$HOME"}" ;; esac
+  if [ $CHECK = 1 ]; then
+    todo "would add ~/.local/bin to PATH in $short"
+    return
+  fi
+  # (A blank line first when the file has lines of its own, ended properly.)
+  if { if [ -s "$profile" ]; then [ -n "$(tail -c 1 "$profile")" ] && echo; echo; fi
+    echo '# Added by Conversations: commands in ~/.local/bin (conversations-node, claude-<workspace>)'
+    echo 'export PATH="$HOME/.local/bin:$PATH"'
+  } 2>/dev/null >> "$profile"; then
+    done_ "Added ~/.local/bin to PATH in $short (new Terminal windows have it)"
+  else
+    todo "(Couldn't add ~/.local/bin to PATH in $short. Add it yourself for /push and /pull in Terminal.)"
   fi
 }
 
@@ -114,17 +178,21 @@ the_app() {
     todo "would install Conversations into $dir"
   else
     local arch zip tmp
-    case "$(uname -m)" in arm64) arch=arm64 ;; *) arch=x64 ;; esac
+    arch="$(mac_arch)"
     tmp="$(mktemp -d)"
     if [ -n "${CONVERSATIONS_APP_ZIP:-}" ]; then
       zip="$CONVERSATIONS_APP_ZIP"
     else
       zip="$tmp/Conversations-mac-$arch.zip"
       say "Downloading Conversations for $( [ $arch = arm64 ] && echo "Apple silicon" || echo "Intel" ) ..."
-      curl -fL --progress-bar -o "$zip" "$RELEASES/Conversations-mac-$arch.zip" || stop "The app couldn't be downloaded. Check this Mac is online, then run this again."
+      curl -fL --progress-bar -o "$zip" "$MAC_DOWNLOADS/Conversations-mac-$arch.zip" || stop "The app couldn't be downloaded. Check this Mac is online, then run this again."
     fi
     ditto -x -k "$zip" "$tmp/unpacked" || stop "The download couldn't be unpacked. Run this again."
     [ -d "$tmp/unpacked/Conversations.app" ] || stop "The download doesn't hold the app. Run this again."
+    # Signed before it goes anywhere: macOS won't start an app whose signature doesn't match,
+    # and a copy left in Applications would stop a second run from trying again.
+    xattr -dr com.apple.quarantine "$tmp/unpacked/Conversations.app" 2>/dev/null || true
+    codesign --force --deep --sign - "$tmp/unpacked/Conversations.app" >/dev/null 2>&1 || stop "Conversations couldn't be signed for this Mac, so it wouldn't open. Run this again."
     # A copy that's running is closed first, and comes back after. (Only asked when one runs:
     # naming an app that isn't there makes macOS ask where it is.)
     if pgrep -xq Conversations; then
@@ -136,8 +204,6 @@ the_app() {
     rm -rf "$APP"
     mv "$tmp/unpacked/Conversations.app" "$APP" || stop "Conversations couldn't be put in $dir."
     rm -rf "$tmp"
-    xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
-    codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || todo "(couldn't give the app its local signature; it may still open)"
     done_ "Installed in $dir"
   fi
   APP_EXE="$APP/Contents/MacOS/Conversations"
@@ -328,13 +394,17 @@ github_login() {
     done_ "GitHub lets this Mac into it"
     return
   fi
+  # (The sign-in below is for https addresses: an SSH one needs this Mac's SSH key instead.)
+  case "$1" in
+    git@*) stop "This Mac couldn't open $1 with its SSH key. Use the repository's https address instead (https://github.com/you/repo), then run this again." ;;
+  esac
   local gh
   gh="$(command -v gh 2>/dev/null || true)"
   if [ -z "$gh" ]; then
     say "Getting GitHub's sign-in tool ..."
     local dir="$SUPPORT/Conversations/gh" tmp asset
     tmp="$(mktemp -d)"
-    asset="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep -Eo 'https://[^"]+_macOS_universal\.zip' | head -1)"
+    asset="$(gh_asset_url)"
     [ -n "$asset" ] || stop "GitHub's sign-in tool couldn't be found. Install it (cli.github.com), run 'gh auth login', then run this again."
     curl -fsSL -o "$tmp/gh.zip" "$asset" && ditto -x -k "$tmp/gh.zip" "$tmp/x" || stop "GitHub's sign-in tool couldn't be downloaded. Run this again."
     mkdir -p "$dir"
@@ -347,6 +417,21 @@ github_login() {
   "$gh" auth setup-git --hostname github.com >/dev/null 2>&1 || true
   GIT_TERMINAL_PROMPT=0 git ls-remote "$1" >/dev/null 2>&1 || stop "GitHub still doesn't let this Mac into $1. Check the address, and that you can open it on github.com while signed in."
   done_ "Signed in to GitHub"
+}
+
+# Where to download GitHub's sign-in tool (gh) for this Mac's processor: its latest release.
+# GitHub's API lists the files; when it says no (it allows only a few calls an hour without a
+# login), the latest release's own page gives the version, and the file is named from that.
+gh_asset_url() {
+  local arch=amd64 url="" tag
+  [ "$(mac_arch)" = arm64 ] && arch=arm64
+  url="$(curl -fsSL -m 30 https://api.github.com/repos/cli/cli/releases/latest 2>/dev/null | grep -Eo 'https://[^"]+_macOS_'"$arch"'\.zip' | head -1)"
+  if [ -z "$url" ]; then
+    tag="$(curl -fsSIL -m 30 -o /dev/null -w '%{url_effective}' https://github.com/cli/cli/releases/latest 2>/dev/null)"
+    tag="${tag##*/tag/}"
+    case "$tag" in v[0-9]*) url="https://github.com/cli/cli/releases/download/$tag/gh_${tag#v}_macOS_$arch.zip" ;; esac
+  fi
+  [ -n "$url" ] && printf '%s\n' "$url"
 }
 
 # ---------------------------------------------------------------- 5. Claude sign-in

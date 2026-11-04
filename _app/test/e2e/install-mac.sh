@@ -5,20 +5,26 @@
 #      Applications with a whole signature and opens; Claude Code is installed with
 #      Anthropic's own installer if it isn't there; the app's code is copied; Claude's Agent
 #      SDK is fetched without npm; the sync is set up; the hooks run through
-#      conversations-node, which runs the app's own Node.
+#      conversations-node, which runs the app's own Node, and an earlier chat uploads that way.
 #   2. Earlier chats kept out, in a second home folder: a workspace of its own, its own Claude
-#      folder, the app's list of workspaces, and its claude-<id> command.
+#      folder, the app's list of workspaces, and its claude-<id> command, which a new Terminal
+#      window finds.
+#   3. Both set-ups run again, as anyone may: nothing is asked, and it still finishes.
 # A local repository stands in for the private one on GitHub; the sign-ins (GitHub's in the
 # browser, Claude's) need a person and aren't part of it.
-#   bash _app/test/e2e/install-mac.sh <out folder>     (on a Mac; CI runs it)
+#   bash _app/test/e2e/install-mac.sh <out folder>     (on GitHub's Macs only: CI runs it)
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 OUT="${1:-$ROOT/_app/test-results/install-mac}"
-mkdir -p "$OUT"
 [ "$(uname -s)" = Darwin ] || { echo "This test is for a Mac."; exit 1; }
+# Case 1 is this Mac's own user: it writes a chat into ~/.claude, rewrites its settings.json
+# and installs into /Applications. GitHub's Macs are thrown away after each run; yours isn't.
+[ "${CI:-}" = true ] || { echo "This test changes this Mac's own Claude folder and Applications, so it runs only on CI (CI=true)."; exit 1; }
+mkdir -p "$OUT"
+# (The Mac's own processor, as the set-up picks it: uname -m says Intel under Rosetta.)
 arch=x64
-[ "$(uname -m)" = arm64 ] && arch=arm64
+[ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && arch=arm64
 ZIP="$ROOT/_app/release-public/Conversations-mac-$arch.zip"
 [ -f "$ZIP" ] || { echo "No $ZIP: build it first (npm run dist:mac)."; exit 1; }
 
@@ -30,11 +36,13 @@ check() {
 # A Mac as most are: the system's folders and Claude Code's, no Node.
 BARE_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 
-# A Claude Code chat from before, in a home folder's usual Claude folder.
+# A Claude Code chat from before, in a home folder's usual Claude folder (where Claude Code
+# keeps a chat started in /Users/someone/site).
+SID=aaaaaaaa-0000-4000-8000-000000000001
 earlier_chat() {
   local dir="$1/.claude/projects/-Users-someone-site"
   mkdir -p "$dir"
-  printf '%s\n' '{"type":"user","message":{"role":"user","content":"hello from before"},"sessionId":"aaaaaaaa-0000-4000-8000-000000000001","cwd":"/Users/someone/site","timestamp":"2026-11-01T10:00:00.000Z"}' > "$dir/aaaaaaaa-0000-4000-8000-000000000001.jsonl"
+  printf '{"type":"user","message":{"role":"user","content":"hello from before"},"sessionId":"%s","cwd":"/Users/someone/site","timestamp":"2026-11-01T10:00:00.000Z"}\n' "$SID" > "$dir/$SID.jsonl"
 }
 
 # The private repository: an empty one on this Mac stands in for GitHub.
@@ -70,7 +78,13 @@ check "conversations-node runs the app's own Node (Electron $NODE_VER)" '[ -n "$
 check "the sync engine runs that way, with no Node on PATH" 'env -i HOME="$HOME" PATH="$BARE_PATH" "$HOME/.local/bin/conversations-node" "$SUP/conversations-app/_sync/sync.mjs" status --json'
 # A Stop hook, as Claude Code runs it: its command in a shell, the event on its input.
 STOP_CMD="$(env -i HOME="$HOME" PATH="$BARE_PATH" "$HOME/.local/bin/conversations-node" -e 'const s=require(process.env.HOME+"/.claude/settings.json"); process.stdout.write(s.hooks.Stop[s.hooks.Stop.length-1].hooks[0].command)' 2>/dev/null)"
-check "a Stop hook runs as Claude Code would run it" 'echo "{\"session_id\":\"aaaaaaaa-0000-4000-8000-000000000001\",\"cwd\":\"/Users/someone/site\"}" | env -i HOME="$HOME" PATH="$BARE_PATH" /bin/sh -c "$STOP_CMD"'
+check "a Stop hook runs as Claude Code would run it" 'echo "{\"session_id\":\"$SID\",\"cwd\":\"/Users/someone/site\"}" | env -i HOME="$HOME" PATH="$BARE_PATH" /bin/sh -c "$STOP_CMD"'
+# A hook always exits 0 (it must never hold Claude Code up), so that can't fail on a sync
+# problem: the chat is uploaded through conversations-node and looked for where it lands.
+PUSHED="$(env -i HOME="$HOME" PATH="$BARE_PATH" "$HOME/.local/bin/conversations-node" "$SUP/conversations-app/_sync/sync.mjs" push --session "$SID" --cwd /Users/someone/site --json 2>&1)"
+printf '%s\n' "$PUSHED" > "$OUT/push-1.txt"
+check "the earlier chat uploads through conversations-node" 'printf "%s" "$PUSHED" | grep -q "\"ok\":true"'
+check "...and the repository has it" 'git --git-dir="$WORK/chats.git" log --all --name-only --format= | grep -q "$SID"'
 
 # The set-up opened the app at the end (as launchd does: the system's PATH only).
 for i in $(seq 1 45); do grep -q "starting" "$SUP/Conversations/app.log" 2>/dev/null && break; sleep 2; done
@@ -89,10 +103,13 @@ H2="$WORK/home2"
 mkdir -p "$H2"
 earlier_chat "$H2"
 printf '%s\n' "CI Mac 2" "file://$WORK/work.git" "Work" "2" > "$WORK/answers2"
-# (The app is in Applications already; Claude Code is found on PATH.)
-env HOME="$H2" PATH="$BARE_PATH:$HOME/.local/bin" CONVERSATIONS_TEST=1 CONVERSATIONS_NO_OPEN=1 CONVERSATIONS_ANSWERS_FILE="$WORK/answers2" \
-  CONVERSATIONS_APP_REPO_URL="$ROOT" GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@example.invalid GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@example.invalid \
-  bash "$ROOT/setup/install.sh" 2>&1 | tee "$OUT/install-2.txt"
+# (The app is in Applications already; Claude Code is found on PATH. zsh, as on most Macs.)
+setup2() {
+  env HOME="$H2" PATH="$BARE_PATH:$HOME/.local/bin" SHELL=/bin/zsh CONVERSATIONS_TEST=1 CONVERSATIONS_NO_OPEN=1 CONVERSATIONS_ANSWERS_FILE="$1" \
+    CONVERSATIONS_APP_REPO_URL="$ROOT" GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@example.invalid GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@example.invalid \
+    bash "$ROOT/setup/install.sh"
+}
+setup2 "$WORK/answers2" 2>&1 | tee "$OUT/install-2.txt"
 code=${PIPESTATUS[0]}
 SUP2="$H2/Library/Application Support"
 check "the set-up finished" '[ $code = 0 ]'
@@ -102,6 +119,21 @@ check "the earlier chats' folder is left as it was" '[ ! -f "$SUP2/claude-conver
 check "the app's list makes it current and leaves the earlier chats out" 'grep -q "\"current\": \"work\"" "$SUP2/Conversations/workspaces.json" && grep -A2 "\"disconnected\"" "$SUP2/Conversations/workspaces.json" | grep -q "\"main\""'
 check "claude-work starts Claude Code in it" '[ -x "$H2/.local/bin/claude-work" ] && grep -q "CLAUDE_CONFIG_DIR=.*\.claude-work" "$H2/.local/bin/claude-work"'
 check "claude-work runs" 'env -i HOME="$H2" PATH="$BARE_PATH" "$H2/.local/bin/claude-work" --version'
+check "a new Terminal window finds claude-work (~/.local/bin is on its PATH)" 'env -i HOME="$H2" PATH="$BARE_PATH" /bin/zsh -lc "command -v claude-work"'
+
+# ------------------------------------------------------------------ 3. run again
+echo "== 3. both set-ups run again: nothing to ask"
+# (No answers at all: the set-up stops with "test: no answer left" if it asks anything.)
+: > "$WORK/no-answers"
+env PATH="$BARE_PATH" CONVERSATIONS_TEST=1 CONVERSATIONS_NO_OPEN=1 CONVERSATIONS_ANSWERS_FILE="$WORK/no-answers" \
+  CONVERSATIONS_APP_ZIP="$ZIP" CONVERSATIONS_APP_REPO_URL="$ROOT" \
+  bash "$ROOT/setup/install.sh" 2>&1 | tee "$OUT/install-1-again.txt"
+code=${PIPESTATUS[0]}
+check "the first set-up runs again without asking anything" '[ $code = 0 ] && ! grep -q "no answer left" "$OUT/install-1-again.txt"'
+setup2 "$WORK/no-answers" 2>&1 | tee "$OUT/install-2-again.txt"
+code=${PIPESTATUS[0]}
+check "the second runs again without asking anything" '[ $code = 0 ] && ! grep -q "no answer left" "$OUT/install-2-again.txt"'
+check "...and PATH was added to its .zprofile only once" '[ "$(grep -c "Added by Conversations" "$H2/.zprofile")" = 1 ]'
 
 rm -rf "$WORK"
 echo
