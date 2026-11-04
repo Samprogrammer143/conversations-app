@@ -17,7 +17,13 @@ concurrency:
 
 jobs:
   mac:
-    runs-on: macos-15
+    # Apple silicon and Intel side by side: GitHub is sometimes short of one kind of Mac,
+    # and each tests the build for its own processor.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:
       run:
@@ -81,7 +87,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: results
+          name: results-${{ matrix.os }}
           path: out/
           retention-days: 7
 
@@ -89,7 +95,7 @@ jobs:
         if: steps.package.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: mac-apps
+          name: mac-apps-${{ matrix.os }}
           path: _app/release-public/*.zip
           retention-days: 7
 
