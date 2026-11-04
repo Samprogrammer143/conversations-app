@@ -51,12 +51,20 @@ function run(exe: string, args: string[], timeoutMs: number): Promise<string> {
 }
 
 /** The usual install places (no process started). */
-function knownCandidates(): string[] {
+export function knownCandidates(platform: NodeJS.Platform = process.platform, home = os.homedir(), env: NodeJS.ProcessEnv = process.env): string[] {
   const out: string[] = [];
-  if (process.env.CONVERSATIONS_CLAUDE_PATH) out.push(process.env.CONVERSATIONS_CLAUDE_PATH);
-  const home = os.homedir();
-  const appData = process.env.APPDATA || path.join(home, "AppData", "Roaming");
-  const local = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+  if (env.CONVERSATIONS_CLAUDE_PATH) out.push(env.CONVERSATIONS_CLAUDE_PATH);
+  if (platform !== "win32") {
+    // Native installer (a link to its current version), its older place, Homebrew, then
+    // npm's, Volta's and Bun's usual folders.
+    const p = path.posix;
+    out.push(p.join(home, ".local", "bin", "claude"), p.join(home, ".claude", "local", "claude"));
+    out.push("/opt/homebrew/bin/claude", "/usr/local/bin/claude");
+    for (const d of [".npm-global", ".volta", ".bun"]) out.push(p.join(home, d, "bin", "claude"));
+    return out;
+  }
+  const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
+  const local = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
   // Native installer, then npm global install (whose bin is a real .exe since 2.1).
   out.push(path.join(home, ".local", "bin", "claude.exe"));
   out.push(path.join(appData, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"));
@@ -64,8 +72,22 @@ function knownCandidates(): string[] {
   return out;
 }
 
+/** `claude` in each PATH folder, in order (a Mac's PATH is the login shell's: see shared/login-path.ts). */
+export function onPath(envPath = process.env.PATH ?? ""): string[] {
+  return envPath
+    .split(":")
+    .filter((d) => d.startsWith("/"))
+    .map((d) => path.posix.join(d, "claude"));
+}
+
+/** Claude Code found without starting anything: the usual places, then (off Windows) PATH. */
+export function findClaudeNow(): string | null {
+  return knownCandidates().find(isFile) ?? (process.platform === "win32" ? null : (onPath().find(isFile) ?? null));
+}
+
 /** Anything on PATH, with a .cmd shim resolved to the executable it starts. */
 async function pathCandidates(): Promise<string[]> {
+  if (process.platform !== "win32") return onPath();
   const out: string[] = [];
   const where = await run("where.exe", ["claude"], 10_000);
   for (const line of where.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
@@ -103,7 +125,7 @@ function signedInNow(): boolean | null {
 /** The last known install, at once. Before the first full look: the usual places only, version unknown. */
 export function claudeInstall(): ClaudeInstall {
   if (cached) return cached.value;
-  const exe = knownCandidates().find(isFile) ?? null;
+  const exe = findClaudeNow();
   return { found: !!exe, path: exe, version: null, signedIn: signedInNow() };
 }
 
@@ -141,8 +163,9 @@ export function refreshClaude(force = false): Promise<ClaudeInstall> {
   refreshing ??= (async () => {
     let exe = knownCandidates().find(isFile) ?? null;
     if (!exe) exe = (await pathCandidates()).find(isFile) ?? null;
-    // Half way through an update: repaired in the background (never holding up this look), then looked at again.
-    if (!exe) void repairNpmInstall().then((ok) => ok && void refreshClaude(true));
+    // Half way through an update: repaired in the background (never holding up this look), then
+    // looked at again. (Windows only: the half-finished update is Windows refusing to replace a running .exe.)
+    if (!exe && process.platform === "win32") void repairNpmInstall().then((ok) => ok && void refreshClaude(true));
     const version = exe ? ((await run(exe, ["--version"], 15_000)).match(/(\d+\.\d+\.\d+)/)?.[1] ?? null) : null;
     const value: ClaudeInstall = { found: !!exe, path: exe, version, signedIn: signedInNow() };
     cached = { at: Date.now(), value };
@@ -167,6 +190,7 @@ let terminal: boolean | null = null;
 
 /** Windows Terminal is installed. Answers at once; a PATH lookup runs in the background the first time. */
 export function hasWindowsTerminal(): boolean {
+  if (process.platform !== "win32") return false;
   if (terminal !== null) return terminal;
   const alias = path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WindowsApps", "wt.exe");
   if (fs.existsSync(alias)) return (terminal = true);

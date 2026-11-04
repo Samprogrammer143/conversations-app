@@ -20,7 +20,15 @@ export function killTree(child: ChildProcess) {
       child.kill("SIGKILL");
     } catch {}
   };
-  if (process.platform !== "win32") return plain();
+  if (process.platform !== "win32") {
+    // Started in a process group of its own (runEngine): the whole group goes, git and all.
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      plain();
+    }
+    return;
+  }
   const k = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
   k.on("error", plain);
   k.on("close", (code) => {
@@ -56,6 +64,8 @@ export function runEngine<T = Record<string, unknown>>(args: string[], { timeout
     const child = spawn(process.execPath, [script, ...args], {
       env: { ...process.env, ...env, ELECTRON_RUN_AS_NODE: "1" },
       windowsHide: true,
+      // Off Windows, a process group of its own, so killTree can end what it started too.
+      detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";

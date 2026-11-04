@@ -541,7 +541,7 @@ const TB35 = path.join(B.claude, "projects", enc(PB), `${S35}.jsonl`);
 fs.appendFileSync(TA35, line("A continues", PA, S35));
 fs.appendFileSync(TB35, line("B continues", PB, S35));
 const prePush = path.join(A.sync, "repo", ".git", "hooks", "pre-push");
-fs.writeFileSync(prePush, "#!/bin/sh\nsleep 6\nexit 0\n"); // A's upload is slow; B's lands inside it
+fs.writeFileSync(prePush, "#!/bin/sh\nsleep 6\nexit 0\n", { mode: 0o755 }); // A's upload is slow; B's lands inside it
 const pA35 = runAsync(A, ["push", "--session", S35, "--cwd", PA]);
 sleep(2500);
 const rB35 = run(B, ["push", "--session", S35, "--cwd", PB]);
@@ -817,8 +817,10 @@ const lj45 = jsonOf(run(B, ["list", "--json"]));
 check("app: the app field is an edit like the others, merged on every PC", app45?.pushed === true && lj45?.state?.[K45]?.app === true && lj45.sessions.find((s) => s.sessionId === K45)?.edits?.app === true, JSON.stringify(lj45?.state?.[K45]));
 
 // ---- 46. Hooks name the tool from $HOME, so a Claude folder shared between PCs works on each
+// (The engine's usual place under a home folder: %LOCALAPPDATA% on Windows, Application Support on a Mac.)
+const LOCAL_REL = process.platform === "darwin" ? ["Library", "Application Support"] : ["AppData", "Local"];
 const HH = path.join(T, "pcH-home");
-const HL = path.join(HH, "AppData", "Local");
+const HL = path.join(HH, ...LOCAL_REL);
 const HS = path.join(HL, "claude-conversation-sync");
 fs.mkdirSync(HS, { recursive: true });
 gitq(["-c", "core.longpaths=true", "clone", "-q", REMOTE, path.join(HS, "repo")], T);
@@ -829,7 +831,7 @@ r = spawnSync(process.execPath, [path.join(HS, "repo", "_sync", "install.mjs")],
 const sH = readJsonT(path.join(HH, ".claude", "settings.json")) ?? { hooks: {} };
 const cmdsH = Object.values(sH.hooks ?? {}).flat().flatMap((g) => g.hooks.map((h) => h.command));
 const skillH = fs.existsSync(path.join(HH, ".claude", "skills", "push", "SKILL.md")) ? fs.readFileSync(path.join(HH, ".claude", "skills", "push", "SKILL.md"), "utf8") : "";
-const TOOL_H = '"$HOME/AppData/Local/claude-conversation-sync/repo/_sync/sync.mjs"';
+const TOOL_H = `"$HOME/${LOCAL_REL.join("/")}/claude-conversation-sync/repo/_sync/sync.mjs"`;
 check("hooks: install names the tool from $HOME when it is in its usual place", r.status === 0 && cmdsH.length === 3 && cmdsH.every((c) => c.startsWith(`node ${TOOL_H} hook `)) && skillH.includes(TOOL_H), r.stdout + r.stderr + cmdsH.join("\n"));
 const gitBash = (() => {
   if (process.platform !== "win32") return "sh";
@@ -885,7 +887,7 @@ const TA48 = tpath(A, PA, V48);
 fs.writeFileSync(TA48, line("V from A", PA, V48));
 run(A, ["push", "--session", V48, "--cwd", PA]);
 run(B, ["pull", V48, "--cwd", PB]);
-fs.writeFileSync(prePush, "#!/bin/sh\nexit 1\n"); // GitHub refuses A's push for now
+fs.writeFileSync(prePush, "#!/bin/sh\nexit 1\n", { mode: 0o755 }); // GitHub refuses A's push for now
 fs.appendFileSync(TA48, line("A committed but not pushed", PA, V48));
 const r48 = run(A, ["push", "--session", V48, "--cwd", PA]);
 fs.rmSync(prePush, { force: true });
@@ -1062,7 +1064,7 @@ check("state: no writer ever fails on a rename over an open file", kids55.every(
 // ---- 56. install: a conflict found during the upgrade keeps the stranded upload for the next sync
 const I56 = pc("pcI56");
 const HI = path.join(T, "pcI56-home");
-const HIL = path.join(HI, "AppData", "Local");
+const HIL = path.join(HI, ...LOCAL_REL);
 const HIS = path.join(HIL, "claude-conversation-sync");
 fs.mkdirSync(HIS, { recursive: true });
 gitq(["-c", "core.longpaths=true", "clone", "-q", REMOTE, path.join(HIS, "repo")], T);
@@ -1084,7 +1086,7 @@ runI(["push", "--session", X56, "--cwd", PI56]);
 run(B, ["pull", X56, "--cwd", PB]);
 // GitHub refuses the push: the upload is committed on I but stranded. Then B changes the chat.
 const deny56 = path.join(REMOTE, "hooks", "pre-receive");
-fs.writeFileSync(deny56, "#!/bin/sh\nexit 1\n");
+fs.writeFileSync(deny56, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
 fs.appendFileSync(TI56, line("stranded line on I", PI56, X56));
 runI(["push", "--session", X56, "--cwd", PI56]);
 fs.unlinkSync(deny56);
@@ -1136,7 +1138,7 @@ fs.writeFileSync(TA58, line("X first", PA, X58));
 run(A, ["push", "--session", X58, "--cwd", PA]);
 fs.appendFileSync(TA58, line("X second, crash after commit", PA, X58));
 const stBefore58 = fs.readFileSync(stPath, "utf8");
-fs.writeFileSync(deny56, "#!/bin/sh\nexit 1\n");
+fs.writeFileSync(deny56, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
 run(A, ["push", "--session", X58, "--cwd", PA]);
 fs.unlinkSync(deny56);
 fs.writeFileSync(stPath, stBefore58); // what a crash right after "git commit" leaves: no marker at all
@@ -1144,7 +1146,7 @@ const setup58 = aheadOf(A) === "1";
 run(A, ["pull-all", "--json"]);
 const afterPullAll58 = aheadOf(A);
 fs.appendFileSync(TA58, line("X third, crash again", PA, X58));
-fs.writeFileSync(deny56, "#!/bin/sh\nexit 1\n");
+fs.writeFileSync(deny56, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
 run(A, ["push", "--session", X58, "--cwd", PA]);
 fs.unlinkSync(deny56);
 fs.writeFileSync(stPath, stBefore58);

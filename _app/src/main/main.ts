@@ -43,6 +43,12 @@ import { cleanStages, writeRunningMark } from "../shell/stages";
 import { log, logPath } from "./log";
 import { loadSdk, sdkLoadedFrom } from "./chat/sdk";
 import { authStatus, cancelAllLogins, cancelLogin, loginEnded, signingIn, startLogin, submitLoginCode } from "./auth";
+import { isMac, macAppMenu, setStartAtLogin, trayIconFile } from "./mac";
+import { useLoginShellPath } from "../shared/login-path";
+
+// A Mac app started from the Finder has only the system's folders on PATH (the installed
+// app's shell has done this already; development and tests start here).
+useLoginShellPath();
 
 // A programming mistake must never take the tray agent (and sync) down with it.
 // Logged, never shown as a dialog: the window shows nothing and the app carries on.
@@ -67,8 +73,9 @@ const APP_VERSION: string = (() => {
 })();
 
 // A sandbox (development, tests) keeps its own Electron profile too, so its
-// single-instance lock never collides with the installed app's.
-if (process.env.CONVERSATIONS_DATA_DIR) app.setPath("userData", path.join(process.env.CONVERSATIONS_DATA_DIR, "electron"));
+// single-instance lock never collides with the installed app's. On a Mac the profile always
+// goes inside the app's data folder: Electron's own place for it is that same folder.
+if (process.env.CONVERSATIONS_DATA_DIR || isMac) app.setPath("userData", path.join(appDataDir(), "electron"));
 if (!app.requestSingleInstanceLock()) {
   app.quit();
   process.exit(0);
@@ -88,7 +95,7 @@ function closeMark() {
   markingOpen = false;
   unmarkOpen(currentWorkspace().id);
 }
-app.setAppUserModelId("com.samcan.conversations");
+if (process.platform === "win32") app.setAppUserModelId("com.samcan.conversations");
 
 let mainWin: BrowserWindow | null = null;
 let settingsWin: BrowserWindow | null = null;
@@ -338,7 +345,11 @@ function makeMain(show: boolean): BrowserWindow {
     // Closing the window keeps the tray agent (and sync) running.
     if (!quitting) {
       e.preventDefault();
-      w.hide();
+      // (A Mac window in full screen leaves full screen first, or its empty Space stays behind.)
+      if (isMac && w.isFullScreen()) {
+        w.once("leave-full-screen", () => w.hide());
+        w.setFullScreen(false);
+      } else w.hide();
     }
   });
   const state = () => broadcast("window-state", { maximized: w.isMaximized(), focused: w.isFocused() });
@@ -397,14 +408,19 @@ function refreshTrayMenu() {
   trayPaused = paused;
   trayUpdate = updateReady;
   trayName = name;
-  tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(paused)));
+  trayMenu = Menu.buildFromTemplate(trayMenuTemplate(paused));
+  // A Mac opens a tray icon's menu on any click: there it waits for a right-click, so a
+  // click still opens the popover.
+  if (!isMac) tray.setContextMenu(trayMenu);
 }
+let trayMenu: Menu | null = null;
 
 function buildTray() {
-  tray = new Tray(appIcon("tray.ico"));
+  tray = new Tray(appIcon(trayIconFile(false)));
   tray.setToolTip(appLabel());
   tray.on("click", toggleFlyout);
   tray.on("double-click", showMain);
+  if (isMac) tray.on("right-click", () => trayMenu && tray?.popUpContextMenu(trayMenu));
   refreshTrayMenu();
 }
 
@@ -561,7 +577,7 @@ function applySettings(s: Settings, patch: Partial<Settings>) {
   if ("theme" in patch) nativeTheme.themeSource = s.theme;
   if ("startAtLogin" in patch) {
     saveStartAtLogin(s.startAtLogin);
-    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: s.startAtLogin && !needsWelcome(), args: ["--hidden"] });
+    if (app.isPackaged) setStartAtLogin(s.startAtLogin && !needsWelcome());
   }
   if ("theme" in patch) for (const w of [mainWin, settingsWin]) if (w && !w.isDestroyed()) setTitleBarColors(w);
   broadcast("settings-changed", s);
@@ -867,7 +883,7 @@ function registerIpc() {
     if (acceptedTerms !== true) return;
     settings.set({ welcomed: true, termsAcceptedAt: new Date().toISOString() });
     // Only now does the app start at login (when that's chosen).
-    if (app.isPackaged && !askedFor(process.argv)) app.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin, args: ["--hidden"] });
+    if (app.isPackaged && !askedFor(process.argv)) setStartAtLogin(settings.get().startAtLogin);
     if (welcomeWin && !welcomeWin.isDestroyed()) welcomeWin.close();
   });
 
@@ -1133,6 +1149,8 @@ function takeKeyboardWhenIdle(w: BrowserWindow, minimized: boolean) {
     } else {
       if (w.isMinimized()) w.restore();
       w.flashFrame(false);
+      // (A Mac gives a window the keyboard only once its app is the active one.)
+      if (isMac) app.focus({ steal: true });
       w.focus();
       // Windows can refuse a program the front while you use another: then the taskbar says so.
       setTimeout(() => {
@@ -1194,7 +1212,7 @@ function updateTrayBadge(onlyIfChanged = false) {
   // Notifications for requests that ended without an answer here come down too.
   pruneApprovals(new Set(waiting.map((p) => p.requestId)));
   if (!tray) return;
-  tray.setImage(appIcon(waiting.length ? "tray-badge.ico" : "tray.ico"));
+  tray.setImage(appIcon(trayIconFile(waiting.length > 0)));
   tray.setToolTip(waiting.length ? `${appLabel()} · ${waiting.every((p) => p.questions) ? "Claude has a question" : "Claude needs your approval"}` : appLabel());
   broadcast("chat-pending", waiting);
 }
@@ -1234,10 +1252,29 @@ function handleSecondInstance(argv: string[]) {
 }
 
 app.on("second-instance", (_e, argv) => secondInstances.push(argv));
+// A Mac never starts a second copy: opening the app again (Finder, Spotlight, the Dock)
+// activates this one, and a conversations:// link arrives as an event, not in argv.
+const startedAt = Date.now();
+app.on("activate", () => {
+  // (A start out of sight is activated once too, as it launches: it stays out of sight.)
+  if (process.argv.includes("--hidden") && Date.now() - startedAt < 5000) return;
+  secondInstances.push([]);
+});
+app.on("open-url", (e, url) => {
+  e.preventDefault();
+  secondInstances.push([url]);
+});
 app.on("window-all-closed", () => {
   /* the tray keeps running */
 });
 app.on("before-quit", () => {
+  // A Mac can quit the app from outside it (the Dock's Quit, logging out): it tidies up as
+  // the app's own Quit does, but the workspace stays marked open, as after a Windows shutdown.
+  if (isMac && !quitting) {
+    chat.closeAll();
+    scheduler?.stop();
+    index.stop();
+  }
   quitting = true;
   cancelAllLogins();
   composer.closing = true;
@@ -1265,7 +1302,12 @@ void app.whenReady().then(async () => {
   if (loginChoice !== null && loginChoice !== s.startAtLogin) settings.set({ startAtLogin: loginChoice });
   settings.on("change", applySettings);
   // Not before the welcome is finished: a PC whose user didn't accept the terms doesn't start it at login.
-  if (app.isPackaged && !askedFor(process.argv)) app.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin && !needsWelcome(), args: ["--hidden"] });
+  if (app.isPackaged && !askedFor(process.argv)) setStartAtLogin(settings.get().startAtLogin && !needsWelcome());
+  if (isMac) {
+    Menu.setApplicationMenu(macAppMenu({ settings: () => openSettings(), quit: () => userQuit(), quitLabel: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations" }));
+    // (The installed app's Dock icon comes from its bundle; this is for development.)
+    if (!app.isPackaged) app.dock?.setIcon(path.join(RESOURCES, "icon-mac.png"));
+  }
   // The window never needs the camera, microphone, notifications API and so on.
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   electronSession.defaultSession.setPermissionCheckHandler(() => false);

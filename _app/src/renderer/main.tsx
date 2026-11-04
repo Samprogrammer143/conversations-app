@@ -6,6 +6,7 @@ import "./styles/layout.css";
 import "./styles/detail.css";
 import "./styles/overlays.css";
 import "./styles/windows.css";
+import "./styles/mac.css";
 import { App } from "./App";
 import { SettingsApp } from "./features/SettingsApp";
 import { FlyoutApp } from "./features/FlyoutApp";
@@ -16,6 +17,8 @@ import { installOverlayScrollbars } from "./lib/scrollbars";
 const kind = api.app.windowKind();
 const Root = kind === "settings" ? SettingsApp : kind === "flyout" ? FlyoutApp : kind === "welcome" ? WelcomeApp : App;
 document.body.dataset.window = kind;
+// The Mac's window buttons sit at the top left, Windows' at the top right (styles/mac.css).
+document.body.dataset.platform = api.app.platform();
 installOverlayScrollbars();
 
 createRoot(document.getElementById("root")!).render(

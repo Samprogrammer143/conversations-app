@@ -1,0 +1,31 @@
+/* A Mac's window buttons are the three at the top left, which main/windows.ts places in the
+   middle of the 52 px toolbar: whichever toolbar is leftmost keeps clear of them, and
+   nothing needs to keep clear of Windows' buttons on the right. */
+
+body[data-platform="darwin"] {
+  --caption-buttons: 0px;
+  --traffic-lights: 84px;
+}
+
+/* The sidebar's title bar, inline or sliding in over the window. */
+body[data-platform="darwin"] .sb-titlebar {
+  padding-left: var(--traffic-lights);
+}
+/* No sidebar: the list is leftmost; in one column, the conversation is when it shows. */
+body[data-platform="darwin"] .app.collapsed .list-toolbar,
+body[data-platform="darwin"] .app.collapsed .content.stacked .detail-toolbar {
+  padding-left: var(--traffic-lights);
+}
+
+/* Settings: the left column's title. */
+body[data-platform="darwin"] .s-nav-title {
+  padding-left: calc(var(--traffic-lights) - 10px);
+}
+
+/* The welcome window closes with the Mac's own button. */
+body[data-platform="darwin"] .welcome-window .close {
+  display: none;
+}
+body[data-platform="darwin"] .welcome-drag {
+  right: 0;
+}

@@ -1,6 +1,8 @@
 // The app's windows: the main window, Settings, and the tray flyout.
 // Native caption buttons and Snap layouts come from titleBarOverlay; Mica sits
-// behind the sidebar; everything else is drawn by the page.
+// behind the sidebar; everything else is drawn by the page. On a Mac the window's
+// buttons are the three at the top left, placed in the middle of the 52 px toolbar, and
+// the sidebar's see-through material is the Mac's own (vibrancy).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -14,6 +16,10 @@ export interface WindowFiles {
   page: string;
   icon?: string;
 }
+
+const isMac = process.platform === "darwin";
+/** The Mac's window buttons, centred in the toolbar (they're 14 px tall). */
+const TRAFFIC_LIGHTS = { x: 18, y: 19 };
 
 const LIGHT = { window: "#f3f3f6", content: "#ffffff", symbols: "#1d1d1f" };
 const DARK = { window: "#18181a", content: "#1e1e1e", symbols: "#f5f5f7" };
@@ -69,7 +75,7 @@ export function createMainWindow(files: WindowFiles, { show }: { show: boolean }
     title: "Conversations",
     icon: files.icon,
     backgroundColor: useMica ? "#00000000" : c.window,
-    backgroundMaterial: useMica ? "mica" : "none",
+    ...(isMac ? { vibrancy: useMica ? ("sidebar" as const) : undefined, visualEffectState: "followWindow" as const, trafficLightPosition: TRAFFIC_LIGHTS } : { backgroundMaterial: useMica ? ("mica" as const) : ("none" as const) }),
     titleBarStyle: "hidden",
     titleBarOverlay: { color: c.content, symbolColor: c.symbols, height: 52 },
     autoHideMenuBar: true,
@@ -101,6 +107,8 @@ export function createMainWindow(files: WindowFiles, { show }: { show: boolean }
 }
 
 export function setTitleBarColors(win: BrowserWindow, colors?: { background: string; symbols: string }) {
+  // (A Mac's window buttons keep their own colours.)
+  if (isMac) return;
   const c = themeColors();
   try {
     win.setTitleBarOverlay({ color: colors?.background ?? c.content, symbolColor: colors?.symbols ?? c.symbols, height: 52 });
@@ -118,6 +126,7 @@ export function createSettingsWindow(files: WindowFiles, parent: BrowserWindow |
     title: "Settings",
     icon: files.icon,
     backgroundColor: c.window,
+    ...(isMac ? { trafficLightPosition: TRAFFIC_LIGHTS } : {}),
     titleBarStyle: "hidden",
     titleBarOverlay: { color: c.content, symbolColor: c.symbols, height: 52 },
     autoHideMenuBar: true,
@@ -151,6 +160,8 @@ export function createWelcomeWindow(files: WindowFiles): BrowserWindow {
     title: "Welcome to Conversations",
     icon: files.icon,
     backgroundColor: c.content,
+    // On a Mac its close button is the window's own, at the top left (the page draws one on Windows).
+    ...(isMac ? { trafficLightPosition: { x: 16, y: 16 } } : {}),
     titleBarStyle: "hidden",
     autoHideMenuBar: true,
     webPreferences: { preload: files.preload, sandbox: true, contextIsolation: true, nodeIntegration: false, additionalArguments: ["--window-kind=welcome"] },
@@ -175,7 +186,7 @@ export function createFlyout(files: WindowFiles): BrowserWindow {
     alwaysOnTop: true,
     roundedCorners: true,
     backgroundColor: "#00000000",
-    backgroundMaterial: "acrylic",
+    ...(isMac ? { transparent: true, vibrancy: "popover" as const, visualEffectState: "active" as const } : { backgroundMaterial: "acrylic" as const }),
     webPreferences: { preload: files.preload, sandbox: true, contextIsolation: true, nodeIntegration: false, additionalArguments: ["--window-kind=flyout"] },
   });
   lockDown(win);
@@ -184,13 +195,20 @@ export function createFlyout(files: WindowFiles): BrowserWindow {
   return win;
 }
 
-/** Places the flyout above the tray, 12 px clear of the taskbar, as Windows 11 does. */
+/**
+ * Places the flyout by the tray icon: above it, 12 px clear of the taskbar, as Windows 11
+ * does; or, with the icon at the top of the screen (a Mac's menu bar), just below it.
+ */
 export function placeFlyout(win: BrowserWindow, trayBounds: Rectangle, height: number) {
   const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
-  const area = display.workArea;
+  win.setBounds(flyoutBounds(display.workArea, display.bounds, trayBounds, height));
+}
+
+export function flyoutBounds(area: Rectangle, screenBounds: Rectangle, trayBounds: Rectangle, height: number): Rectangle {
   const width = 380;
   const h = Math.min(height, area.height - 24);
   const x = Math.min(area.x + area.width - width - 12, Math.max(area.x + 12, trayBounds.x + trayBounds.width / 2 - width / 2));
-  const y = area.y + area.height - h - 12;
-  win.setBounds({ x: Math.round(x), y: Math.round(y), width, height: Math.round(h) });
+  const atTop = trayBounds.y + trayBounds.height / 2 < screenBounds.y + screenBounds.height / 2;
+  const y = atTop ? area.y + 6 : area.y + area.height - h - 12;
+  return { x: Math.round(x), y: Math.round(y), width, height: Math.round(h) };
 }

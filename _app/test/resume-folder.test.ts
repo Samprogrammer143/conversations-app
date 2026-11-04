@@ -31,11 +31,18 @@ beforeAll(() => {
 afterAll(() => fs.rmSync(base, { recursive: true, force: true }));
 
 describe("Claude Code's transcript folders", () => {
-  it("are named after the folder, every other character a dash", () => {
+  it.skipIf(process.platform !== "win32")("are named after the folder, every other character a dash", () => {
     expect(encodeCwd("C:\\Users\\alex\\My Projects\\Web Development\\website")).toBe("C--Users-alex-My-Projects-Web-Development-website");
     expect(cwdMatchesFolder("C:\\Users\\me\\site", "c--users-me-site")).toBe(true);
     expect(cwdMatchesFolder("C:\\Users\\me\\site", "C--Users-me-site-seo")).toBe(false);
     const long = `C:\\${"x".repeat(240)}`;
+    expect(cwdMatchesFolder(long, `${encodeCwd(long).slice(0, 200)}-abc123`)).toBe(true);
+  });
+  it.skipIf(process.platform === "win32")("are named the same way on a Mac", () => {
+    expect(encodeCwd("/Users/alex/My Projects/Web Development/website")).toBe("-Users-alex-My-Projects-Web-Development-website");
+    expect(cwdMatchesFolder("/Users/me/site", "-users-me-site")).toBe(true);
+    expect(cwdMatchesFolder("/Users/me/site", "-Users-me-site-seo")).toBe(false);
+    const long = `/${"x".repeat(240)}`;
     expect(cwdMatchesFolder(long, `${encodeCwd(long).slice(0, 200)}-abc123`)).toBe(true);
   });
 });

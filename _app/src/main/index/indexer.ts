@@ -34,17 +34,26 @@ export interface ScanResult {
 }
 
 const PROFILE_RE = /^([a-z]:\\users\\[^\\]+)/i;
-export const profilePrefix = (cwd: string | null | undefined) => (cwd ? (String(cwd).replace(/\//g, "\\").match(PROFILE_RE)?.[1] ?? null)?.toLowerCase() ?? null : null);
+// A Mac's (or Linux's) home folder: /Users/<name>, /home/<name>.
+const POSIX_PROFILE_RE = /^(\/(?:Users|home)\/[^/]+)/;
+/** The user folder a working folder is in ("c:\users\alex", "/users/alex"), lowercased: it tells which PC wrote an entry. */
+export const profilePrefix = (cwd: string | null | undefined): string | null => {
+  if (!cwd) return null;
+  const s = String(cwd);
+  const posix = s.match(POSIX_PROFILE_RE)?.[1];
+  if (posix) return posix.toLowerCase();
+  return s.replace(/\//g, "\\").match(PROFILE_RE)?.[1]?.toLowerCase() ?? null;
+};
 
 export class Indexer {
-  private machines = new Map<string, string>(); // Windows user folder -> PC name
+  private machines = new Map<string, string>(); // user folder -> PC name
   private keyRemote = new Map<string, string>(); // repo folder key -> project id
 
   constructor(private db: DatabaseSync, private opts: IndexerOptions) {}
 
   private longPrefix = new Map<string, string | null>();
 
-  /** Which PC wrote an entry, from its working folder's Windows user folder. */
+  /** Which PC wrote an entry, from its working folder's user folder. */
   machineForCwd = (cwd: string | null | undefined): string | null => {
     const p = profilePrefix(cwd);
     if (!p) return null;

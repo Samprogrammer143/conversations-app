@@ -22,6 +22,7 @@ const api: ConversationsApi = {
     checkClaude: () => invoke("app:checkClaude"),
     finishWelcome: (acceptedTerms) => invoke("app:finishWelcome", acceptedTerms),
     windowKind: () => windowKind,
+    platform: () => process.platform,
   },
   window: {
     minimize: () => ipcRenderer.send("window:minimize"),

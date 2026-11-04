@@ -18,7 +18,13 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const local = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+// The app's own folders' place (src/shared/dirs.ts): %LOCALAPPDATA%, or Application Support on a Mac.
+const local =
+  process.platform === "win32"
+    ? process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local")
+    : process.platform === "darwin"
+      ? path.join(os.homedir(), "Library", "Application Support")
+      : process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
 const base = path.join(local, "Conversations-dev");
 const live = path.join(local, "claude-conversation-sync", "repo");
 const mirror = path.join(base, "github-standin.git");

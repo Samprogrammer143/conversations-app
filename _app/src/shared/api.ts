@@ -52,6 +52,8 @@ export interface ConversationsApi {
     finishWelcome(acceptedTerms: true): Promise<void>;
     /** Window kind this page was opened as: "main" | "settings" | "flyout". */
     windowKind(): string;
+    /** The operating system ("win32", "darwin"), known before the first paint. */
+    platform(): string;
   };
   window: {
     minimize(): void;

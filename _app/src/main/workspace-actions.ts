@@ -12,8 +12,8 @@ import type { WorkspaceInfo } from "../shared/types";
 import { addWorkspace, baseEngine, baseEnv, baseRepoDir, currentWorkspace, isWorkspaceId, listWorkspaces, mainAccountRecord, mainRemote, newWorkspaceId, removeWorkspace, folders as folderOf, type Workspace } from "./workspace";
 import { log } from "./log";
 import { openElsewhere } from "./open-windows";
-
-const local = () => process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+import { findClaudeNow } from "./claude";
+import { localBase } from "../shared/dirs";
 
 /** Is this workspace's Claude Code signed in? (Only whether a login exists is read, never the login itself.) */
 export function signedIn(w: Workspace): boolean {
@@ -68,7 +68,8 @@ export async function shareWorkspace(w: { id: string; name: string; remote: stri
 /** Runs a script of the first workspace's tools with this app's Node, and its output. */
 function run(argv: string[], env: Record<string, string | undefined>, timeoutMs: number): Promise<{ code: number | null; out: string }> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, argv, { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    // Its own process group off Windows, so stopping it stops what it started too.
+    const child = spawn(process.execPath, argv, { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
@@ -76,7 +77,13 @@ function run(argv: string[], env: Record<string, string | undefined>, timeoutMs:
       out += "\nthe setup took too long and was stopped";
       // The whole tree: a clone or push it started must not keep running.
       if (process.platform === "win32" && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
-      else child.kill();
+      else if (child.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      }
     }, timeoutMs);
     child.on("error", (e) => {
       clearTimeout(timer);
@@ -192,24 +199,42 @@ function seedSettings(w: Workspace) {
 
 // ------------------------------------------------------------ claude-<id>
 
-/** Where `claude-<id>.cmd` goes: a folder Windows already looks in for commands. */
+/**
+ * Where `claude-<id>` goes: a folder the terminal already looks in for commands. On
+ * Windows that's WindowsApps (a .cmd); on a Mac, ~/.local/bin, beside Claude Code's own
+ * `claude` (its installer puts that folder on PATH).
+ */
 function launcherDir(): string {
   // Tests keep their launcher out of the real command folder.
   if (process.env.CONVERSATIONS_LAUNCHER_DIR) return process.env.CONVERSATIONS_LAUNCHER_DIR;
-  return path.join(local(), "Microsoft", "WindowsApps");
+  if (process.platform !== "win32") return path.join(os.homedir(), ".local", "bin");
+  return path.join(localBase(), "Microsoft", "WindowsApps");
 }
 
 export function launcherPath(w: Workspace): string | null {
-  if (process.platform !== "win32") return null;
-  return path.join(launcherDir(), `claude-${w.id}.cmd`);
+  return path.join(launcherDir(), process.platform === "win32" ? `claude-${w.id}.cmd` : `claude-${w.id}`);
 }
 
 /** The claude.exe the launcher starts (the app's own detection result is not needed here). */
 function claudeExe(): string {
+  if (process.platform !== "win32") return findClaudeNow() ?? "claude";
   const npm = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
   if (fs.existsSync(npm)) return npm;
   const native = path.join(os.homedir(), ".local", "bin", "claude.exe");
   return fs.existsSync(native) ? native : "claude";
+}
+
+/** The launcher's text: a .cmd on Windows, a shell script elsewhere. */
+export function launcherScript(platform: NodeJS.Platform, exe: string, env: { CLAUDE_CONFIG_DIR?: string; CLAUDE_SYNC_HOME?: string }, name: string): string {
+  if (platform === "win32") {
+    const q = (s: string) => s.replace(/%/g, "%%");
+    // "set X=" clears it.
+    const set = (k: keyof typeof env) => `set "${k}=${q(env[k] ?? "")}"`;
+    return ["@echo off", set("CLAUDE_CONFIG_DIR"), set("CLAUDE_SYNC_HOME"), `${exe === "claude" ? "claude" : `"${q(exe)}"`} %*`, ""].join("\r\n");
+  }
+  const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+  const set = (k: keyof typeof env) => (env[k] ? `export ${k}=${sq(env[k]!)}` : `unset ${k}`);
+  return ["#!/bin/sh", `# Claude Code in the ${name.replace(/[\r\n]/g, " ")} workspace. Written by Conversations.`, set("CLAUDE_CONFIG_DIR"), set("CLAUDE_SYNC_HOME"), `exec ${exe === "claude" ? "claude" : sq(exe)} "$@"`, ""].join("\n");
 }
 
 /**
@@ -220,15 +245,13 @@ function claudeExe(): string {
 export function writeLauncher(w: Workspace): boolean {
   const file = launcherPath(w);
   if (!file) return false;
-  const q = (s: string) => s.replace(/%/g, "%%");
-  const exe = claudeExe();
-  // The first workspace runs as the app was started: its folders as they were set, or none ("set X=" clears it).
+  // The first workspace runs as the app was started: its folders as they were set, or none.
   const env = w.id === "main" ? baseEnv() : { CLAUDE_CONFIG_DIR: w.claudeDir, CLAUDE_SYNC_HOME: w.syncHome };
-  const set = (k: string) => `set "${k}=${q(env[k as keyof typeof env] ?? "")}"`;
-  const body = ["@echo off", set("CLAUDE_CONFIG_DIR"), set("CLAUDE_SYNC_HOME"), `${exe === "claude" ? "claude" : `"${q(exe)}"`} %*`, ""].join("\r\n");
+  const body = launcherScript(process.platform, claudeExe(), { CLAUDE_CONFIG_DIR: env.CLAUDE_CONFIG_DIR, CLAUDE_SYNC_HOME: env.CLAUDE_SYNC_HOME }, w.name);
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, body);
+    fs.writeFileSync(file, body, { mode: 0o755 });
+    if (process.platform !== "win32") fs.chmodSync(file, 0o755);
     return true;
   } catch (e) {
     log("app", `could not write ${file}: ${(e as Error).message}`);

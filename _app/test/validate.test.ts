@@ -48,16 +48,18 @@ describe("edits", () => {
 
 describe("settings from the window", () => {
   it("keeps known settings with valid values and refuses the rest", () => {
+    // (A full path on the system the test runs on.)
+    const folder = process.platform === "win32" ? "C:\\Users\\me\\y" : "/Users/me/y";
     const { patch, rejected } = sanitizeSettingsPatch({
       theme: "dark",
       checkWhileOpenSeconds: 60,
       defaultPermissionMode: "bypassPermissions",
       defaultModel: "opus",
-      folders: { "github.com/x/y": "C:\\Users\\me\\y" },
+      folders: { "github.com/x/y": folder },
       startAtLogin: "yes",
       unknown: 1,
     });
-    expect(patch).toEqual({ theme: "dark", checkWhileOpenSeconds: 60, defaultModel: "opus", folders: { "github.com/x/y": "C:\\Users\\me\\y" } });
+    expect(patch).toEqual({ theme: "dark", checkWhileOpenSeconds: 60, defaultModel: "opus", folders: { "github.com/x/y": folder } });
     expect(rejected.sort()).toEqual(["defaultPermissionMode", "startAtLogin", "unknown"]);
   });
 

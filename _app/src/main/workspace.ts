@@ -21,6 +21,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { appRepoDir } from "./paths";
+import { defaultDataDir, defaultSyncHome } from "../shared/dirs";
 
 export interface Workspace {
   /** "main" for the first one; a short name from the workspace's name otherwise. */
@@ -50,7 +51,6 @@ interface Registry {
 const ENV_KEYS = ["CLAUDE_CONFIG_DIR", "CLAUDE_SYNC_HOME", "CONVERSATIONS_DATA_DIR", "CONVERSATIONS_ENGINE"] as const;
 type BaseEnv = Partial<Record<(typeof ENV_KEYS)[number], string>>;
 
-const local = () => process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
 
 /**
  * The environment the app was started with, before a workspace changed it. Carried
@@ -69,8 +69,8 @@ const BASE: BaseEnv = (() => {
   return b;
 })();
 
-const baseDataDir = () => BASE.CONVERSATIONS_DATA_DIR || path.join(local(), "Conversations");
-const baseSyncHome = () => BASE.CLAUDE_SYNC_HOME || path.join(local(), "claude-conversation-sync");
+const baseDataDir = () => BASE.CONVERSATIONS_DATA_DIR || defaultDataDir();
+const baseSyncHome = () => BASE.CLAUDE_SYNC_HOME || defaultSyncHome();
 const baseClaudeDir = () => BASE.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
 const registryFile = () => path.join(baseDataDir(), "workspaces.json");
 

@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { defaultAppHome, defaultDataDir, defaultSyncHome } from "../shared/dirs";
 
 const HOME = os.homedir();
 
@@ -17,10 +18,7 @@ export function projectsDir(): string {
 }
 
 function defaultSyncDir(): string {
-  if (process.env.CLAUDE_SYNC_HOME) return process.env.CLAUDE_SYNC_HOME;
-  if (process.platform === "win32") return path.join(process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local"), "claude-conversation-sync");
-  if (process.platform === "darwin") return path.join(HOME, "Library", "Application Support", "claude-conversation-sync");
-  return path.join(process.env.XDG_DATA_HOME || path.join(HOME, ".local", "share"), "claude-conversation-sync");
+  return process.env.CLAUDE_SYNC_HOME || defaultSyncHome();
 }
 
 export function syncDir(): string {
@@ -40,10 +38,7 @@ export function repoDir(): string {
  * shared by every workspace. Same rules as defaultAppDir() in _sync/engine.mjs.
  */
 export function appRepoDir(): string {
-  if (process.env.CONVERSATIONS_APP_HOME) return process.env.CONVERSATIONS_APP_HOME;
-  if (process.platform === "win32") return path.join(process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local"), "conversations-app");
-  if (process.platform === "darwin") return path.join(HOME, "Library", "Application Support", "conversations-app");
-  return path.join(process.env.XDG_DATA_HOME || path.join(HOME, ".local", "share"), "conversations-app");
+  return process.env.CONVERSATIONS_APP_HOME || defaultAppHome();
 }
 
 /**
@@ -60,7 +55,7 @@ export function engineScriptPath(): string {
 
 /** The app's own data: index, settings, logs. Never inside OneDrive or the repo. */
 export function appDataDir(): string {
-  const base = process.env.CONVERSATIONS_DATA_DIR || (process.platform === "win32" ? path.join(process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local"), "Conversations") : path.join(HOME, ".conversations"));
+  const base = process.env.CONVERSATIONS_DATA_DIR || defaultDataDir();
   fs.mkdirSync(base, { recursive: true });
   return base;
 }

@@ -11,13 +11,13 @@ import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { app } from "electron";
 import { chooseApp } from "./choose";
+import { defaultAppHome, defaultDataDir, defaultSyncHome } from "../shared/dirs";
 
-const local = () => process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-const appRepo = () => process.env.CONVERSATIONS_APP_HOME || path.join(local(), "conversations-app");
-const dataDir = () => process.env.CONVERSATIONS_DATA_DIR || path.join(process.env.LOCALAPPDATA || os.homedir(), "Conversations");
+const appRepo = () => process.env.CONVERSATIONS_APP_HOME || defaultAppHome();
+const dataDir = () => process.env.CONVERSATIONS_DATA_DIR || defaultDataDir();
 /** This PC's conversations repository, where the engine's rules put it (the older place inside ~/.claude too). */
 function syncRepo(): string {
-  const fresh = path.join(process.env.CLAUDE_SYNC_HOME || path.join(local(), "claude-conversation-sync"), "repo");
+  const fresh = path.join(process.env.CLAUDE_SYNC_HOME || defaultSyncHome(), "repo");
   const older = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "conversation-sync", "repo");
   return fs.existsSync(path.join(fresh, ".git")) || !fs.existsSync(path.join(older, ".git")) ? fresh : older;
 }

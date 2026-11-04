@@ -1,4 +1,5 @@
-# The Mac version, built and tested on GitHub's Macs (free for a public repository).
+# The Mac version, built and tested on GitHub's Macs (free for a public repository), with
+# the same tests on Windows alongside so a Mac change can't quietly break the Windows app.
 # Runs on every push to the mac branch; nothing here touches main or anyone's install.
 # Everything it makes (test results, screenshots, the app zips) is kept as the run's
 # artifacts for a week.
@@ -42,6 +43,7 @@ jobs:
           git config --global user.name "Conversations CI"
           git config --global user.email "ci@example.invalid"
           git config --global init.defaultBranch main
+          mkdir -p ../out
 
       - name: Install
         run: npm ci
@@ -58,13 +60,15 @@ jobs:
         id: sync
         continue-on-error: true
         working-directory: _sync
-        run: |
-          mkdir -p ../out
-          node test.mjs 2>&1 | tee ../out/sync.txt
-          exit ${PIPESTATUS[0]}
+        run: node test.mjs 2>&1 | tee ../out/sync.txt; exit ${PIPESTATUS[0]}
 
       - name: Build
         run: npm run build
+
+      - name: The app on a Mac (window test, with screenshots)
+        id: e2e
+        continue-on-error: true
+        run: node test/e2e/mac-smoke.e2e.mjs ../out/shots 2>&1 | tee ../out/e2e.txt; exit ${PIPESTATUS[0]}
 
       - name: Package the Mac app (unsigned, without the Agent SDK)
         id: package
@@ -100,7 +104,70 @@ jobs:
           retention-days: 7
 
       - name: Fail if anything failed
-        if: steps.unit.outcome == 'failure' || steps.sync.outcome == 'failure' || steps.package.outcome == 'failure'
+        if: steps.unit.outcome == 'failure' || steps.sync.outcome == 'failure' || steps.e2e.outcome == 'failure' || steps.package.outcome == 'failure'
         run: |
-          echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} package=${{ steps.package.outcome }}"
+          echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} e2e=${{ steps.e2e.outcome }} package=${{ steps.package.outcome }}"
+          exit 1
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: _app
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: _app/package-lock.json
+
+      - name: Git identity for the sync tests
+        run: |
+          git config --global user.name "Conversations CI"
+          git config --global user.email "ci@example.invalid"
+          git config --global init.defaultBranch main
+          git config --global core.longpaths true
+          mkdir -p ../out
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        id: unit
+        continue-on-error: true
+        run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=../out/unit.xml
+
+      - name: Sync engine tests
+        id: sync
+        continue-on-error: true
+        working-directory: _sync
+        run: node test.mjs 2>&1 | tee ../out/sync.txt; exit ${PIPESTATUS[0]}
+
+      - name: Build
+        run: npm run build
+
+      - name: The app on Windows (window test, with screenshots)
+        id: e2e
+        continue-on-error: true
+        run: node test/e2e/mac-smoke.e2e.mjs ../out/shots 2>&1 | tee ../out/e2e.txt; exit ${PIPESTATUS[0]}
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-windows
+          path: out/
+          retention-days: 7
+
+      - name: Fail if anything failed
+        if: steps.unit.outcome == 'failure' || steps.sync.outcome == 'failure' || steps.e2e.outcome == 'failure'
+        run: |
+          echo "unit=${{ steps.unit.outcome }} sync=${{ steps.sync.outcome }} e2e=${{ steps.e2e.outcome }}"
           exit 1
