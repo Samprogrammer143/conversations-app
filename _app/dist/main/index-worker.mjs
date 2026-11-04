@@ -1197,7 +1197,14 @@ function projectIdForCwd(cwd, home) {
 
 // src/main/index/indexer.ts
 var PROFILE_RE = /^([a-z]:\\users\\[^\\]+)/i;
-var profilePrefix = (cwd) => cwd ? (String(cwd).replace(/\//g, "\\").match(PROFILE_RE)?.[1] ?? null)?.toLowerCase() ?? null : null;
+var POSIX_PROFILE_RE = /^(\/(?:Users|home)\/[^/]+)/;
+var profilePrefix = (cwd) => {
+  if (!cwd) return null;
+  const s = String(cwd);
+  const posix = s.match(POSIX_PROFILE_RE)?.[1];
+  if (posix) return posix.toLowerCase();
+  return s.replace(/\//g, "\\").match(PROFILE_RE)?.[1]?.toLowerCase() ?? null;
+};
 var Indexer = class {
   // repo folder key -> project id
   constructor(db2, opts2) {
@@ -1207,10 +1214,10 @@ var Indexer = class {
   db;
   opts;
   machines = /* @__PURE__ */ new Map();
-  // Windows user folder -> PC name
+  // user folder -> PC name
   keyRemote = /* @__PURE__ */ new Map();
   longPrefix = /* @__PURE__ */ new Map();
-  /** Which PC wrote an entry, from its working folder's Windows user folder. */
+  /** Which PC wrote an entry, from its working folder's user folder. */
   machineForCwd = (cwd) => {
     const p = profilePrefix(cwd);
     if (!p) return null;

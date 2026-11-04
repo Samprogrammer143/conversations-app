@@ -2,67 +2,75 @@ import { createRequire as __cr } from 'node:module'; const require = __cr(import
 
 // src/main/workspace.ts
 import fs2 from "node:fs";
-import os2 from "node:os";
-import path2 from "node:path";
+import os3 from "node:os";
+import path3 from "node:path";
 
 // src/main/paths.ts
 import fs from "node:fs";
+import os2 from "node:os";
+import path2 from "node:path";
+
+// src/shared/dirs.ts
 import os from "node:os";
 import path from "node:path";
-var HOME = os.homedir();
+function localBase() {
+  const home = os.homedir();
+  if (process.platform === "win32") return process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+  if (process.platform === "darwin") return path.join(home, "Library", "Application Support");
+  return process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+}
+var defaultSyncHome = () => path.join(localBase(), "claude-conversation-sync");
+var defaultAppHome = () => path.join(localBase(), "conversations-app");
+var defaultDataDir = () => path.join(localBase(), "Conversations");
+
+// src/main/paths.ts
+var HOME = os2.homedir();
 function claudeDir() {
-  return process.env.CLAUDE_CONFIG_DIR || path.join(HOME, ".claude");
+  return process.env.CLAUDE_CONFIG_DIR || path2.join(HOME, ".claude");
 }
 function projectsDir() {
-  return path.join(claudeDir(), "projects");
+  return path2.join(claudeDir(), "projects");
 }
 function defaultSyncDir() {
-  if (process.env.CLAUDE_SYNC_HOME) return process.env.CLAUDE_SYNC_HOME;
-  if (process.platform === "win32") return path.join(process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local"), "claude-conversation-sync");
-  if (process.platform === "darwin") return path.join(HOME, "Library", "Application Support", "claude-conversation-sync");
-  return path.join(process.env.XDG_DATA_HOME || path.join(HOME, ".local", "share"), "claude-conversation-sync");
+  return process.env.CLAUDE_SYNC_HOME || defaultSyncHome();
 }
 function syncDir() {
   const fresh = defaultSyncDir();
-  const legacy = path.join(claudeDir(), "conversation-sync");
-  if (fs.existsSync(path.join(fresh, "config.json"))) return fresh;
-  if (fs.existsSync(path.join(legacy, "config.json"))) return legacy;
+  const legacy = path2.join(claudeDir(), "conversation-sync");
+  if (fs.existsSync(path2.join(fresh, "config.json"))) return fresh;
+  if (fs.existsSync(path2.join(legacy, "config.json"))) return legacy;
   return fresh;
 }
 function repoDir() {
-  return path.join(syncDir(), "repo");
+  return path2.join(syncDir(), "repo");
 }
 function appRepoDir() {
-  if (process.env.CONVERSATIONS_APP_HOME) return process.env.CONVERSATIONS_APP_HOME;
-  if (process.platform === "win32") return path.join(process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local"), "conversations-app");
-  if (process.platform === "darwin") return path.join(HOME, "Library", "Application Support", "conversations-app");
-  return path.join(process.env.XDG_DATA_HOME || path.join(HOME, ".local", "share"), "conversations-app");
+  return process.env.CONVERSATIONS_APP_HOME || defaultAppHome();
 }
 function engineScriptPath() {
   if (process.env.CONVERSATIONS_ENGINE) return process.env.CONVERSATIONS_ENGINE;
-  const app4 = path.join(appRepoDir(), "_sync", "sync.mjs");
-  if (fs.existsSync(app4)) return app4;
-  return path.join(repoDir(), "_sync", "sync.mjs");
+  const app5 = path2.join(appRepoDir(), "_sync", "sync.mjs");
+  if (fs.existsSync(app5)) return app5;
+  return path2.join(repoDir(), "_sync", "sync.mjs");
 }
 function appDataDir() {
-  const base = process.env.CONVERSATIONS_DATA_DIR || (process.platform === "win32" ? path.join(process.env.LOCALAPPDATA || path.join(HOME, "AppData", "Local"), "Conversations") : path.join(HOME, ".conversations"));
+  const base = process.env.CONVERSATIONS_DATA_DIR || defaultDataDir();
   fs.mkdirSync(base, { recursive: true });
   return base;
 }
 function readSyncConfig() {
   try {
-    return JSON.parse(fs.readFileSync(path.join(syncDir(), "config.json"), "utf8"));
+    return JSON.parse(fs.readFileSync(path2.join(syncDir(), "config.json"), "utf8"));
   } catch {
     return null;
   }
 }
 function thisMachine() {
-  return readSyncConfig()?.machine || os.hostname();
+  return readSyncConfig()?.machine || os2.hostname();
 }
 
 // src/main/workspace.ts
 var ENV_KEYS = ["CLAUDE_CONFIG_DIR", "CLAUDE_SYNC_HOME", "CONVERSATIONS_DATA_DIR", "CONVERSATIONS_ENGINE"];
-var local = () => process.env.LOCALAPPDATA || path2.join(os2.homedir(), "AppData", "Local");
 var BASE = (() => {
   const relaunch = process.env.CONVERSATIONS_RELAUNCH;
   delete process.env.CONVERSATIONS_RELAUNCH;
@@ -75,16 +83,16 @@ var BASE = (() => {
   process.env.CONVERSATIONS_BASE_ENV = JSON.stringify(b);
   return b;
 })();
-var baseDataDir = () => BASE.CONVERSATIONS_DATA_DIR || path2.join(local(), "Conversations");
-var baseSyncHome = () => BASE.CLAUDE_SYNC_HOME || path2.join(local(), "claude-conversation-sync");
-var baseClaudeDir = () => BASE.CLAUDE_CONFIG_DIR || path2.join(os2.homedir(), ".claude");
-var registryFile = () => path2.join(baseDataDir(), "workspaces.json");
+var baseDataDir = () => BASE.CONVERSATIONS_DATA_DIR || defaultDataDir();
+var baseSyncHome = () => BASE.CLAUDE_SYNC_HOME || defaultSyncHome();
+var baseClaudeDir = () => BASE.CLAUDE_CONFIG_DIR || path3.join(os3.homedir(), ".claude");
+var registryFile = () => path3.join(baseDataDir(), "workspaces.json");
 var engineOverridden = () => !!BASE.CONVERSATIONS_ENGINE;
-var baseRepoDir = () => path2.join(baseSyncHome(), "repo");
+var baseRepoDir = () => path3.join(baseSyncHome(), "repo");
 var baseEngine = () => {
   if (BASE.CONVERSATIONS_ENGINE) return BASE.CONVERSATIONS_ENGINE;
-  const app4 = path2.join(appRepoDir(), "_sync", "sync.mjs");
-  return fs2.existsSync(app4) ? app4 : path2.join(baseRepoDir(), "_sync", "sync.mjs");
+  const app5 = path3.join(appRepoDir(), "_sync", "sync.mjs");
+  return fs2.existsSync(app5) ? app5 : path3.join(baseRepoDir(), "_sync", "sync.mjs");
 };
 function baseEnv() {
   const env = { ...process.env };
@@ -96,7 +104,7 @@ function baseEnv() {
 }
 function folders(id) {
   if (id === "main") return { claudeDir: baseClaudeDir(), syncHome: baseSyncHome(), dataDir: baseDataDir() };
-  return { claudeDir: `${baseClaudeDir()}-${id}`, syncHome: `${baseSyncHome()}-${id}`, dataDir: path2.join(baseDataDir(), "workspaces", id) };
+  return { claudeDir: `${baseClaudeDir()}-${id}`, syncHome: `${baseSyncHome()}-${id}`, dataDir: path3.join(baseDataDir(), "workspaces", id) };
 }
 var isWorkspaceId = (v) => typeof v === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(v);
 function readRegistry() {
@@ -125,7 +133,7 @@ function readRegistry() {
 }
 function writeRegistry(r) {
   const f = registryFile();
-  fs2.mkdirSync(path2.dirname(f), { recursive: true });
+  fs2.mkdirSync(path3.dirname(f), { recursive: true });
   const tmp = `${f}.${process.pid}.tmp`;
   fs2.writeFileSync(tmp, JSON.stringify(r, null, 2));
   fs2.renameSync(tmp, f);
@@ -158,8 +166,8 @@ function askedFor(argv) {
   const url = argv.find((a) => a.startsWith("conversations://"));
   return url && /[?&]ws=([a-z0-9][a-z0-9-]{0,39})(?:[&#/]|$)/.exec(url)?.[1] || null;
 }
-var openMarksDir = () => path2.join(baseDataDir(), "open");
-var sharedDataFile = (name) => path2.join(baseDataDir(), name);
+var openMarksDir = () => path3.join(baseDataDir(), "open");
+var sharedDataFile = (name) => path3.join(baseDataDir(), name);
 var registryPath = () => registryFile();
 function newWorkspaceId(name) {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || "workspace";
@@ -205,10 +213,10 @@ function prepareSwitch(id) {
   writeRegistry(r);
   restoreBaseEnv();
 }
-var mainAccountRecord = () => BASE.CLAUDE_CONFIG_DIR ? path2.join(BASE.CLAUDE_CONFIG_DIR, ".claude.json") : path2.join(os2.homedir(), ".claude.json");
+var mainAccountRecord = () => BASE.CLAUDE_CONFIG_DIR ? path3.join(BASE.CLAUDE_CONFIG_DIR, ".claude.json") : path3.join(os3.homedir(), ".claude.json");
 function mainRemote() {
   try {
-    const c = JSON.parse(fs2.readFileSync(path2.join(baseSyncHome(), "config.json"), "utf8"));
+    const c = JSON.parse(fs2.readFileSync(path3.join(baseSyncHome(), "config.json"), "utf8"));
     return typeof c?.remote === "string" ? c.remote : null;
   } catch {
     return null;
@@ -231,8 +239,8 @@ function workspaceEnv(w) {
 
 // src/main/open-windows.ts
 import fs3 from "node:fs";
-import os3 from "node:os";
-import path3 from "node:path";
+import os4 from "node:os";
+import path4 from "node:path";
 var processAlive = (pid) => {
   try {
     process.kill(pid, 0);
@@ -241,7 +249,7 @@ var processAlive = (pid) => {
     return e.code === "EPERM";
   }
 };
-var bootTime = () => Date.now() - os3.uptime() * 1e3;
+var bootTime = () => Date.now() - os4.uptime() * 1e3;
 var MARK_EVERY_MS = 6e4;
 var MARK_STALE_MS = 3 * MARK_EVERY_MS;
 var live = (m, alive, since) => {
@@ -249,7 +257,7 @@ var live = (m, alive, since) => {
   const at = Date.parse(m.at);
   return at >= since - 6e4 && Date.now() - at < MARK_STALE_MS;
 };
-var markFile = (id, dir = openMarksDir()) => path3.join(dir, `${id}.json`);
+var markFile = (id, dir = openMarksDir()) => path4.join(dir, `${id}.json`);
 function readMark(id, dir = openMarksDir()) {
   try {
     const m = JSON.parse(fs3.readFileSync(markFile(id, dir), "utf8"));
@@ -309,18 +317,18 @@ function dropMark(id, dir = openMarksDir()) {
 }
 
 // src/main/workspace-actions.ts
-import fs5 from "node:fs";
-import os4 from "node:os";
-import path5 from "node:path";
-import { spawn } from "node:child_process";
+import fs6 from "node:fs";
+import os6 from "node:os";
+import path7 from "node:path";
+import { spawn as spawn2 } from "node:child_process";
 
 // src/main/log.ts
 import fs4 from "node:fs";
-import path4 from "node:path";
+import path5 from "node:path";
 var file = null;
 function log(scope, message) {
   try {
-    file ??= path4.join(appDataDir(), "app.log");
+    file ??= path5.join(appDataDir(), "app.log");
     try {
       if (fs4.statSync(file).size > 1024 * 1024) fs4.renameSync(file, `${file}.1`);
     } catch {
@@ -332,13 +340,166 @@ function log(scope, message) {
   if (process.env.CONVERSATIONS_DEBUG) console.log(`[${scope}] ${message}`);
 }
 
+// src/main/claude.ts
+import fs5 from "node:fs";
+import os5 from "node:os";
+import path6 from "node:path";
+import { spawn } from "node:child_process";
+var KEEP_MS = 6e4;
+var cached = null;
+var refreshing = null;
+function run(exe, args, timeoutMs) {
+  return new Promise((resolve) => {
+    let out = "";
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(out);
+    };
+    let child;
+    try {
+      child = spawn(exe, args, { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    } catch {
+      resolve("");
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+      }
+      done();
+    }, timeoutMs);
+    child.stdout?.on("data", (d) => out += d);
+    child.on("error", done);
+    child.on("close", done);
+  });
+}
+function knownCandidates(platform = process.platform, home = os5.homedir(), env = process.env) {
+  const out = [];
+  if (env.CONVERSATIONS_CLAUDE_PATH) out.push(env.CONVERSATIONS_CLAUDE_PATH);
+  if (platform !== "win32") {
+    const p = path6.posix;
+    out.push(p.join(home, ".local", "bin", "claude"), p.join(home, ".claude", "local", "claude"));
+    out.push("/opt/homebrew/bin/claude", "/usr/local/bin/claude");
+    for (const d of [".npm-global", ".volta", ".bun"]) out.push(p.join(home, d, "bin", "claude"));
+    return out;
+  }
+  const appData = env.APPDATA || path6.join(home, "AppData", "Roaming");
+  const local = env.LOCALAPPDATA || path6.join(home, "AppData", "Local");
+  out.push(path6.join(home, ".local", "bin", "claude.exe"));
+  out.push(path6.join(appData, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"));
+  out.push(path6.join(local, "Programs", "claude", "claude.exe"));
+  return out;
+}
+function onPath(envPath = process.env.PATH ?? "") {
+  return envPath.split(":").filter((d) => d.startsWith("/")).map((d) => path6.posix.join(d, "claude"));
+}
+function findClaudeNow() {
+  return knownCandidates().find(isFile) ?? (process.platform === "win32" ? null : onPath().find(isFile) ?? null);
+}
+async function pathCandidates() {
+  if (process.platform !== "win32") return onPath();
+  const out = [];
+  const where = await run("where.exe", ["claude"], 1e4);
+  for (const line of where.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
+    if (line.toLowerCase().endsWith(".exe")) out.push(line);
+    else if (line.toLowerCase().endsWith(".cmd")) {
+      try {
+        const m = fs5.readFileSync(line, "utf8").match(/"%dp0%\\([^"]+\.exe)"/i);
+        if (m) out.push(path6.join(path6.dirname(line), m[1]));
+      } catch {
+      }
+    }
+  }
+  return out;
+}
+var isFile = (p) => {
+  try {
+    return fs5.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+};
+function signedInNow() {
+  try {
+    if (fs5.existsSync(path6.join(claudeDir(), ".credentials.json"))) return true;
+    const record = process.env.CLAUDE_CONFIG_DIR ? path6.join(claudeDir(), ".claude.json") : path6.join(os5.homedir(), ".claude.json");
+    const cfg = JSON.parse(fs5.readFileSync(record, "utf8"));
+    return !!cfg?.oauthAccount;
+  } catch {
+    return null;
+  }
+}
+function claudeInstall() {
+  if (cached) return cached.value;
+  const exe = findClaudeNow();
+  return { found: !!exe, path: exe, version: null, signedIn: signedInNow() };
+}
+var repairedAt = 0;
+async function repairNpmInstall(pkg = path6.join(process.env.APPDATA || path6.join(os5.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@anthropic-ai", "claude-code"), node = process.execPath) {
+  const exe = path6.join(pkg, "bin", "claude.exe");
+  const step = path6.join(pkg, "install.cjs");
+  if (isFile(exe) || !isFile(step) || Date.now() - repairedAt < 10 * 6e4) return isFile(exe);
+  repairedAt = Date.now();
+  log("app", "Claude Code's program is missing after an update; running its install step again");
+  await new Promise((done) => {
+    const child = spawn(node, [step], { cwd: pkg, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
+    const timer = setTimeout(() => child.kill(), 12e4);
+    child.on("error", () => done());
+    child.on("exit", () => {
+      clearTimeout(timer);
+      done();
+    });
+  });
+  const ok = isFile(exe);
+  log("app", ok ? "Claude Code repaired" : "Claude Code could not be repaired: reinstall it");
+  return ok;
+}
+function refreshClaude(force = false) {
+  if (!force && cached && Date.now() - cached.at < KEEP_MS) return Promise.resolve(cached.value);
+  refreshing ??= (async () => {
+    let exe = knownCandidates().find(isFile) ?? null;
+    if (!exe) exe = (await pathCandidates()).find(isFile) ?? null;
+    if (!exe && process.platform === "win32") void repairNpmInstall().then((ok) => ok && void refreshClaude(true));
+    const version = exe ? (await run(exe, ["--version"], 15e3)).match(/(\d+\.\d+\.\d+)/)?.[1] ?? null : null;
+    const value = { found: !!exe, path: exe, version, signedIn: signedInNow() };
+    cached = { at: Date.now(), value };
+    return value;
+  })().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
+}
+function claudeDefaultModel() {
+  try {
+    const s = JSON.parse(fs5.readFileSync(path6.join(claudeDir(), "settings.json"), "utf8"));
+    return typeof s?.model === "string" && s.model.trim() ? s.model.trim() : null;
+  } catch {
+    return null;
+  }
+}
+var terminal = null;
+function hasWindowsTerminal() {
+  if (process.platform !== "win32") return false;
+  if (terminal !== null) return terminal;
+  const alias = path6.join(process.env.LOCALAPPDATA || "", "Microsoft", "WindowsApps", "wt.exe");
+  if (fs5.existsSync(alias)) return terminal = true;
+  void run("where.exe", ["wt"], 1e4).then((out) => terminal = out.trim().length > 0);
+  return false;
+}
+
+// src/main/words.ts
+var PC = process.platform === "darwin" ? "Mac" : "PC";
+
 // src/main/workspace-actions.ts
-var local2 = () => process.env.LOCALAPPDATA || path5.join(os4.homedir(), "AppData", "Local");
 function signedIn(w) {
   try {
-    if (fs5.existsSync(path5.join(w.claudeDir, ".credentials.json"))) return true;
-    const cfg = w.id === "main" ? mainAccountRecord() : path5.join(w.claudeDir, ".claude.json");
-    return !!JSON.parse(fs5.readFileSync(cfg, "utf8"))?.oauthAccount;
+    if (fs6.existsSync(path7.join(w.claudeDir, ".credentials.json"))) return true;
+    const cfg = w.id === "main" ? mainAccountRecord() : path7.join(w.claudeDir, ".claude.json");
+    return !!JSON.parse(fs6.readFileSync(cfg, "utf8"))?.oauthAccount;
   } catch {
     return false;
   }
@@ -346,22 +507,22 @@ function signedIn(w) {
 function workspacesForWindow() {
   const { workspaces } = listWorkspaces();
   const current = currentWorkspace().id;
-  const here = workspaces.map((w) => ({ id: w.id, name: w.name, remote: w.remote, setUp: w.id === "main" || fs5.existsSync(path5.join(w.syncHome, "repo", ".git")), signedIn: signedIn(w), disconnected: w.disconnected, openElsewhere: w.id !== current && openElsewhere(w.id) }));
+  const here = workspaces.map((w) => ({ id: w.id, name: w.name, remote: w.remote, setUp: w.id === "main" || fs6.existsSync(path7.join(w.syncHome, "repo", ".git")), signedIn: signedIn(w), disconnected: w.disconnected, openElsewhere: w.id !== current && openElsewhere(w.id) }));
   const elsewhere = readShared().filter((s) => !here.some((h) => h.id === s.id)).map((s) => ({ ...s, setUp: false, signedIn: false, disconnected: false }));
   return { current, workspaces: [...here, ...elsewhere] };
 }
-var sharedDir = () => path5.join(baseRepoDir(), "_shared", "workspaces");
+var sharedDir = () => path7.join(baseRepoDir(), "_shared", "workspaces");
 function readShared() {
   let files2 = [];
   try {
-    files2 = fs5.readdirSync(sharedDir()).filter((f) => f.endsWith(".json"));
+    files2 = fs6.readdirSync(sharedDir()).filter((f) => f.endsWith(".json"));
   } catch {
     return [];
   }
   const out = [];
   for (const f of files2) {
     try {
-      const w = JSON.parse(fs5.readFileSync(path5.join(sharedDir(), f), "utf8"));
+      const w = JSON.parse(fs6.readFileSync(path7.join(sharedDir(), f), "utf8"));
       if (w && isWorkspaceId(w.id) && w.id !== "main" && `${w.id}.json` === f && typeof w.name === "string" && typeof w.remote === "string" && isRemote(w.remote)) out.push({ id: w.id, name: w.name, remote: w.remote });
     } catch {
     }
@@ -369,19 +530,25 @@ function readShared() {
   return out;
 }
 async function shareWorkspace(w) {
-  const r = await run([baseEngine(), "share-workspace", "--id", w.id, "--name", w.name, "--remote", w.remote], baseEnv(), 2 * 6e4);
+  const r = await run2([baseEngine(), "share-workspace", "--id", w.id, "--name", w.name, "--remote", w.remote], baseEnv(), 2 * 6e4);
   if (r.code !== 0 || !/"ok":\s*true/.test(r.out)) log("app", `could not share workspace ${w.id}: ${r.out.trim().slice(-300)}`);
 }
-function run(argv, env, timeoutMs) {
+function run2(argv, env, timeoutMs) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, argv, { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn2(process.execPath, argv, { env: { ...env, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     child.stdout.on("data", (d) => out += d);
     child.stderr.on("data", (d) => out += d);
     const timer = setTimeout(() => {
       out += "\nthe setup took too long and was stopped";
-      if (process.platform === "win32" && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
-      else child.kill();
+      if (process.platform === "win32" && child.pid) spawn2("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
+      else if (child.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      }
     }, timeoutMs);
     child.on("error", (e) => {
       clearTimeout(timer);
@@ -397,15 +564,15 @@ var repoKey = (u) => u.trim().replace(/\\/g, "/").replace(/\/+$/, "").replace(/\
 var sameRepo = (a, b) => repoKey(a) === repoKey(b);
 function isRemote(v) {
   if (typeof v !== "string" || v.length > 400 || /[\s"'`<>|;&$]/.test(v)) return false;
-  return /^https:\/\/[^/]+\/.+/.test(v) || /^git@[^:]+:.+/.test(v) || path5.isAbsolute(v) && fs5.existsSync(v);
+  return /^https:\/\/[^/]+\/.+/.test(v) || /^git@[^:]+:.+/.test(v) || path7.isAbsolute(v) && fs6.existsSync(v);
 }
 function baseMachine() {
   try {
-    const cfg = JSON.parse(fs5.readFileSync(path5.join(path5.dirname(baseRepoDir()), "config.json"), "utf8"));
+    const cfg = JSON.parse(fs6.readFileSync(path7.join(path7.dirname(baseRepoDir()), "config.json"), "utf8"));
     if (typeof cfg?.machine === "string" && cfg.machine) return cfg.machine;
   } catch {
   }
-  return os4.hostname();
+  return os6.hostname();
 }
 async function setUpWorkspace(input) {
   const name = input.name.trim().slice(0, 40);
@@ -421,71 +588,80 @@ async function setUpWorkspace(input) {
   const id = retry ?? newWorkspaceId(name);
   const isNew = !known.some((w2) => w2.id === id);
   const w = { id, name, remote, ...folders(id), disconnected: false };
-  const made = [w.syncHome, w.claudeDir].filter((d) => !fs5.existsSync(d));
-  fs5.mkdirSync(w.claudeDir, { recursive: true });
-  const installer = path5.join(path5.dirname(baseEngine()), "install.mjs");
-  const r = await run([installer, "--remote", remote, "--machine", baseMachine()], { ...baseEnv(), CLAUDE_CONFIG_DIR: w.claudeDir, CLAUDE_SYNC_HOME: w.syncHome }, 10 * 6e4);
+  const made = [w.syncHome, w.claudeDir].filter((d) => !fs6.existsSync(d));
+  fs6.mkdirSync(w.claudeDir, { recursive: true });
+  const installer = path7.join(path7.dirname(baseEngine()), "install.mjs");
+  const r = await run2([installer, "--remote", remote, "--machine", baseMachine()], { ...baseEnv(), CLAUDE_CONFIG_DIR: w.claudeDir, CLAUDE_SYNC_HOME: w.syncHome }, 10 * 6e4);
   if (r.code !== 0) {
     const why = r.out.trim().split(/\r?\n/).filter(Boolean).pop() ?? "the setup stopped";
     log("app", `workspace ${id} setup failed: ${r.out.trim().slice(-600)}`);
     if (isNew) removeWorkspace(id);
     for (const d of made) {
       try {
-        fs5.rmSync(d, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
+        fs6.rmSync(d, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
       } catch {
       }
     }
     const github = /could not read from remote|authentication failed|permission denied|repository not found|returned error: 40[34]/i.test(r.out);
-    return { ok: false, id, err: github ? "GitHub didn't let this PC into that repository. Check the address, and that you can open it on github.com while signed in." : why };
+    return { ok: false, id, err: github ? `GitHub didn't let this ${PC} into that repository. Check the address, and that you can open it on github.com while signed in.` : why };
   }
   addWorkspace({ id, name, remote });
   await shareWorkspace({ id, name, remote });
   writeLauncher(w);
   seedSettings(w);
-  log("app", `workspace ${id} set up on this PC`);
+  log("app", `workspace ${id} set up on this ${PC}`);
   return { ok: true, id };
 }
 function seedSettings(w) {
-  const target = path5.join(w.dataDir, "settings.json");
-  if (fs5.existsSync(target)) return;
+  const target = path7.join(w.dataDir, "settings.json");
+  if (fs6.existsSync(target)) return;
   let s = {};
   try {
-    s = JSON.parse(fs5.readFileSync(path5.join(listWorkspaces().workspaces[0].dataDir, "settings.json"), "utf8"));
+    s = JSON.parse(fs6.readFileSync(path7.join(listWorkspaces().workspaces[0].dataDir, "settings.json"), "utf8"));
   } catch {
   }
   delete s.folders;
   try {
-    fs5.mkdirSync(w.dataDir, { recursive: true });
-    fs5.writeFileSync(target, JSON.stringify({ ...s, welcomed: true }, null, 2));
+    fs6.mkdirSync(w.dataDir, { recursive: true });
+    fs6.writeFileSync(target, JSON.stringify({ ...s, welcomed: true }, null, 2));
   } catch (e) {
     log("app", `could not start ${w.id}'s settings: ${e.message}`);
   }
 }
 function launcherDir() {
   if (process.env.CONVERSATIONS_LAUNCHER_DIR) return process.env.CONVERSATIONS_LAUNCHER_DIR;
-  return path5.join(local2(), "Microsoft", "WindowsApps");
+  if (process.platform !== "win32") return path7.join(os6.homedir(), ".local", "bin");
+  return path7.join(localBase(), "Microsoft", "WindowsApps");
 }
 function launcherPath(w) {
-  if (process.platform !== "win32") return null;
-  return path5.join(launcherDir(), `claude-${w.id}.cmd`);
+  return path7.join(launcherDir(), process.platform === "win32" ? `claude-${w.id}.cmd` : `claude-${w.id}`);
 }
 function claudeExe() {
-  const npm = path5.join(process.env.APPDATA || path5.join(os4.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
-  if (fs5.existsSync(npm)) return npm;
-  const native = path5.join(os4.homedir(), ".local", "bin", "claude.exe");
-  return fs5.existsSync(native) ? native : "claude";
+  if (process.platform !== "win32") return findClaudeNow() ?? "claude";
+  const npm = path7.join(process.env.APPDATA || path7.join(os6.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+  if (fs6.existsSync(npm)) return npm;
+  const native = path7.join(os6.homedir(), ".local", "bin", "claude.exe");
+  return fs6.existsSync(native) ? native : "claude";
+}
+function launcherScript(platform, exe, env, name) {
+  if (platform === "win32") {
+    const q = (s) => s.replace(/%/g, "%%");
+    const set2 = (k) => `set "${k}=${q(env[k] ?? "")}"`;
+    return ["@echo off", set2("CLAUDE_CONFIG_DIR"), set2("CLAUDE_SYNC_HOME"), `${exe === "claude" ? "claude" : `"${q(exe)}"`} %*`, ""].join("\r\n");
+  }
+  const sq = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+  const set = (k) => env[k] ? `export ${k}=${sq(env[k])}` : `unset ${k}`;
+  return ["#!/bin/sh", `# Claude Code in the ${name.replace(/[\r\n]/g, " ")} workspace. Written by Conversations.`, set("CLAUDE_CONFIG_DIR"), set("CLAUDE_SYNC_HOME"), `exec ${exe === "claude" ? "claude" : sq(exe)} "$@"`, ""].join("\n");
 }
 function writeLauncher(w) {
   const file4 = launcherPath(w);
   if (!file4) return false;
-  const q = (s) => s.replace(/%/g, "%%");
-  const exe = claudeExe();
   const env = w.id === "main" ? baseEnv() : { CLAUDE_CONFIG_DIR: w.claudeDir, CLAUDE_SYNC_HOME: w.syncHome };
-  const set = (k) => `set "${k}=${q(env[k] ?? "")}"`;
-  const body = ["@echo off", set("CLAUDE_CONFIG_DIR"), set("CLAUDE_SYNC_HOME"), `${exe === "claude" ? "claude" : `"${q(exe)}"`} %*`, ""].join("\r\n");
+  const body = launcherScript(process.platform, claudeExe(), { CLAUDE_CONFIG_DIR: env.CLAUDE_CONFIG_DIR, CLAUDE_SYNC_HOME: env.CLAUDE_SYNC_HOME }, w.name);
   try {
-    fs5.mkdirSync(path5.dirname(file4), { recursive: true });
-    fs5.writeFileSync(file4, body);
+    fs6.mkdirSync(path7.dirname(file4), { recursive: true });
+    fs6.writeFileSync(file4, body, { mode: 493 });
+    if (process.platform !== "win32") fs6.chmodSync(file4, 493);
     return true;
   } catch (e) {
     log("app", `could not write ${file4}: ${e.message}`);
@@ -494,9 +670,9 @@ function writeLauncher(w) {
 }
 
 // src/main/main.ts
-import fs26 from "node:fs";
-import { execFile, spawn as spawn9 } from "node:child_process";
-import path26 from "node:path";
+import fs28 from "node:fs";
+import { execFile as execFile3, spawn as spawn10 } from "node:child_process";
+import path29 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/main/alert.ts
@@ -543,12 +719,12 @@ var AlertWatcher = class {
 };
 
 // src/main/main.ts
-import { app as app3, BrowserWindow as BrowserWindow2, clipboard, dialog as dialog2, ipcMain, Menu, nativeImage, nativeTheme as nativeTheme2, powerMonitor, session as electronSession, shell as shell2, Tray } from "electron";
+import { app as app4, BrowserWindow as BrowserWindow2, clipboard, dialog as dialog3, ipcMain, Menu as Menu2, nativeImage, nativeTheme as nativeTheme2, powerMonitor, session as electronSession, shell as shell2, Tray } from "electron";
 
 // src/main/index/service.ts
-import fs6 from "node:fs";
-import os5 from "node:os";
-import path6 from "node:path";
+import fs7 from "node:fs";
+import os7 from "node:os";
+import path8 from "node:path";
 import zlib from "node:zlib";
 import { EventEmitter } from "node:events";
 import { Worker } from "node:worker_threads";
@@ -706,7 +882,7 @@ var IndexService = class _IndexService extends EventEmitter {
   queued = false;
   ready = false;
   firstRun = false;
-  dbPath = path6.join(appDataDir(), "index.db");
+  dbPath = path8.join(appDataDir(), "index.db");
   workerFile = "";
   restarts = 0;
   stopped = false;
@@ -736,7 +912,7 @@ var IndexService = class _IndexService extends EventEmitter {
   removeDbFiles() {
     for (const suffix of ["", "-wal", "-shm", "-journal"]) {
       try {
-        fs6.rmSync(`${this.dbPath}${suffix}`, { force: true });
+        fs7.rmSync(`${this.dbPath}${suffix}`, { force: true });
       } catch {
       }
     }
@@ -744,7 +920,7 @@ var IndexService = class _IndexService extends EventEmitter {
   /** The worker, and the promise of its "ready" message; rejected if it dies first. */
   spawnWorker() {
     const worker = new Worker(this.workerFile, {
-      workerData: { dbPath: this.dbPath, opts: { projectsDir: projectsDir(), repoDir: repoDir(), home: os5.homedir(), thisMachine: thisMachine() } }
+      workerData: { dbPath: this.dbPath, opts: { projectsDir: projectsDir(), repoDir: repoDir(), home: os7.homedir(), thisMachine: thisMachine() } }
     });
     this.worker = worker;
     return new Promise((resolve, reject) => {
@@ -809,12 +985,12 @@ var IndexService = class _IndexService extends EventEmitter {
   }
   watch() {
     const add = (dir, toId) => {
-      if (!fs6.existsSync(dir)) return;
+      if (!fs7.existsSync(dir)) return;
       try {
-        const w = fs6.watch(dir, { recursive: true }, (_ev, file4) => {
+        const w = fs7.watch(dir, { recursive: true }, (_ev, file4) => {
           if (!file4) return this.scan("watch");
           const rel = String(file4);
-          if (rel.startsWith(".git") || rel.includes(`${path6.sep}.git${path6.sep}`)) return;
+          if (rel.startsWith(".git") || rel.includes(`${path8.sep}.git${path8.sep}`)) return;
           const id = toId(rel);
           if (id) {
             this.dirty.add(id);
@@ -830,12 +1006,12 @@ var IndexService = class _IndexService extends EventEmitter {
       }
     };
     add(projectsDir(), (rel) => {
-      const parts = rel.split(path6.sep);
+      const parts = rel.split(path8.sep);
       if (parts.length === 2 && parts[1].endsWith(".jsonl")) return parts[1].slice(0, -6);
       return null;
     });
     add(repoDir(), (rel) => {
-      const parts = rel.split(path6.sep);
+      const parts = rel.split(path8.sep);
       if (parts.length === 3 && /^(transcript\.jsonl(\.gz)?|meta\.json)$/.test(parts[2])) return parts[1];
       return null;
     });
@@ -869,7 +1045,7 @@ var IndexService = class _IndexService extends EventEmitter {
       if (!file4) continue;
       let sig;
       try {
-        const st = fs6.statSync(file4);
+        const st = fs7.statSync(file4);
         sig = `${st.size}:${st.mtimeMs}`;
       } catch {
         this.hotPaths.delete(id);
@@ -893,15 +1069,15 @@ var IndexService = class _IndexService extends EventEmitter {
     let found = null;
     try {
       const row = this.db.prepare("SELECT local_path FROM conversations WHERE id = ?").get(id);
-      if (row?.local_path && fs6.existsSync(row.local_path)) found = row.local_path;
+      if (row?.local_path && fs7.existsSync(row.local_path)) found = row.local_path;
     } catch {
     }
     if (!found) {
       try {
-        for (const d of fs6.readdirSync(projectsDir(), { withFileTypes: true })) {
+        for (const d of fs7.readdirSync(projectsDir(), { withFileTypes: true })) {
           if (!d.isDirectory()) continue;
-          const f = path6.join(projectsDir(), d.name, `${id}.jsonl`);
-          if (fs6.existsSync(f)) {
+          const f = path8.join(projectsDir(), d.name, `${id}.jsonl`);
+          if (fs7.existsSync(f)) {
             found = f;
             break;
           }
@@ -933,10 +1109,10 @@ var IndexService = class _IndexService extends EventEmitter {
   /** The last compressed transcript an image came from, already unpacked. */
   gzCache = null;
   async unpacked(file4) {
-    const st = fs6.statSync(file4);
+    const st = fs7.statSync(file4);
     const sig = `${st.size}:${st.mtimeMs}`;
     if (this.gzCache?.file === file4 && this.gzCache.sig === sig) return this.gzCache.buf;
-    const buf = await new Promise((resolve, reject) => zlib.gunzip(fs6.readFileSync(file4), (err, out) => err ? reject(err) : resolve(out)));
+    const buf = await new Promise((resolve, reject) => zlib.gunzip(fs7.readFileSync(file4), (err, out) => err ? reject(err) : resolve(out)));
     this.gzCache = { file: file4, sig, buf };
     return buf;
   }
@@ -945,7 +1121,7 @@ var IndexService = class _IndexService extends EventEmitter {
     const file4 = decodeURIComponent(enc ?? "");
     const offset = Number(offStr);
     const block = Number(blockStr);
-    const allowed = [projectsDir(), repoDir()].some((root) => path6.resolve(file4).toLowerCase().startsWith(path6.resolve(root).toLowerCase() + path6.sep));
+    const allowed = [projectsDir(), repoDir()].some((root) => path8.resolve(file4).toLowerCase().startsWith(path8.resolve(root).toLowerCase() + path8.sep));
     if (!allowed || !Number.isFinite(offset) || !Number.isFinite(block)) return null;
     try {
       let line;
@@ -954,12 +1130,12 @@ var IndexService = class _IndexService extends EventEmitter {
         const end = buf.indexOf(10, offset);
         line = buf.toString("utf8", offset, end === -1 ? void 0 : end);
       } else {
-        const fd = fs6.openSync(file4, "r");
+        const fd = fs7.openSync(file4, "r");
         const chunks = [];
         let pos = offset;
         for (; ; ) {
           const b2 = Buffer.alloc(1024 * 1024);
-          const n = fs6.readSync(fd, b2, 0, b2.length, pos);
+          const n = fs7.readSync(fd, b2, 0, b2.length, pos);
           if (n <= 0) break;
           const nl = b2.subarray(0, n).indexOf(10);
           if (nl >= 0) {
@@ -969,7 +1145,7 @@ var IndexService = class _IndexService extends EventEmitter {
           chunks.push(b2.subarray(0, n));
           pos += n;
         }
-        fs6.closeSync(fd);
+        fs7.closeSync(fd);
         line = Buffer.concat(chunks).toString("utf8");
       }
       const entry = JSON.parse(line);
@@ -1062,7 +1238,7 @@ function sidebarData(db, ctx2, devices2, folders3) {
     p.count++;
     byProject.set(r.projectId, p);
   }
-  const local3 = new Set(db.prepare("SELECT DISTINCT project_id FROM conversations WHERE local_path IS NOT NULL AND item_count >= 0").all().map((r) => r.project_id));
+  const local = new Set(db.prepare("SELECT DISTINCT project_id FROM conversations WHERE local_path IS NOT NULL AND item_count >= 0").all().map((r) => r.project_id));
   const projects = [];
   const otherIds = [];
   let otherCount = 0;
@@ -1073,7 +1249,7 @@ function sidebarData(db, ctx2, devices2, folders3) {
       otherCount += p.count;
       continue;
     }
-    projects.push({ id, label: p.label, kind: "repo", count: p.count, folder: folders3[id] ?? null, onThisPc: local3.has(id) });
+    projects.push({ id, label: p.label, kind: "repo", count: p.count, folder: folders3[id] ?? null, onThisPc: local.has(id) });
   }
   projects.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
   const home = byProject.get("folder:_home");
@@ -1126,7 +1302,7 @@ function conversationDetail(db, id, ctx2, folders3) {
   if (!r) return null;
   const row = toRow(r, ctx2);
   const where = row.folderLabel ?? row.projectLabel;
-  const who = row.runningHere || row.live && row.lastPc === ctx2.thisMachine ? "Live on this PC" : `Last on ${row.lastPc === ctx2.thisMachine ? "this PC" : row.lastPc ?? "another PC"}`;
+  const who = row.runningHere || row.live && row.lastPc === ctx2.thisMachine ? `Live on this ${PC}` : `Last on ${row.lastPc === ctx2.thisMachine ? `this ${PC}` : row.lastPc ?? "another PC"}`;
   const subtitle = [who, where, `${row.prompts} prompt${row.prompts === 1 ? "" : "s"}`].join("  \xB7  ");
   const folder = folders3[row.projectId] ?? (r.cwd && r.local_path ? r.cwd : null);
   const recentElsewhere = row.lastPc && row.lastPc !== ctx2.thisMachine && row.lastAt && ctx2.now - Date.parse(row.lastAt) < LIVE_MS ? { pc: row.lastPc, at: row.lastAt } : null;
@@ -1236,22 +1412,22 @@ function search(db, text, ctx2, { includeTools = false, limit = 20 } = {}) {
 }
 
 // src/main/sync/repo-read.ts
-import fs7 from "node:fs";
-import path7 from "node:path";
+import fs8 from "node:fs";
+import path9 from "node:path";
 function readJson(p) {
   try {
-    return JSON.parse(fs7.readFileSync(p, "utf8"));
+    return JSON.parse(fs8.readFileSync(p, "utf8"));
   } catch {
     return null;
   }
 }
 function readDevices(repoDir2) {
-  const dir = path7.join(repoDir2, "_devices");
+  const dir = path9.join(repoDir2, "_devices");
   const out = [];
   try {
-    for (const f of fs7.readdirSync(dir)) {
+    for (const f of fs8.readdirSync(dir)) {
       if (!f.endsWith(".json")) continue;
-      const d = readJson(path7.join(dir, f));
+      const d = readJson(path9.join(dir, f));
       if (d?.name) out.push({ ...d, slug: f.replace(/\.json$/, "") });
     }
   } catch {
@@ -1260,16 +1436,16 @@ function readDevices(repoDir2) {
 }
 
 // src/main/sync/scheduler.ts
-import fs11 from "node:fs";
-import os6 from "node:os";
-import path9 from "node:path";
+import fs12 from "node:fs";
+import os8 from "node:os";
+import path11 from "node:path";
 import { EventEmitter as EventEmitter3 } from "node:events";
-import { spawn as spawn3 } from "node:child_process";
+import { spawn as spawn4 } from "node:child_process";
 import { net } from "electron";
 
 // src/main/settings.ts
-import fs8 from "node:fs";
-import path8 from "node:path";
+import fs9 from "node:fs";
+import path10 from "node:path";
 import { EventEmitter as EventEmitter2 } from "node:events";
 
 // src/main/validate.ts
@@ -1317,7 +1493,7 @@ var isInt = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >
 function isFolders(v) {
   if (!v || typeof v !== "object" || Array.isArray(v)) return false;
   const entries = Object.entries(v);
-  return entries.length <= 1e3 && entries.every(([k, p]) => k.length > 0 && k.length <= 400 && typeof p === "string" && p.length <= 1e3 && path8.isAbsolute(p));
+  return entries.length <= 1e3 && entries.every(([k, p]) => k.length > 0 && k.length <= 400 && typeof p === "string" && p.length <= 1e3 && path10.isAbsolute(p));
 }
 var CHECKS = {
   theme: (v) => v === "system" || v === "light" || v === "dark",
@@ -1351,9 +1527,9 @@ var SettingsStore = class extends EventEmitter2 {
   value = { ...DEFAULT_SETTINGS };
   file = "";
   load() {
-    this.file = path8.join(appDataDir(), "settings.json");
+    this.file = path10.join(appDataDir(), "settings.json");
     try {
-      const raw = JSON.parse(fs8.readFileSync(this.file, "utf8"));
+      const raw = JSON.parse(fs9.readFileSync(this.file, "utf8"));
       this.value = { ...DEFAULT_SETTINGS, ...sanitizeSettingsPatch(raw).patch };
     } catch {
       this.value = { ...DEFAULT_SETTINGS };
@@ -1366,8 +1542,8 @@ var SettingsStore = class extends EventEmitter2 {
   set(patch) {
     this.value = { ...this.value, ...patch };
     const tmp = `${this.file}.${process.pid}.tmp`;
-    fs8.writeFileSync(tmp, JSON.stringify(this.value, null, 2));
-    fs8.renameSync(tmp, this.file);
+    fs9.writeFileSync(tmp, JSON.stringify(this.value, null, 2));
+    fs9.renameSync(tmp, this.file);
     this.emit("change", this.value, patch);
     return this.value;
   }
@@ -1403,8 +1579,8 @@ function displayRemote(remote) {
 }
 
 // src/main/sync/engine-bridge.ts
-import { spawn as spawn2 } from "node:child_process";
-import fs9 from "node:fs";
+import { spawn as spawn3 } from "node:child_process";
+import fs10 from "node:fs";
 function killTree(child) {
   if (!child.pid) return;
   const plain2 = () => {
@@ -1413,8 +1589,15 @@ function killTree(child) {
     } catch {
     }
   };
-  if (process.platform !== "win32") return plain2();
-  const k = spawn2("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      plain2();
+    }
+    return;
+  }
+  const k = spawn3("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
   k.on("error", plain2);
   k.on("close", (code) => {
     if (code !== 0) plain2();
@@ -1428,13 +1611,15 @@ function runEngine(args, { timeoutMs = 10 * 6e4, env = {} } = {}) {
   const script = engineScript();
   const t0 = Date.now();
   return new Promise((resolve) => {
-    if (!fs9.existsSync(script)) {
+    if (!fs10.existsSync(script)) {
       resolve({ ok: false, code: null, json: null, stderr: `Sync engine not found at ${script}`, stdout: "", ms: 0 });
       return;
     }
-    const child = spawn2(process.execPath, [script, ...args], {
+    const child = spawn3(process.execPath, [script, ...args], {
       env: { ...process.env, ...env, ELECTRON_RUN_AS_NODE: "1" },
       windowsHide: true,
+      // Off Windows, a process group of its own, so killTree can end what it started too.
+      detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"]
     });
     let out = "";
@@ -1483,7 +1668,7 @@ var KILL_GRACE_MS = 1e4;
 async function detectEngineVersion(force = false) {
   if (engineVersion !== null && !force) return engineVersion;
   const script = engineScript();
-  if (!fs9.existsSync(script)) {
+  if (!fs10.existsSync(script)) {
     engineVersion = null;
     return 0;
   }
@@ -1501,7 +1686,7 @@ function runEngineSerial(args, opts) {
 }
 
 // src/main/sync/pull-decision.ts
-import fs10 from "node:fs";
+import fs11 from "node:fs";
 var RETRY_SKIPPED_MS = 15e4;
 function shouldPull(a) {
   if (a.force) return true;
@@ -1516,7 +1701,7 @@ var HeadStore = class {
   file;
   get() {
     try {
-      const v = JSON.parse(fs10.readFileSync(this.file, "utf8"));
+      const v = JSON.parse(fs11.readFileSync(this.file, "utf8"));
       return typeof v?.head === "string" ? v.head : null;
     } catch {
       return null;
@@ -1525,8 +1710,8 @@ var HeadStore = class {
   set(head) {
     try {
       const tmp = `${this.file}.${process.pid}.tmp`;
-      fs10.writeFileSync(tmp, JSON.stringify({ head, at: (/* @__PURE__ */ new Date()).toISOString() }));
-      fs10.renameSync(tmp, this.file);
+      fs11.writeFileSync(tmp, JSON.stringify({ head, at: (/* @__PURE__ */ new Date()).toISOString() }));
+      fs11.renameSync(tmp, this.file);
     } catch {
     }
   }
@@ -1538,7 +1723,7 @@ function repoSizeBytes(dir) {
     let out = "";
     let child;
     try {
-      child = spawn3("git", ["count-objects", "-v"], { cwd: dir, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      child = spawn4("git", ["count-objects", "-v"], { cwd: dir, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
     } catch {
       resolve(null);
       return;
@@ -1561,9 +1746,9 @@ var SyncScheduler = class extends EventEmitter3 {
   constructor(opts) {
     super();
     this.opts = opts;
-    this.heads = new HeadStore(path9.join(appDataDir(), "sync-head.json"));
+    this.heads = new HeadStore(path11.join(appDataDir(), "sync-head.json"));
     try {
-      this.recent = JSON.parse(fs11.readFileSync(path9.join(appDataDir(), "activity.json"), "utf8"));
+      this.recent = JSON.parse(fs12.readFileSync(path11.join(appDataDir(), "activity.json"), "utf8"));
     } catch {
     }
   }
@@ -1637,7 +1822,7 @@ var SyncScheduler = class extends EventEmitter3 {
     this.recent.unshift({ ...a, at: (/* @__PURE__ */ new Date()).toISOString() });
     this.recent = this.recent.slice(0, 20);
     try {
-      fs11.writeFileSync(path9.join(appDataDir(), "activity.json"), JSON.stringify(this.recent));
+      fs12.writeFileSync(path11.join(appDataDir(), "activity.json"), JSON.stringify(this.recent));
     } catch {
     }
   }
@@ -1674,7 +1859,7 @@ var SyncScheduler = class extends EventEmitter3 {
       if (this.engineVersion < 3) {
         if (Date.now() - this.lastEngineRefresh > 10 * 6e4) {
           this.lastEngineRefresh = Date.now();
-          await runEngineSerial(["pull", "list", "--cwd", os6.homedir()], { timeoutMs: 5 * 6e4 });
+          await runEngineSerial(["pull", "list", "--cwd", os8.homedir()], { timeoutMs: 5 * 6e4 });
           this.opts.onDownloaded();
         }
         this.engineVersion = await detectEngineVersion(true);
@@ -1804,7 +1989,7 @@ var SyncScheduler = class extends EventEmitter3 {
     const time = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
     if (this.phase === "not-set-up") {
       headline = "Sync is not set up";
-      detail = "Run the installer on this PC";
+      detail = `Run the installer on this ${PC}`;
     } else if (paused) {
       headline = "Sync paused";
       detail = lastSync ? `Last synced ${time(lastSync)}` : "Resume in the sync menu";
@@ -1813,10 +1998,10 @@ var SyncScheduler = class extends EventEmitter3 {
       detail = "Chats aren't syncing";
     } else if (this.phase === "offline") {
       headline = noNetwork ? "Offline" : "Can't reach GitHub";
-      detail = lastSync ? `Last synced ${time(lastSync)}` : "Saved on this PC";
+      detail = lastSync ? `Last synced ${time(lastSync)}` : `Saved on this ${PC}`;
     } else if (this.phase === "attention") {
       headline = "Can't reach GitHub";
-      detail = "Retrying \xB7 saved on this PC";
+      detail = `Retrying \xB7 saved on this ${PC}`;
     } else if (this.phase === "downloading" || this.phase === "uploading" || this.phase === "checking") {
       headline = total > 1 && behind.length ? `${current} of ${total} PCs up to date` : this.phase === "checking" ? "Up to date" : "Syncing\u2026";
       detail = this.phase === "checking" ? lastSync ? `Last synced ${time(lastSync)}` : "Checking GitHub" : this.phase === "downloading" ? "Downloading\u2026" : "Uploading\u2026";
@@ -1866,152 +2051,17 @@ var SyncScheduler = class extends EventEmitter3 {
   }
 };
 
-// src/main/claude.ts
-import fs12 from "node:fs";
-import os7 from "node:os";
-import path10 from "node:path";
-import { spawn as spawn4 } from "node:child_process";
-var KEEP_MS = 6e4;
-var cached = null;
-var refreshing = null;
-function run2(exe, args, timeoutMs) {
-  return new Promise((resolve) => {
-    let out = "";
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(out);
-    };
-    let child;
-    try {
-      child = spawn4(exe, args, { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-    } catch {
-      resolve("");
-      return;
-    }
-    const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-      }
-      done();
-    }, timeoutMs);
-    child.stdout?.on("data", (d) => out += d);
-    child.on("error", done);
-    child.on("close", done);
-  });
-}
-function knownCandidates() {
-  const out = [];
-  if (process.env.CONVERSATIONS_CLAUDE_PATH) out.push(process.env.CONVERSATIONS_CLAUDE_PATH);
-  const home = os7.homedir();
-  const appData = process.env.APPDATA || path10.join(home, "AppData", "Roaming");
-  const local3 = process.env.LOCALAPPDATA || path10.join(home, "AppData", "Local");
-  out.push(path10.join(home, ".local", "bin", "claude.exe"));
-  out.push(path10.join(appData, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"));
-  out.push(path10.join(local3, "Programs", "claude", "claude.exe"));
-  return out;
-}
-async function pathCandidates() {
-  const out = [];
-  const where = await run2("where.exe", ["claude"], 1e4);
-  for (const line of where.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
-    if (line.toLowerCase().endsWith(".exe")) out.push(line);
-    else if (line.toLowerCase().endsWith(".cmd")) {
-      try {
-        const m = fs12.readFileSync(line, "utf8").match(/"%dp0%\\([^"]+\.exe)"/i);
-        if (m) out.push(path10.join(path10.dirname(line), m[1]));
-      } catch {
-      }
-    }
-  }
-  return out;
-}
-var isFile = (p) => {
-  try {
-    return fs12.statSync(p).isFile();
-  } catch {
-    return false;
-  }
-};
-function signedInNow() {
-  try {
-    if (fs12.existsSync(path10.join(claudeDir(), ".credentials.json"))) return true;
-    const record = process.env.CLAUDE_CONFIG_DIR ? path10.join(claudeDir(), ".claude.json") : path10.join(os7.homedir(), ".claude.json");
-    const cfg = JSON.parse(fs12.readFileSync(record, "utf8"));
-    return !!cfg?.oauthAccount;
-  } catch {
-    return null;
-  }
-}
-function claudeInstall() {
-  if (cached) return cached.value;
-  const exe = knownCandidates().find(isFile) ?? null;
-  return { found: !!exe, path: exe, version: null, signedIn: signedInNow() };
-}
-var repairedAt = 0;
-async function repairNpmInstall(pkg = path10.join(process.env.APPDATA || path10.join(os7.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@anthropic-ai", "claude-code"), node = process.execPath) {
-  const exe = path10.join(pkg, "bin", "claude.exe");
-  const step = path10.join(pkg, "install.cjs");
-  if (isFile(exe) || !isFile(step) || Date.now() - repairedAt < 10 * 6e4) return isFile(exe);
-  repairedAt = Date.now();
-  log("app", "Claude Code's program is missing after an update; running its install step again");
-  await new Promise((done) => {
-    const child = spawn4(node, [step], { cwd: pkg, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
-    const timer = setTimeout(() => child.kill(), 12e4);
-    child.on("error", () => done());
-    child.on("exit", () => {
-      clearTimeout(timer);
-      done();
-    });
-  });
-  const ok = isFile(exe);
-  log("app", ok ? "Claude Code repaired" : "Claude Code could not be repaired: reinstall it");
-  return ok;
-}
-function refreshClaude(force = false) {
-  if (!force && cached && Date.now() - cached.at < KEEP_MS) return Promise.resolve(cached.value);
-  refreshing ??= (async () => {
-    let exe = knownCandidates().find(isFile) ?? null;
-    if (!exe) exe = (await pathCandidates()).find(isFile) ?? null;
-    if (!exe) void repairNpmInstall().then((ok) => ok && void refreshClaude(true));
-    const version = exe ? (await run2(exe, ["--version"], 15e3)).match(/(\d+\.\d+\.\d+)/)?.[1] ?? null : null;
-    const value = { found: !!exe, path: exe, version, signedIn: signedInNow() };
-    cached = { at: Date.now(), value };
-    return value;
-  })().finally(() => {
-    refreshing = null;
-  });
-  return refreshing;
-}
-function claudeDefaultModel() {
-  try {
-    const s = JSON.parse(fs12.readFileSync(path10.join(claudeDir(), "settings.json"), "utf8"));
-    return typeof s?.model === "string" && s.model.trim() ? s.model.trim() : null;
-  } catch {
-    return null;
-  }
-}
-var terminal = null;
-function hasWindowsTerminal() {
-  if (terminal !== null) return terminal;
-  const alias = path10.join(process.env.LOCALAPPDATA || "", "Microsoft", "WindowsApps", "wt.exe");
-  if (fs12.existsSync(alias)) return terminal = true;
-  void run2("where.exe", ["wt"], 1e4).then((out) => terminal = out.trim().length > 0);
-  return false;
-}
-
 // src/main/windows.ts
 import fs13 from "node:fs";
-import path11 from "node:path";
+import path12 from "node:path";
 import { BrowserWindow, nativeTheme, screen, shell } from "electron";
+var isMac = process.platform === "darwin";
+var TRAFFIC_LIGHTS = { x: 18, y: 19 };
 var LIGHT = { window: "#f3f3f6", content: "#ffffff", symbols: "#1d1d1f" };
 var DARK = { window: "#18181a", content: "#1e1e1e", symbols: "#f5f5f7" };
 var themeColors = () => nativeTheme.shouldUseDarkColors ? DARK : LIGHT;
 function boundsFile() {
-  return path11.join(appDataDir(), "window.json");
+  return path12.join(appDataDir(), "window.json");
 }
 function savedBounds() {
   try {
@@ -2054,7 +2104,7 @@ function createMainWindow(files2, { show }) {
     title: "Conversations",
     icon: files2.icon,
     backgroundColor: useMica ? "#00000000" : c.window,
-    backgroundMaterial: useMica ? "mica" : "none",
+    ...isMac ? { vibrancy: useMica ? "sidebar" : void 0, visualEffectState: "followWindow", trafficLightPosition: TRAFFIC_LIGHTS } : { backgroundMaterial: useMica ? "mica" : "none" },
     titleBarStyle: "hidden",
     titleBarOverlay: { color: c.content, symbolColor: c.symbols, height: 52 },
     autoHideMenuBar: true,
@@ -2086,6 +2136,7 @@ function createMainWindow(files2, { show }) {
   return win;
 }
 function setTitleBarColors(win, colors) {
+  if (isMac) return;
   const c = themeColors();
   try {
     win.setTitleBarOverlay({ color: colors?.background ?? c.content, symbolColor: colors?.symbols ?? c.symbols, height: 52 });
@@ -2103,6 +2154,7 @@ function createSettingsWindow(files2, parent, section) {
     title: "Settings",
     icon: files2.icon,
     backgroundColor: c.window,
+    ...isMac ? { trafficLightPosition: TRAFFIC_LIGHTS } : {},
     titleBarStyle: "hidden",
     titleBarOverlay: { color: c.content, symbolColor: c.symbols, height: 52 },
     autoHideMenuBar: true,
@@ -2134,6 +2186,8 @@ function createWelcomeWindow(files2) {
     title: "Welcome to Conversations",
     icon: files2.icon,
     backgroundColor: c.content,
+    // On a Mac its close button is the window's own, at the top left (the page draws one on Windows).
+    ...isMac ? { trafficLightPosition: { x: 16, y: 16 } } : {},
     titleBarStyle: "hidden",
     autoHideMenuBar: true,
     webPreferences: { preload: files2.preload, sandbox: true, contextIsolation: true, nodeIntegration: false, additionalArguments: ["--window-kind=welcome"] }
@@ -2157,7 +2211,7 @@ function createFlyout(files2) {
     alwaysOnTop: true,
     roundedCorners: true,
     backgroundColor: "#00000000",
-    backgroundMaterial: "acrylic",
+    ...isMac ? { transparent: true, vibrancy: "popover", visualEffectState: "active" } : { backgroundMaterial: "acrylic" },
     webPreferences: { preload: files2.preload, sandbox: true, contextIsolation: true, nodeIntegration: false, additionalArguments: ["--window-kind=flyout"] }
   });
   lockDown(win);
@@ -2167,24 +2221,55 @@ function createFlyout(files2) {
 }
 function placeFlyout(win, trayBounds, height) {
   const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
-  const area = display.workArea;
+  win.setBounds(flyoutBounds(display.workArea, display.bounds, trayBounds, height));
+}
+function flyoutBounds(area, screenBounds, trayBounds, height) {
   const width = 380;
   const h = Math.min(height, area.height - 24);
   const x = Math.min(area.x + area.width - width - 12, Math.max(area.x + 12, trayBounds.x + trayBounds.width / 2 - width / 2));
-  const y = area.y + area.height - h - 12;
-  win.setBounds({ x: Math.round(x), y: Math.round(y), width, height: Math.round(h) });
+  const atTop = trayBounds.y + trayBounds.height / 2 < screenBounds.y + screenBounds.height / 2;
+  const y = atTop ? area.y + 6 : area.y + area.height - h - 12;
+  return { x: Math.round(x), y: Math.round(y), width, height: Math.round(h) };
 }
 
 // src/main/cli.ts
-import fs16 from "node:fs";
-import { spawn as spawn6 } from "node:child_process";
-import path14 from "node:path";
-import { app, dialog } from "electron";
+import fs17 from "node:fs";
+import { execFile as execFile2, spawn as spawn6 } from "node:child_process";
+import path16 from "node:path";
+import { app as app2, dialog as dialog2 } from "electron";
 
 // src/main/launch.ts
 var PS_SINGLE_QUOTES = /['‘’‚‛]/g;
 var psQuote = (s) => `'${s.replace(PS_SINGLE_QUOTES, (q) => q + q)}'`;
 var encodePowerShell = (script) => Buffer.from(script, "utf16le").toString("base64");
+var shQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+function macTerminalCommand(folder, exe, args) {
+  return macTerminalLine(`cd ${shQuote(folder)} && exec ${[exe, ...args].map(shQuote).join(" ")}`);
+}
+function macTerminalLine(line) {
+  const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
+  return { file: "/usr/bin/osascript", args: [...script.flatMap((l) => ["-e", l]), line] };
+}
+function macFocusCommand(tty) {
+  if (!/^ttys\d+$/.test(tty)) return null;
+  const script = [
+    "on run argv",
+    'tell application "Terminal"',
+    "repeat with w in windows",
+    "repeat with t in tabs of w",
+    "if tty of t is (item 1 of argv) then",
+    "set selected of t to true",
+    "set index of w to 1",
+    "activate",
+    "return",
+    "end if",
+    "end repeat",
+    "end repeat",
+    "end tell",
+    "end run"
+  ];
+  return { file: "/usr/bin/osascript", args: [...script.flatMap((l) => ["-e", l]), `/dev/${tty}`] };
+}
 function terminalCommand(folder, exe, args, useWt) {
   if (useWt && ![folder, exe, ...args].some((a) => a.includes(";"))) return { file: "wt.exe", args: ["-d", folder, exe, ...args] };
   const script = `Start-Process -FilePath ${psQuote(exe)} -WorkingDirectory ${psQuote(folder)}${args.length ? ` -ArgumentList ${args.map(psQuote).join(",")}` : ""}`;
@@ -2209,13 +2294,126 @@ function focusScript(pid) {
   ].join("\n");
 }
 
+// src/main/mac.ts
+import fs14 from "node:fs";
+import os9 from "node:os";
+import path13 from "node:path";
+import { execFile } from "node:child_process";
+import { app, dialog, Menu } from "electron";
+var isMac2 = process.platform === "darwin";
+function trayIconFile(badge, platform = process.platform) {
+  if (platform === "darwin") return badge ? "trayBadgeTemplate.png" : "trayTemplate.png";
+  return badge ? "tray-badge.ico" : "tray.ico";
+}
+var AGENT = "com.samcan.conversations.login";
+var launchAgentFile = (home = os9.homedir()) => path13.join(home, "Library", "LaunchAgents", `${AGENT}.plist`);
+function appBundle(exe = process.execPath) {
+  const m = exe.match(/^(.*?\.app)\/Contents\/MacOS\/[^/]+$/);
+  return m ? m[1] : null;
+}
+var xml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function launchAgentPlist(bundle) {
+  const args = ["/usr/bin/open", "-g", "-a", bundle, "--args", "--hidden"];
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    "<dict>",
+    `  <key>Label</key><string>${AGENT}</string>`,
+    // (So macOS's Login Items list shows it as Conversations, not "open".)
+    "  <key>AssociatedBundleIdentifiers</key><string>com.samcan.conversations</string>",
+    "  <key>ProgramArguments</key>",
+    "  <array>",
+    ...args.map((a) => `    <string>${xml(a)}</string>`),
+    "  </array>",
+    "  <key>RunAtLoad</key><true/>",
+    "</dict>",
+    "</plist>",
+    ""
+  ].join("\n");
+}
+function setStartAtLogin(on) {
+  if (!isMac2) {
+    app.setLoginItemSettings({ openAtLogin: on, args: ["--hidden"] });
+    return;
+  }
+  const file4 = launchAgentFile();
+  const bundle = appBundle();
+  try {
+    if (on && bundle) {
+      fs14.mkdirSync(path13.dirname(file4), { recursive: true });
+      fs14.writeFileSync(file4, launchAgentPlist(bundle));
+    } else fs14.rmSync(file4, { force: true });
+  } catch (e) {
+    log("app", `could not ${on ? "set" : "clear"} start at login: ${e.message}`);
+  }
+}
+function findGh(envPath = process.env.PATH ?? "", dataDir = defaultDataDir()) {
+  const dirs = [...envPath.split(":").filter((d) => d.startsWith("/")), "/opt/homebrew/bin", "/usr/local/bin", path13.posix.join(dataDir, "gh")];
+  for (const d of dirs) {
+    const p = path13.posix.join(d, "gh");
+    try {
+      if (fs14.statSync(p).isFile()) return p;
+    } catch {
+    }
+  }
+  return null;
+}
+function macGitHubSignIn() {
+  const gh = findGh();
+  if (!gh) return { ok: false, err: "Signing in to GitHub on a Mac uses GitHub's own tool: install it (brew install gh, or cli.github.com), then try again." };
+  const q = shQuote(gh);
+  openTerminal(macTerminalLine(`${q} auth login --hostname github.com --git-protocol https --web && ${q} auth setup-git --hostname github.com`), "sign in to GitHub");
+  return { ok: false, err: "Finish signing in to GitHub in the Terminal window that opened, then choose Sync now." };
+}
+function openTerminal(c, what) {
+  execFile(c.file, c.args, { timeout: 18e4 }, (err, _out, stderr) => {
+    if (!err) return;
+    log("app", `could not open Terminal to ${what}: ${String(stderr || err.message).trim().split("\n").pop()}`);
+    const refused = /-1743|not allowed|not authori[sz]ed/i.test(String(stderr) + err.message);
+    void dialog.showMessageBox({
+      type: "warning",
+      message: refused ? "Conversations isn't allowed to open Terminal" : "Terminal didn't open",
+      detail: refused ? "Allow it in System Settings, Privacy & Security, Automation: turn on Terminal under Conversations. Then try again." : `Conversations couldn't open Terminal to ${what}. Try again in a moment.`
+    });
+  });
+}
+function macAppMenu(actions) {
+  const name = app.name;
+  const template = [
+    {
+      label: name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { label: "Settings\u2026", accelerator: "Cmd+,", click: actions.settings },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        // The app's own Quit: it tidies up (chats, sync, the open-windows record) before going.
+        { label: actions.quitLabel, accelerator: "Cmd+Q", click: actions.quit }
+      ]
+    },
+    { role: "editMenu" },
+    // Reload and the developer tools only while developing: a reload loses the window's state.
+    { label: "View", submenu: [...app.isPackaged ? [] : [{ role: "reload" }, { role: "toggleDevTools" }, { type: "separator" }], { role: "togglefullscreen" }] },
+    // (The Window menu's own role has no Close: Cmd+W needs it here.)
+    { role: "window", submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }, { type: "separator" }, { role: "front" }] }
+  ];
+  return Menu.buildFromTemplate(template);
+}
+
 // src/main/handover.ts
-var OPEN_ON_THIS_PC = "It's open in Claude Code on this PC \u2014 switch to that window.";
-var WRITTEN_JUST_NOW = "It was written to on this PC in the last two minutes. If Claude Code has it open, switch to that window; otherwise try again in a moment.";
-var NOT_HERE = "That conversation isn't on this PC yet, and it couldn't be downloaded.";
+var OPEN_ON_THIS_PC = `It's open in Claude Code on this ${PC}: switch to that window.`;
+var WRITTEN_JUST_NOW = `It was written to on this ${PC} in the last two minutes. If Claude Code has it open, switch to that window; otherwise try again in a moment.`;
+var NOT_HERE = `That conversation isn't on this ${PC} yet, and it couldn't be downloaded.`;
 var NO_FOLDER = "This chat couldn't be moved to that folder. It may not have finished uploading from the other PC: try again in a few minutes.";
-var NEEDS_FOLDER = "This chat needs a folder to work in on this PC.";
-var CONTINUING = "Continuing in Windows Terminal";
+var NEEDS_FOLDER = `This chat needs a folder to work in on this ${PC}.`;
+var CONTINUING = process.platform === "darwin" ? "Continuing in Terminal" : "Continuing in Windows Terminal";
 var EXIT_WAIT_MS = 5e3;
 var OWN_WRITE_SLACK_MS = 15e3;
 async function handOver(id, where, deps) {
@@ -2239,13 +2437,13 @@ async function handOver(id, where, deps) {
   if (pulled?.live) {
     const procs = await deps.processes(id);
     if (procs?.length) return refuse(procs);
-    const local3 = deps.localTranscript(id);
-    const mtime = local3 ? deps.mtimeOf(local3) : null;
+    const local = deps.localTranscript(id);
+    const mtime = local ? deps.mtimeOf(local) : null;
     const ours = deps.appLastWriteAt(id);
     if (!(ours > 0 && mtime !== null && mtime <= ours + OWN_WRITE_SLACK_MS)) return { ok: false, message: WRITTEN_JUST_NOW };
   }
   const transcript = (pulled?.ok ? pulled.dest : null) ?? deps.localTranscript(id);
-  if (!transcript) return { ok: false, message: pulled && !pulled.ok && !pulled.live && pulled.err ? `Couldn't bring it to this PC: ${pulled.err}` : NOT_HERE };
+  if (!transcript) return { ok: false, message: pulled && !pulled.ok && !pulled.live && pulled.err ? `Couldn't bring it to this ${PC}: ${pulled.err}` : NOT_HERE };
   let folder = deps.folderFor(transcript, [where.recordedCwd, where.projectFolder]);
   if (!folder && deps.chooseFolder && deps.pullInto) {
     const chosen = await deps.chooseFolder();
@@ -2259,15 +2457,15 @@ async function handOver(id, where, deps) {
 }
 
 // src/main/resume-folder.ts
-import fs14 from "node:fs";
-import path12 from "node:path";
+import fs15 from "node:fs";
+import path14 from "node:path";
 function safeFolderName(label) {
   const name = label.replace(/[^\p{L}\p{N} ._-]/gu, "").trim().replace(/[. ]+$/, "");
   if (!name || /^\.+$/.test(name) || /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(name)) return "Conversations project";
   return name;
 }
 function encodeCwd(cwd) {
-  return path12.resolve(cwd).replace(/[^A-Za-z0-9]/g, "-");
+  return path14.resolve(cwd).replace(/[^A-Za-z0-9]/g, "-");
 }
 function cwdMatchesFolder(cwd, folderName) {
   const enc = encodeCwd(cwd).toLowerCase();
@@ -2276,7 +2474,7 @@ function cwdMatchesFolder(cwd, folderName) {
 }
 var isDir = (p) => {
   try {
-    return fs14.statSync(p).isDirectory();
+    return fs15.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -2284,17 +2482,17 @@ var isDir = (p) => {
 function recordedCwds(transcript, bytes = 256 * 1024) {
   let text = "";
   try {
-    const fd = fs14.openSync(transcript, "r");
+    const fd = fs15.openSync(transcript, "r");
     try {
-      const size = fs14.fstatSync(fd).size;
+      const size = fs15.fstatSync(fd).size;
       const head = Buffer.alloc(Math.min(bytes, size));
-      text = head.toString("utf8", 0, fs14.readSync(fd, head, 0, head.length, 0));
+      text = head.toString("utf8", 0, fs15.readSync(fd, head, 0, head.length, 0));
       if (size > bytes) {
         const tail = Buffer.alloc(Math.min(bytes, size - head.length));
-        text += "\n" + tail.toString("utf8", 0, fs14.readSync(fd, tail, 0, tail.length, size - tail.length));
+        text += "\n" + tail.toString("utf8", 0, fs15.readSync(fd, tail, 0, tail.length, size - tail.length));
       }
     } finally {
-      fs14.closeSync(fd);
+      fs15.closeSync(fd);
     }
   } catch {
     return [];
@@ -2310,7 +2508,7 @@ function recordedCwds(transcript, bytes = 256 * 1024) {
   return out;
 }
 function folderForTranscript(transcript, candidates, exists2 = isDir) {
-  const name = path12.basename(path12.dirname(transcript));
+  const name = path14.basename(path14.dirname(transcript));
   const fits = (c) => !!c && cwdMatchesFolder(c, name) && exists2(c);
   for (const c of candidates) if (fits(c)) return c;
   const all = [...candidates, ...recordedCwds(transcript)];
@@ -2319,28 +2517,28 @@ function folderForTranscript(transcript, candidates, exists2 = isDir) {
   return null;
 }
 function ancestors(p) {
-  if (!p || !path12.isAbsolute(p)) return [];
+  if (!p || !path14.isAbsolute(p)) return [];
   const out = [];
-  for (let dir = path12.dirname(path12.resolve(p)); dir !== path12.dirname(dir); dir = path12.dirname(dir)) out.push(dir);
+  for (let dir = path14.dirname(path14.resolve(p)); dir !== path14.dirname(dir); dir = path14.dirname(dir)) out.push(dir);
   return out;
 }
 
 // src/main/chat/terminals.ts
-import fs15 from "node:fs";
-import os8 from "node:os";
-import path13 from "node:path";
+import fs16 from "node:fs";
+import os10 from "node:os";
+import path15 from "node:path";
 import { spawn as spawn5 } from "node:child_process";
 function thisPidDomain() {
-  return `${process.platform}:${os8.hostname().toLowerCase()}`;
+  return `${process.platform}:${os10.hostname().toLowerCase()}`;
 }
 function registryDir() {
-  return path13.join(claudeDir(), "sessions");
+  return path15.join(claudeDir(), "sessions");
 }
 var str = (v) => typeof v === "string" ? v : null;
 function readRegistry2(dir = registryDir()) {
   let names;
   try {
-    names = fs15.readdirSync(dir);
+    names = fs16.readdirSync(dir);
   } catch {
     return null;
   }
@@ -2348,7 +2546,7 @@ function readRegistry2(dir = registryDir()) {
   for (const n of names) {
     if (!/^\d+\.json$/.test(n)) continue;
     try {
-      const v = JSON.parse(fs15.readFileSync(path13.join(dir, n), "utf8"));
+      const v = JSON.parse(fs16.readFileSync(path15.join(dir, n), "utf8"));
       if (typeof v?.pid !== "number" || typeof v?.sessionId !== "string") continue;
       out.push({ pid: v.pid, sessionId: v.sessionId, cwd: str(v.cwd), kind: str(v.kind), entrypoint: str(v.entrypoint), pidDomain: str(v.pidDomain), status: str(v.status) });
     } catch {
@@ -2367,7 +2565,7 @@ var probeProcess = async (pid) => {
   } catch (e) {
     if (e.code !== "EPERM") return null;
   }
-  if (process.platform !== "win32") return "?";
+  if (process.platform !== "win32") return probePosix(pid);
   return new Promise((resolve) => {
     let out = "";
     let settled = false;
@@ -2393,6 +2591,36 @@ var probeProcess = async (pid) => {
     });
   });
 };
+function processNameFromPs(args) {
+  const line = args.trim();
+  if (!line) return null;
+  const first = line.split(/\s+/)[0];
+  if (/(^|\/)claude$/.test(first) || /\/claude-code\/|\/bin\/claude(\s|$)|\/claude\/versions\/[^/\s]+(\s|$)/.test(line)) return "claude";
+  return first.split("/").pop() || "?";
+}
+function probePosix(pid) {
+  return new Promise((resolve) => {
+    let out = "";
+    let settled = false;
+    const done = (v) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const child = spawn5("ps", ["-o", "args=", "-p", String(pid)], { stdio: ["ignore", "pipe", "ignore"] });
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+      }
+      done("?");
+    }, 5e3);
+    child.stdout.on("data", (d) => out += d);
+    child.on("error", () => done("?"));
+    child.on("close", () => done(processNameFromPs(out)));
+  });
+}
 var isClaude = (image) => image === "?" || !!image && /^claude(\.exe)?$/i.test(image);
 async function openTerminalSessions(opts = {}) {
   const entries = readRegistry2(opts.dir);
@@ -2431,21 +2659,21 @@ async function chooseFolder(win, projectLabel, fromOtherPc = true) {
   const ask = {
     type: "question",
     title: "Conversations",
-    message: `Where should Claude work on this PC?`,
-    detail: fromOtherPc ? `This chat ran in ${projectLabel} on another PC, and this PC doesn't know that folder. Pick your copy of the project, or start with a new empty folder. The whole conversation comes along, but files that are only on the other PC don't.` : `This PC doesn't know where ${projectLabel} is yet. Pick your copy of the project, or start with a new empty folder.`,
+    message: `Where should Claude work on this ${PC}?`,
+    detail: fromOtherPc ? `This chat ran in ${projectLabel} on another PC, and this ${PC} doesn't know that folder. Pick your copy of the project, or start with a new empty folder. The whole conversation comes along, but files that are only on the other PC don't.` : `This ${PC} doesn't know where ${projectLabel} is yet. Pick your copy of the project, or start with a new empty folder.`,
     buttons: ["Pick my copy", "New empty folder", "Cancel"],
     defaultId: 0,
     cancelId: 2,
     noLink: true
   };
-  const { response } = win ? await dialog.showMessageBox(win, ask) : await dialog.showMessageBox(ask);
+  const { response } = win ? await dialog2.showMessageBox(win, ask) : await dialog2.showMessageBox(ask);
   if (response === 2) return null;
   if (response === 1) {
-    const base = path14.join(app.getPath("documents"), safeFolderName(projectLabel));
+    const base = path16.join(app2.getPath("documents"), safeFolderName(projectLabel));
     let dir = base;
     try {
-      for (let i = 2; fs16.existsSync(dir) && (!fs16.statSync(dir).isDirectory() || fs16.readdirSync(dir).length); i++) dir = `${base} ${i}`;
-      fs16.mkdirSync(dir, { recursive: true });
+      for (let i = 2; fs17.existsSync(dir) && (!fs17.statSync(dir).isDirectory() || fs17.readdirSync(dir).length); i++) dir = `${base} ${i}`;
+      fs17.mkdirSync(dir, { recursive: true });
       return dir;
     } catch (e) {
       log("cli", `could not make ${dir}: ${e.message}`);
@@ -2453,20 +2681,24 @@ async function chooseFolder(win, projectLabel, fromOtherPc = true) {
     }
   }
   const opts = { title: `Your copy of ${projectLabel}`, properties: ["openDirectory"], buttonLabel: "Use this folder" };
-  const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+  const r = win ? await dialog2.showOpenDialog(win, opts) : await dialog2.showOpenDialog(opts);
   return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
 }
 function isGenericFolder(p) {
-  const same = (a, b) => path14.resolve(a).toLowerCase() === path14.resolve(b).toLowerCase();
-  return ["downloads", "desktop", "home"].some((n) => same(p, app.getPath(n)));
+  const same = (a, b) => path16.resolve(a).toLowerCase() === path16.resolve(b).toLowerCase();
+  return ["downloads", "desktop", "home"].some((n) => same(p, app2.getPath(n)));
 }
+var isMac3 = process.platform === "darwin";
+var TERMINAL = isMac3 ? "Terminal" : "Windows Terminal";
 function launchInTerminal(folder, exe, args) {
+  if (isMac3) return openTerminal(macTerminalCommand(folder, exe, args), "carry on in Claude Code");
   const c = terminalCommand(folder, exe, args, hasWindowsTerminal());
   const child = spawn6(c.file, c.args, { cwd: folder, detached: true, stdio: "ignore", windowsHide: c.file !== "wt.exe" });
   child.on("error", (e) => log("cli", `could not start ${c.file}: ${e.message}`));
   child.unref();
 }
 function focusProcessWindow(pid) {
+  if (isMac3) return focusOnMac(pid);
   if (process.platform !== "win32") return;
   let script;
   try {
@@ -2479,9 +2711,20 @@ function focusProcessWindow(pid) {
   child.on("error", () => clearTimeout(timer));
   child.on("close", () => clearTimeout(timer));
 }
+function focusOnMac(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  execFile2("ps", ["-o", "tty=", "-p", String(pid)], { timeout: 5e3 }, (err, out) => {
+    const c = err ? null : macFocusCommand(String(out).trim());
+    if (!c) return;
+    const child = spawn6(c.file, c.args, { stdio: "ignore" });
+    const timer = setTimeout(() => child.kill(), 15e3);
+    child.on("error", () => clearTimeout(timer));
+    child.on("close", () => clearTimeout(timer));
+  });
+}
 var isDir2 = (p) => {
   try {
-    return !!p && fs16.statSync(p).isDirectory();
+    return !!p && fs17.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -2497,14 +2740,14 @@ async function pullConversation(id, cwd, into = false) {
 }
 async function openInCli(args) {
   const claude = await refreshClaude();
-  if (!claude.found || !claude.path) return { ok: false, message: "Claude Code isn't installed on this PC" };
+  if (!claude.found || !claude.path) return { ok: false, message: `Claude Code isn't installed on this ${PC}` };
   const exe = process.env.CONVERSATIONS_CLAUDE_LAUNCHER || claude.path;
   let projectFolder = isDir2(args.folder) ? args.folder : null;
   const recordedCwd = isDir2(args.recordedCwd) ? args.recordedCwd : null;
   let picked = null;
   if (!projectFolder && !recordedCwd) {
-    const local3 = args.localTranscript(args.id);
-    projectFolder = local3 ? folderForTranscript(local3, []) : null;
+    const local = args.localTranscript(args.id);
+    projectFolder = local ? folderForTranscript(local, []) : null;
   }
   if (!projectFolder && !recordedCwd) {
     picked = projectFolder = await chooseFolder(args.win, args.projectLabel);
@@ -2526,7 +2769,7 @@ async function openInCli(args) {
         appLastWriteAt: args.appLastWriteAt,
         mtimeOf: (f) => {
           try {
-            return fs16.statSync(f).mtimeMs;
+            return fs17.statSync(f).mtimeMs;
           } catch {
             return null;
           }
@@ -2539,61 +2782,61 @@ async function openInCli(args) {
     if (!r.ok) log("cli", `Open in CLI for ${args.id.slice(0, 8)} refused: ${r.message}`);
     return { ok: r.ok, message: r.message };
   } catch (e) {
-    return { ok: false, message: `Couldn't start Windows Terminal: ${e.message}` };
+    return { ok: false, message: `Couldn't start ${TERMINAL}: ${e.message}` };
   }
 }
 async function newChatInCli(folder) {
   const claude = await refreshClaude();
-  if (!claude.found || !claude.path) return { ok: false, message: "Claude Code isn't installed on this PC" };
+  if (!claude.found || !claude.path) return { ok: false, message: `Claude Code isn't installed on this ${PC}` };
   launchInTerminal(folder, process.env.CONVERSATIONS_CLAUDE_LAUNCHER || claude.path, []);
-  return { ok: true, message: "Claude Code started in Windows Terminal" };
+  return { ok: true, message: `Claude Code started in ${TERMINAL}` };
 }
 
 // src/main/chat/manager.ts
-import path21 from "node:path";
+import path23 from "node:path";
 import { EventEmitter as EventEmitter5 } from "node:events";
-import fs22 from "node:fs";
+import fs23 from "node:fs";
 
 // src/main/chat/mcp.ts
-import os9 from "node:os";
+import os11 from "node:os";
 
 // src/main/chat/sdk.ts
 import crypto from "node:crypto";
-import fs17 from "node:fs";
-import path15 from "node:path";
+import fs18 from "node:fs";
+import path17 from "node:path";
 import { pathToFileURL } from "node:url";
-var PKG = path15.join("node_modules", "@anthropic-ai", "claude-agent-sdk");
+var PKG = path17.join("node_modules", "@anthropic-ai", "claude-agent-sdk");
 var mod = null;
 var loadedFrom = null;
-var hasSdk = (dir) => fs17.existsSync(path15.join(dir, "package.json")) && fs17.existsSync(path15.join(dir, "sdk.mjs"));
+var hasSdk = (dir) => fs18.existsSync(path17.join(dir, "package.json")) && fs18.existsSync(path17.join(dir, "sdk.mjs"));
 function sdkCandidates(installDir, resourcesDir = null) {
   const out = [];
   if (process.env.CONVERSATIONS_SDK_DIR) out.push(process.env.CONVERSATIONS_SDK_DIR);
-  if (installDir && !resourcesDir) out.push(path15.join(installDir, PKG));
+  if (installDir && !resourcesDir) out.push(path17.join(installDir, PKG));
   const appDir = appRepoDir();
   const root = `${appDir}-runtime`;
   try {
-    const lock = fs17.readFileSync(path15.join(appDir, "_app", "runtime", "package-lock.json"));
+    const lock = fs18.readFileSync(path17.join(appDir, "_app", "runtime", "package-lock.json"));
     const hash = crypto.createHash("sha256").update(lock).digest("hex").slice(0, 12);
-    if (fs17.existsSync(path15.join(root, hash, ".ready"))) out.push(path15.join(root, hash, PKG));
+    if (fs18.existsSync(path17.join(root, hash, ".ready"))) out.push(path17.join(root, hash, PKG));
   } catch {
   }
   try {
-    const dirs = fs17.readdirSync(root).map((n) => path15.join(root, n)).filter((d) => fs17.existsSync(path15.join(d, ".ready"))).sort((a, b) => fs17.statSync(b).mtimeMs - fs17.statSync(a).mtimeMs);
-    for (const d of dirs) out.push(path15.join(d, PKG));
+    const dirs = fs18.readdirSync(root).map((n) => path17.join(root, n)).filter((d) => fs18.existsSync(path17.join(d, ".ready"))).sort((a, b) => fs18.statSync(b).mtimeMs - fs18.statSync(a).mtimeMs);
+    for (const d of dirs) out.push(path17.join(d, PKG));
   } catch {
   }
-  if (resourcesDir) out.push(path15.join(resourcesDir, "sdk", PKG));
-  if (installDir) out.push(path15.join(installDir, PKG));
+  if (resourcesDir) out.push(path17.join(resourcesDir, "sdk", PKG));
+  if (installDir) out.push(path17.join(installDir, PKG));
   return [...new Set(out)];
 }
 async function loadSdk(installDir, resourcesDir = null) {
   if (mod) return { ok: true, from: loadedFrom };
-  let lastErr = "Claude's Agent SDK isn't installed on this PC";
+  let lastErr = `Claude's Agent SDK isn't installed on this ${PC}`;
   for (const dir of sdkCandidates(installDir, resourcesDir)) {
     if (!hasSdk(dir)) continue;
     try {
-      mod = await import(pathToFileURL(path15.join(dir, "sdk.mjs")).href);
+      mod = await import(pathToFileURL(path17.join(dir, "sdk.mjs")).href);
       loadedFrom = dir;
       return { ok: true, from: dir };
     } catch (e) {
@@ -2604,7 +2847,7 @@ async function loadSdk(installDir, resourcesDir = null) {
 }
 var sdkLoadedFrom = () => loadedFrom;
 var query = ((...args) => {
-  if (!mod) throw new Error("Claude's Agent SDK isn't installed on this PC yet. The app installs it from npm by itself while this PC is online: try again in a few minutes, or run Set up Conversations again");
+  if (!mod) throw new Error(`Claude's Agent SDK isn't installed on this ${PC} yet. The app installs it from npm by itself while this ${PC} is online: try again in a few minutes, or run ${process.platform === "darwin" ? "the set-up command" : "Set up Conversations"} again`);
   return mod.query(...args);
 });
 
@@ -2629,7 +2872,7 @@ async function* nothing() {
 async function probeMcp(claudePath, cwd, waitMs = 8e3) {
   const env = { ...process.env, CLAUDE_SYNC_DISABLE: "1" };
   delete env.ELECTRON_RUN_AS_NODE;
-  const q = query({ prompt: nothing(), options: { cwd: cwd || os9.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: ["user", "project", "local"], extraArgs: { chrome: null }, env } });
+  const q = query({ prompt: nothing(), options: { cwd: cwd || os11.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: ["user", "project", "local"], extraArgs: { chrome: null }, env } });
   const timer = setTimeout(() => q.close(), waitMs + 2e4);
   try {
     const t0 = Date.now();
@@ -2649,11 +2892,11 @@ async function probeMcp(claudePath, cwd, waitMs = 8e3) {
 }
 
 // src/main/chat/models.ts
-import fs18 from "node:fs";
-import os10 from "node:os";
-import path16 from "node:path";
+import fs19 from "node:fs";
+import os12 from "node:os";
+import path18 from "node:path";
 var MAX_AGE_MS = 12 * 60 * 60 * 1e3;
-var file2 = () => path16.join(appDataDir(), "models.json");
+var file2 = () => path18.join(appDataDir(), "models.json");
 function toChoices(list) {
   return list.filter((m) => m.value && m.displayName).map((m) => ({
     value: m.value,
@@ -2713,7 +2956,7 @@ var refreshing2 = null;
 function load() {
   if (cache) return cache;
   try {
-    const v = JSON.parse(fs18.readFileSync(file2(), "utf8"));
+    const v = JSON.parse(fs19.readFileSync(file2(), "utf8"));
     if (Array.isArray(v.models)) cache = { at: Number(v.at) || 0, models: v.models };
   } catch {
   }
@@ -2723,7 +2966,7 @@ function remember(models) {
   if (!models.length) return;
   cache = { at: Date.now(), models };
   try {
-    fs18.writeFileSync(file2(), JSON.stringify(cache));
+    fs19.writeFileSync(file2(), JSON.stringify(cache));
   } catch {
   }
 }
@@ -2740,7 +2983,7 @@ function refresh(claudePath) {
   refreshing2 ??= (async () => {
     const env = { ...process.env, CLAUDE_SYNC_DISABLE: "1" };
     delete env.ELECTRON_RUN_AS_NODE;
-    const q = query({ prompt: nothing2(), options: { cwd: os10.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: ["user"], env } });
+    const q = query({ prompt: nothing2(), options: { cwd: os12.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: ["user"], env } });
     const timer = setTimeout(() => q.close(), 3e4);
     try {
       remember(toChoices(await q.supportedModels()));
@@ -2756,14 +2999,14 @@ function refresh(claudePath) {
 }
 
 // src/main/chat/session.ts
-import fs20 from "node:fs";
-import path19 from "node:path";
+import fs21 from "node:fs";
+import path21 from "node:path";
 import { randomUUID } from "node:crypto";
 import { EventEmitter as EventEmitter4 } from "node:events";
 
 // src/main/chat/agents.ts
-import fs19 from "node:fs";
-import path17 from "node:path";
+import fs20 from "node:fs";
+import path19 from "node:path";
 
 // src/main/index/parse.ts
 function splitLines(buf, startOffset = 0) {
@@ -3145,7 +3388,7 @@ function mergeAgentLogs(parts) {
   const steps = parts.flatMap((p, i) => i < parts.length - 1 ? p.steps.map((s) => ({ ...s, pending: false })) : p.steps);
   return { brief: parts.find((p) => p.brief)?.brief ?? null, report: [...parts].reverse().find((p) => p.report)?.report ?? null, total: parts.reduce((n, p) => n + p.total, 0), steps: steps.slice(-MAX_STEPS) };
 }
-var agentLogFile = (transcript, agentId) => path17.join(path17.dirname(transcript), path17.basename(transcript, ".jsonl"), "subagents", `agent-${agentId}.jsonl`);
+var agentLogFile = (transcript, agentId) => path19.join(path19.dirname(transcript), path19.basename(transcript, ".jsonl"), "subagents", `agent-${agentId}.jsonl`);
 var logs = /* @__PURE__ */ new Map();
 function applyLines(st, buf) {
   const end = buf.lastIndexOf(10);
@@ -3167,7 +3410,7 @@ async function readOnce(file4) {
   let size;
   let mtimeMs;
   try {
-    ({ size, mtimeMs } = await fs19.promises.stat(file4));
+    ({ size, mtimeMs } = await fs20.promises.stat(file4));
   } catch {
     logs.delete(file4);
     return null;
@@ -3175,7 +3418,7 @@ async function readOnce(file4) {
   let c = logs.get(file4);
   if (c && c.size === size && c.mtimeMs === mtimeMs) return snapshot(c.state);
   try {
-    const h = await fs19.promises.open(file4, "r");
+    const h = await fs20.promises.open(file4, "r");
     try {
       if (!c || size < c.offset) {
         c = { size: 0, mtimeMs: 0, offset: 0, state: newLog() };
@@ -3206,7 +3449,7 @@ async function readOnce(file4) {
 }
 
 // src/main/chat/destructive.ts
-import path18 from "node:path";
+import path20 from "node:path";
 var SAFE = { destructive: false, deletesFiles: false, consequence: null };
 function serverName(tool) {
   const s = tool.split("__")[1] ?? tool;
@@ -3258,7 +3501,7 @@ function splitCommands(line) {
   endCommand();
   return out;
 }
-var commandName = (w) => path18.win32.basename(w).toLowerCase().replace(/\.(exe|cmd|bat|com|ps1)$/, "");
+var commandName = (w) => path20.win32.basename(w).toLowerCase().replace(/\.(exe|cmd|bat|com|ps1)$/, "");
 var PREFIXES = /* @__PURE__ */ new Set(["sudo", "time", "nohup", "exec", "command", "call", "start", "xargs", "env", "npx", "bunx", "pnpx", "!"]);
 var KEYWORDS = /* @__PURE__ */ new Set(["if", "then", "else", "elif", "do", "while", "until", "for", "foreach", "where-object", "foreach-object", "%", "?"]);
 var KNOWN = /* @__PURE__ */ new Set(["rm", "unlink", "shred", "rimraf", "del", "erase", "rd", "rmdir", "remove-item", "ri", "clear-content", "clc", "set-content", "out-file", "git", "find", "format", "format-volume", "dd", "robocopy", "reg", "powershell", "pwsh", "cmd", "bash", "sh", "zsh", "wsl", "iex", "invoke-expression"]);
@@ -3267,7 +3510,7 @@ var CLOUD_CLIS = { az: "Azure", aws: "AWS", gcloud: "Google Cloud", gsutil: "Goo
 var CLOUD_VERB = /^(delete|destroy|remove|rm|rb|purge|uninstall|wipe|drop|truncate)$|^(delete|remove|destroy)-|:(destroy|reset|delete|remove)$/;
 function shortTarget(t, cwd) {
   const clean = t.replace(/^["']|["']$/g, "").replace(/[\\/]+$/, "");
-  if (["", ".", "*", "./*", ".\\*", "*.*"].includes(clean)) return `everything in ${path18.win32.basename(cwd) || cwd}`;
+  if (["", ".", "*", "./*", ".\\*", "*.*"].includes(clean)) return `everything in ${path20.win32.basename(cwd) || cwd}`;
   const parts = clean.split(/[\\/]+/).filter(Boolean);
   const s = parts.length > 2 ? parts.slice(-2).join("/") : parts.join("/");
   return s.length > 56 ? `${s.slice(0, 26)}\u2026${s.slice(-26)}` : s;
@@ -3356,11 +3599,13 @@ function takeRedirects(words) {
 function existsHere(target, ctx2) {
   if (!ctx2.exists) return true;
   const t = target.replace(/^["']|["']$/g, "");
-  if (/^[$%~/]/.test(t) || /[*?]/.test(t)) return true;
-  const absolute = /^[a-z]:[\\/]/i.test(t) || t.startsWith("\\\\");
+  if (/^[$%~]/.test(t) || /[*?]/.test(t)) return true;
+  const posix = ctx2.cwd.startsWith("/");
+  if (!posix && t.startsWith("/")) return true;
+  const absolute = posix ? t.startsWith("/") : /^[a-z]:[\\/]/i.test(t) || t.startsWith("\\\\");
   if (!absolute && ctx2.movesAround) return true;
   try {
-    return ctx2.exists(absolute ? t : path18.win32.resolve(ctx2.cwd, t));
+    return ctx2.exists(absolute ? t : (posix ? path20.posix : path20.win32).resolve(ctx2.cwd, t));
   } catch {
     return true;
   }
@@ -3776,7 +4021,7 @@ var MOVES = /* @__PURE__ */ new Set(["cd", "chdir", "pushd", "popd", "set-locati
 function classifyCommand(command, cwd, opts = {}) {
   const fx = newEffects();
   const commands = splitCommands(command);
-  const ctx2 = { cwd, folder: path18.win32.basename(cwd) || cwd, movesAround: commands.some((c) => MOVES.has(commandName(c[0] ?? ""))), exists: opts.exists };
+  const ctx2 = { cwd, folder: path20.win32.basename(cwd) || cwd, movesAround: commands.some((c) => MOVES.has(commandName(c[0] ?? ""))), exists: opts.exists };
   for (const words of commands) analyse(words, ctx2, fx, 0);
   if (commands.some((c) => c.some((w) => SQL_CLIENTS.has(commandName(w))))) sqlEffects(command, fx);
   const destructive = fx.deletes.length > 0 || fx.deletesUnnamed || fx.sentences.length > 0;
@@ -4304,7 +4549,7 @@ var ChatSession = class extends EventEmitter4 {
         conversationId: this.id ?? "",
         toolName,
         title: questions.length === 1 ? "Claude has a question" : `Claude has ${questions.length} questions`,
-        context: [`in ${path19.basename(this.cwd)}`, this.opts.machine].join("  \xB7  "),
+        context: [`in ${path21.basename(this.cwd)}`, this.opts.machine].join("  \xB7  "),
         body: questions[0].question.trim().slice(0, 1e3),
         consequence: null,
         destructive: false,
@@ -4320,9 +4565,9 @@ var ChatSession = class extends EventEmitter4 {
       });
     }
     const command = typeof input.command === "string" ? input.command : null;
-    const verdict = classifyTool(toolName, input, this.cwd, { exists: (p) => fs20.existsSync(p) });
+    const verdict = classifyTool(toolName, input, this.cwd, { exists: (p) => fs21.existsSync(p) });
     const destructive = verdict.destructive || !!o.defaultToNo;
-    const folder = path19.basename(this.cwd);
+    const folder = path21.basename(this.cwd);
     const shell3 = SHELLS[toolName];
     const file4 = String(input.file_path ?? input.notebook_path ?? input.path ?? "");
     let title = o.title || `Allow ${o.displayName ?? toolName}?`;
@@ -4621,21 +4866,21 @@ var stripDiagnostics = (s) => s.replace(/\[[a-z_]+_diagnostic\][^\n]*/gi, "").tr
 function plainError(msg) {
   const m = stripDiagnostics(msg);
   if (!m) return "The conversation is saved up to here.";
-  if (/ENOENT|not found|spawn/i.test(m)) return "Claude Code could not be started on this PC. Check that it is installed, then try again.";
+  if (/ENOENT|not found|spawn/i.test(m)) return `Claude Code could not be started on this ${PC}. Check that it is installed, then try again.`;
   return `${m.slice(0, 280)}${m.length > 280 ? "\u2026" : ""} The conversation is saved up to here.`;
 }
 
 // src/main/chat/shell.ts
 import crypto2 from "node:crypto";
-import fs21 from "node:fs";
-import os11 from "node:os";
-import path20 from "node:path";
+import fs22 from "node:fs";
+import os13 from "node:os";
+import path22 from "node:path";
 import { spawn as spawn7 } from "node:child_process";
 var MAX_OUTPUT = 3e4;
 var TIME_LIMIT_MS = 10 * 6e4;
 var exists = (p) => {
   try {
-    return !!p && fs21.statSync(p).isFile();
+    return !!p && fs22.statSync(p).isFile();
   } catch {
     return false;
   }
@@ -4647,18 +4892,18 @@ function findShell(env = process.env, platform = process.platform) {
   }
   const candidates = [];
   if (env.CLAUDE_CODE_GIT_BASH_PATH) candidates.push(env.CLAUDE_CODE_GIT_BASH_PATH);
-  for (const dir of (env.PATH ?? env.Path ?? "").split(path20.delimiter)) {
+  for (const dir of (env.PATH ?? env.Path ?? "").split(path22.delimiter)) {
     if (!dir) continue;
-    if (exists(path20.join(dir, "git.exe"))) {
-      candidates.push(path20.join(dir, "..", "bin", "bash.exe"), path20.join(dir, "bash.exe"));
+    if (exists(path22.join(dir, "git.exe"))) {
+      candidates.push(path22.join(dir, "..", "bin", "bash.exe"), path22.join(dir, "bash.exe"));
     }
   }
-  for (const root of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && path20.join(env.LOCALAPPDATA, "Programs")]) {
-    if (root) candidates.push(path20.join(root, "Git", "bin", "bash.exe"));
+  for (const root of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && path22.join(env.LOCALAPPDATA, "Programs")]) {
+    if (root) candidates.push(path22.join(root, "Git", "bin", "bash.exe"));
   }
-  const bash = candidates.map((c) => path20.resolve(c)).find(exists);
+  const bash = candidates.map((c) => path22.resolve(c)).find(exists);
   if (bash) return { file: bash, args: (c) => ["-c", c], name: "bash" };
-  const ps = path20.join(env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const ps = path22.join(env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   if (exists(ps)) return { file: ps, args: (c) => ["-NoProfile", "-NonInteractive", "-Command", c], name: "powershell" };
   return null;
 }
@@ -4734,7 +4979,7 @@ async function killTree2(child, bashGroup) {
   }
   let msysPid = "";
   try {
-    msysPid = bashGroup ? fs21.readFileSync(bashGroup.pidFile, "utf8").trim() : "";
+    msysPid = bashGroup ? fs22.readFileSync(bashGroup.pidFile, "utf8").trim() : "";
   } catch {
   }
   if (bashGroup && /^\d+$/.test(msysPid)) {
@@ -4753,7 +4998,7 @@ function runShell(command, cwd, opts = {}) {
   env.CHERE_INVOKING = "1";
   let stopped = null;
   let child;
-  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path20.join(os11.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
+  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path22.join(os13.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
   let args = shell3.args(command);
   if (bashGroup) {
     env.CONVERSATIONS_SHELL_COMMAND = command;
@@ -4785,7 +5030,7 @@ function runShell(command, cwd, opts = {}) {
       if (settledFlag) return;
       settledFlag = true;
       clearTimeout(timer);
-      if (bashGroup) setTimeout(() => fs21.rm(bashGroup.pidFile, { force: true }, () => {
+      if (bashGroup) setTimeout(() => fs22.rm(bashGroup.pidFile, { force: true }, () => {
       }), 1e4).unref?.();
       const errText = err.text();
       resolve({ stdout: out.text(), stderr: extraErr ? `${errText}${errText && !errText.endsWith("\n") ? "\n" : ""}${extraErr}` : errText, code, stopped });
@@ -4801,13 +5046,13 @@ function runShell(command, cwd, opts = {}) {
   });
   return { done, stop: () => settledFlag ? void 0 : end("you") };
 }
-function sweepPidFiles(dir = os11.tmpdir(), olderThanMs = 6e4) {
+function sweepPidFiles(dir = os13.tmpdir(), olderThanMs = 6e4) {
   try {
-    for (const name of fs21.readdirSync(dir)) {
+    for (const name of fs22.readdirSync(dir)) {
       if (!/^conversations-shell-\d+-[0-9a-f-]{36}\.pid$/.test(name)) continue;
-      const f = path20.join(dir, name);
+      const f = path22.join(dir, name);
       try {
-        if (Date.now() - fs21.statSync(f).mtimeMs > olderThanMs) fs21.rmSync(f, { force: true });
+        if (Date.now() - fs22.statSync(f).mtimeMs > olderThanMs) fs22.rmSync(f, { force: true });
       } catch {
       }
     }
@@ -4816,7 +5061,7 @@ function sweepPidFiles(dir = os11.tmpdir(), olderThanMs = 6e4) {
 }
 
 // src/main/chat/manager.ts
-var OPEN_IN_TERMINAL = "This conversation is open in a terminal on this PC. Carry on there, or close it first.";
+var OPEN_IN_TERMINAL = `This conversation is open in a terminal on this ${PC}. Carry on there, or close it first.`;
 var STILL_STARTING = "Claude Code is still starting for this conversation. Send it again in a moment.";
 var STOPPED_BEFORE_START = "Stopped before Claude Code started.";
 var LIVE_MS2 = 2 * 60 * 1e3;
@@ -4922,7 +5167,7 @@ var ChatManager = class extends EventEmitter5 {
    */
   async shell(args) {
     const claudePath = this.deps.claudePath();
-    if (!claudePath) return { ok: false, err: "Chat needs Claude Code on this PC" };
+    if (!claudePath) return { ok: false, err: `Chat needs Claude Code on this ${PC}` };
     const id = args.id;
     const key = id ?? draftShellKey(args.draftKey ?? args.cwd);
     const refuse = () => {
@@ -4985,7 +5230,7 @@ var ChatManager = class extends EventEmitter5 {
    */
   async mcp(id, cwd, opts = {}, look) {
     const claudePath = this.deps.claudePath();
-    if (!claudePath) throw new Error("Claude Code isn't installed on this PC");
+    if (!claudePath) throw new Error(`Claude Code isn't installed on this ${PC}`);
     let note;
     if (look?.noStart) {
       const s = id ? this.sessions.get(id) : void 0;
@@ -5012,7 +5257,7 @@ var ChatManager = class extends EventEmitter5 {
     if (start) await start.done;
     else {
       const r = await this.resume(id, { id, text: "", cwd, idle: true, model: opts.model ?? null, effort: opts.effort ?? null, permissionMode: opts.permissionMode ?? "default" }, claudePath);
-      if (!r.ok) return { err: r.err === OPEN_IN_TERMINAL ? "This chat is open in a terminal on this PC: use /mcp there, or close it first." : r.err };
+      if (!r.ok) return { err: r.err === OPEN_IN_TERMINAL ? `This chat is open in a terminal on this ${PC}: use /mcp there, or close it first.` : r.err };
     }
     const s = this.sessions.get(id);
     return s?.alive ? { s, fresh: !start } : { err: "Claude Code didn't start for this chat." };
@@ -5036,7 +5281,7 @@ var ChatManager = class extends EventEmitter5 {
     let s = this.sessions.get(id);
     if (!s?.alive) {
       const claudePath = this.deps.claudePath();
-      if (!claudePath) return { ok: false, err: "Chat needs Claude Code on this PC" };
+      if (!claudePath) return { ok: false, err: `Chat needs Claude Code on this ${PC}` };
       const live2 = await this.ensureLive(id, s?.cwd ?? cwd, opts, claudePath);
       if (!live2.s) return { ok: false, err: live2.err ?? "Claude Code didn't start for this chat." };
       s = live2.s;
@@ -5085,7 +5330,7 @@ var ChatManager = class extends EventEmitter5 {
     const p = this.deps.localTranscript(id);
     if (!p) return false;
     try {
-      const mtime = fs22.statSync(p).mtimeMs;
+      const mtime = fs23.statSync(p).mtimeMs;
       const ours = this.sessions.get(id)?.lastWriteAt ?? 0;
       return Date.now() - mtime < LIVE_MS2 && mtime > ours + 3e3;
     } catch {
@@ -5094,7 +5339,7 @@ var ChatManager = class extends EventEmitter5 {
   }
   async send(args) {
     const claudePath = this.deps.claudePath();
-    if (!claudePath) return { ok: false, err: "Chat needs Claude Code on this PC" };
+    if (!claudePath) return { ok: false, err: `Chat needs Claude Code on this ${PC}` };
     if (!args.id) return this.startNew(args, claudePath);
     const id = args.id;
     if (this.shells.has(id)) return { ok: false, err: SHELL_RUNNING };
@@ -5298,7 +5543,7 @@ var ChatManager = class extends EventEmitter5 {
     const s = this.sessions.get(id) ?? this.closed.get(id);
     const parts = [];
     for (const x of [...s?.pastIds ?? [], id]) {
-      for (const t of [this.deps.localTranscript(x), s ? path21.join(projectsDir(), encodeCwd(s.cwd), `${x}.jsonl`) : null]) {
+      for (const t of [this.deps.localTranscript(x), s ? path23.join(projectsDir(), encodeCwd(s.cwd), `${x}.jsonl`) : null]) {
         const d2 = t ? await readAgentLog(agentLogFile(t, agentId)) : null;
         if (d2) {
           parts.push(d2);
@@ -5366,10 +5611,10 @@ var ChatManager = class extends EventEmitter5 {
 };
 
 // src/main/chat/usage.ts
-import fs23 from "node:fs";
-import os12 from "node:os";
-import path22 from "node:path";
-var file3 = () => path22.join(appDataDir(), "usage.json");
+import fs24 from "node:fs";
+import os14 from "node:os";
+import path24 from "node:path";
+var file3 = () => path24.join(appDataDir(), "usage.json");
 var clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
 function meter(key, label, w) {
   if (!w || typeof w.utilization !== "number" || !Number.isFinite(w.utilization)) return null;
@@ -5399,7 +5644,7 @@ var lastAskAt = 0;
 function lastUsage() {
   if (last === void 0) {
     try {
-      const saved = JSON.parse(fs23.readFileSync(file3(), "utf8"));
+      const saved = JSON.parse(fs24.readFileSync(file3(), "utf8"));
       last = saved && Array.isArray(saved.meters) && typeof saved.at === "number" ? saved : null;
     } catch {
       last = null;
@@ -5418,7 +5663,7 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
   inflight = (async () => {
     const env = { ...process.env, CLAUDE_SYNC_DISABLE: "1" };
     delete env.ELECTRON_RUN_AS_NODE;
-    const q = query({ prompt: nothing3(), options: { cwd: os12.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: [], env } });
+    const q = query({ prompt: nothing3(), options: { cwd: os14.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: [], env } });
     const timer = setTimeout(() => q.close(), 3e4);
     try {
       const qq = q;
@@ -5438,8 +5683,8 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
       if (words(next) !== words(lastUsage())) log("chat", `usage: ${words(next)}`);
       last = next;
       try {
-        if (next) fs23.writeFileSync(file3(), JSON.stringify(next));
-        else fs23.rmSync(file3(), { force: true });
+        if (next) fs24.writeFileSync(file3(), JSON.stringify(next));
+        else fs24.rmSync(file3(), { force: true });
       } catch {
       }
       return next;
@@ -5457,8 +5702,8 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
 }
 
 // src/main/composer-state.ts
-import fs24 from "node:fs";
-import path23 from "node:path";
+import fs25 from "node:fs";
+import path25 from "node:path";
 var MAX_KEYS = 400;
 var MAX_DRAFT = 1e5;
 var RESERVED = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
@@ -5482,7 +5727,7 @@ function put(map, key, value) {
   return next;
 }
 var ComposerStore = class {
-  constructor(file4 = path23.join(appDataDir(), "composer.json")) {
+  constructor(file4 = path25.join(appDataDir(), "composer.json")) {
     this.file = file4;
   }
   file;
@@ -5493,7 +5738,7 @@ var ComposerStore = class {
     if (!this.loaded) {
       this.loaded = true;
       try {
-        const raw = JSON.parse(fs24.readFileSync(this.file, "utf8"));
+        const raw = JSON.parse(fs25.readFileSync(this.file, "utf8"));
         let drafts = {};
         let prefs = {};
         for (const [k, v] of Object.entries(raw.drafts ?? {})) if (isComposerKey(k) && typeof v === "string" && v) drafts = put(drafts, k, v.slice(0, MAX_DRAFT));
@@ -5541,13 +5786,13 @@ var ComposerStore = class {
     if (!this.loaded) return;
     const tmp = `${this.file}.${process.pid}.tmp`;
     try {
-      fs24.mkdirSync(path23.dirname(this.file), { recursive: true });
-      fs24.writeFileSync(tmp, JSON.stringify(this.state));
-      fs24.renameSync(tmp, this.file);
+      fs25.mkdirSync(path25.dirname(this.file), { recursive: true });
+      fs25.writeFileSync(tmp, JSON.stringify(this.state));
+      fs25.renameSync(tmp, this.file);
     } catch (e) {
       log("app", `could not save the composer's drafts: ${e.message}`);
       try {
-        fs24.rmSync(tmp, { force: true });
+        fs25.rmSync(tmp, { force: true });
       } catch {
       }
     }
@@ -5555,13 +5800,13 @@ var ComposerStore = class {
 };
 
 // src/main/chat/notify.ts
-import path24 from "node:path";
-import { app as app2, Notification } from "electron";
+import path26 from "node:path";
+import { app as app3, Notification } from "electron";
 var PROTOCOL = "conversations";
 var xmlEscape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function registerProtocol() {
-  if (app2.isPackaged) app2.setAsDefaultProtocolClient(PROTOCOL);
-  else if (process.env.CONVERSATIONS_REGISTER_PROTOCOL === "1") app2.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path24.resolve(process.argv[1] ?? ".")]);
+  if (app3.isPackaged) app3.setAsDefaultProtocolClient(PROTOCOL);
+  else if (process.env.CONVERSATIONS_REGISTER_PROTOCOL === "1") app3.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path26.resolve(process.argv[1] ?? ".")]);
 }
 function parseProtocolArgs(argv) {
   const url = argv.find((a) => a.startsWith(`${PROTOCOL}://`));
@@ -5570,7 +5815,7 @@ function parseProtocolArgs(argv) {
   return m ? { action: m[1], requestId: decodeURIComponent(m[2]) } : null;
 }
 var shown = /* @__PURE__ */ new Map();
-function notifyApproval(p, conversationTitle, onClick, workspace = "main") {
+function notifyApproval(p, conversationTitle, onClick, workspace = "main", onDeny, onFailed) {
   if (shown.has(p.requestId) || !Notification.isSupported()) return;
   const id = `${encodeURIComponent(p.requestId)}?ws=${encodeURIComponent(workspace)}`;
   const what = p.body ? ` (${p.body.split("\n")[0].slice(0, 80)})` : "";
@@ -5587,11 +5832,16 @@ function notifyApproval(p, conversationTitle, onClick, workspace = "main") {
     <action content="${asking ? "Answer" : "Review"}" activationType="protocol" arguments="${PROTOCOL}://review/${id}"/>
     ${asking ? "" : `<action content="Deny" activationType="protocol" arguments="${PROTOCOL}://deny/${id}"/>`}
   </actions>
-</toast>` : void 0
+</toast>` : void 0,
+    // A Mac's buttons are the notification's own (it shows them as an alert: see
+    // NSUserNotificationAlertStyle in package.json); a click on the rest opens the review.
+    ...process.platform === "darwin" && !asking && onDeny ? { actions: [{ type: "button", text: "Deny" }], closeButtonText: "Later" } : {}
   });
   n.on("click", onClick);
+  n.on("action", () => onDeny?.());
   n.on("failed", () => {
     if (shown.get(p.requestId) === n) shown.delete(p.requestId);
+    onFailed?.();
   });
   n.show();
   shown.set(p.requestId, n);
@@ -5660,8 +5910,8 @@ var StartupQueue = class {
 };
 
 // src/shell/stages.ts
-import fs25 from "node:fs";
-import path25 from "node:path";
+import fs26 from "node:fs";
+import path27 from "node:path";
 var RUNNING_MARK = "running.json";
 var processAlive2 = (pid) => {
   try {
@@ -5673,24 +5923,24 @@ var processAlive2 = (pid) => {
 };
 var ownMark = (pid) => `running-${pid}.json`;
 function writeRunningMark(root, stage, pid = process.pid) {
-  fs25.mkdirSync(root, { recursive: true });
+  fs26.mkdirSync(root, { recursive: true });
   const body = JSON.stringify({ pid, stage, at: (/* @__PURE__ */ new Date()).toISOString() });
   for (const name of [ownMark(pid), RUNNING_MARK]) {
-    const tmp = path25.join(root, `${name}.${pid}.tmp`);
-    fs25.writeFileSync(tmp, body);
-    fs25.renameSync(tmp, path25.join(root, name));
+    const tmp = path27.join(root, `${name}.${pid}.tmp`);
+    fs26.writeFileSync(tmp, body);
+    fs26.renameSync(tmp, path27.join(root, name));
   }
 }
 var markerNames = (root) => {
   try {
-    return fs25.readdirSync(root).filter((f) => f === RUNNING_MARK || /^running-\d+\.json$/.test(f));
+    return fs26.readdirSync(root).filter((f) => f === RUNNING_MARK || /^running-\d+\.json$/.test(f));
   } catch {
     return [];
   }
 };
 var readMarker = (root, f) => {
   try {
-    const m = JSON.parse(fs25.readFileSync(path25.join(root, f), "utf8"));
+    const m = JSON.parse(fs26.readFileSync(path27.join(root, f), "utf8"));
     return typeof m?.pid === "number" && typeof m?.stage === "string" ? m : null;
   } catch {
     return null;
@@ -5703,9 +5953,9 @@ function readRunningMarks(root, alive = processAlive2) {
 function stagesToRemove(root, inUse, alive = processAlive2, keepAlso = []) {
   let names;
   try {
-    names = fs25.readdirSync(root).filter((d) => {
+    names = fs26.readdirSync(root).filter((d) => {
       try {
-        return fs25.statSync(path25.join(root, d)).isDirectory();
+        return fs26.statSync(path27.join(root, d)).isDirectory();
       } catch {
         return false;
       }
@@ -5713,21 +5963,21 @@ function stagesToRemove(root, inUse, alive = processAlive2, keepAlso = []) {
   } catch {
     return [];
   }
-  const keep = /* @__PURE__ */ new Set([path25.basename(inUse)]);
-  for (const mark of readRunningMarks(root, alive)) keep.add(path25.basename(mark.stage));
-  for (const k of keepAlso) keep.add(path25.basename(k));
-  const older = names.filter((d) => !keep.has(d) && !d.endsWith(".tmp")).map((d) => ({ d, t: fs25.statSync(path25.join(root, d)).mtimeMs })).sort((a, b) => b.t - a.t);
-  return older.slice(1).map((o) => path25.join(root, o.d));
+  const keep = /* @__PURE__ */ new Set([path27.basename(inUse)]);
+  for (const mark of readRunningMarks(root, alive)) keep.add(path27.basename(mark.stage));
+  for (const k of keepAlso) keep.add(path27.basename(k));
+  const older = names.filter((d) => !keep.has(d) && !d.endsWith(".tmp")).map((d) => ({ d, t: fs26.statSync(path27.join(root, d)).mtimeMs })).sort((a, b) => b.t - a.t);
+  return older.slice(1).map((o) => path27.join(root, o.d));
 }
 function cleanStages(root, inUse, alive = processAlive2, keepAlso = []) {
   const gone = [];
   for (const f of markerNames(root)) {
     const m = readMarker(root, f);
-    if (f !== RUNNING_MARK && (!m || !alive(m.pid))) fs25.rmSync(path25.join(root, f), { force: true });
+    if (f !== RUNNING_MARK && (!m || !alive(m.pid))) fs26.rmSync(path27.join(root, f), { force: true });
   }
   for (const p of stagesToRemove(root, inUse, alive, keepAlso)) {
     try {
-      fs25.rmSync(p, { recursive: true, force: true });
+      fs26.rmSync(p, { recursive: true, force: true });
       gone.push(p);
     } catch {
     }
@@ -5910,31 +6160,113 @@ function lastLine(out) {
   return (lines.pop() ?? "").slice(0, 200);
 }
 
+// src/shared/login-path.ts
+import { spawn as spawn9 } from "node:child_process";
+import fs27 from "node:fs";
+import os15 from "node:os";
+import path28 from "node:path";
+var MARK = "__CONVERSATIONS_PATH__";
+function usualMacFolders(home = os15.homedir()) {
+  return ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", path28.posix.join(home, ".local", "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+}
+function parseShellPath(out) {
+  const start = out.indexOf(MARK);
+  const end = out.indexOf(MARK, start + MARK.length);
+  if (start < 0 || end < 0) return null;
+  const value = out.slice(start + MARK.length, end).trim();
+  return value || null;
+}
+function mergePath(shellPath, current, usual) {
+  const parts = [...(shellPath ?? "").split(":"), ...(current ?? "").split(":"), ...usual];
+  return [...new Set(parts.map((p) => p.trim()).filter(Boolean))].join(":");
+}
+function readLoginShellPath(shell3 = process.env.SHELL && fs27.existsSync(process.env.SHELL) ? process.env.SHELL : "/bin/zsh", timeoutMs = 1e4) {
+  return new Promise((resolve) => {
+    let out = "";
+    let done = false;
+    let child;
+    try {
+      child = spawn9(shell3, ["-ilc", `printf '%s%s%s' '${MARK}' "$PATH" '${MARK}'`], {
+        stdio: ["ignore", "pipe", "ignore"],
+        detached: true,
+        env: { ...process.env, DISABLE_AUTO_UPDATE: "true", ZSH_DISABLE_COMPFIX: "true" }
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+        }
+      }
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(parseShellPath(out)), timeoutMs);
+    child.stdout?.on("data", (d) => {
+      out += d;
+      const value = parseShellPath(out);
+      if (value) finish(value);
+    });
+    child.on("error", () => finish(null));
+    child.on("close", () => finish(parseShellPath(out)));
+  });
+}
+function useLoginShellPath(cacheFile) {
+  if (process.platform !== "darwin" || process.env.CONVERSATIONS_LOGIN_PATH) return Promise.resolve();
+  process.env.CONVERSATIONS_LOGIN_PATH = "1";
+  const given = process.env.PATH;
+  let remembered = null;
+  try {
+    if (cacheFile) remembered = JSON.parse(fs27.readFileSync(cacheFile, "utf8"))?.path ?? null;
+  } catch {
+  }
+  process.env.PATH = mergePath(remembered, given, usualMacFolders());
+  return readLoginShellPath().then((fresh) => {
+    if (!fresh) return;
+    process.env.PATH = mergePath(fresh, given, usualMacFolders());
+    if (!cacheFile) return;
+    try {
+      fs27.mkdirSync(path28.dirname(cacheFile), { recursive: true });
+      fs27.writeFileSync(cacheFile, JSON.stringify({ path: fresh, at: (/* @__PURE__ */ new Date()).toISOString() }));
+    } catch {
+    }
+  });
+}
+
 // src/main/main.ts
+void useLoginShellPath(path29.join(appDataDir(), "login-path.json"));
 process.on("uncaughtException", (e) => log("app", `uncaught exception: ${e?.stack || e}`));
 process.on("unhandledRejection", (e) => log("app", `unhandled rejection: ${e?.stack || e}`));
-var HERE = path26.dirname(fileURLToPath(import.meta.url));
-var DIST = path26.resolve(HERE, "..");
+var HERE = path29.dirname(fileURLToPath(import.meta.url));
+var DIST = path29.resolve(HERE, "..");
 var files = {
-  preload: path26.join(DIST, "preload", "preload.cjs"),
-  page: process.env.CONVERSATIONS_DEV_URL || path26.join(DIST, "renderer", "index.html")
+  preload: path29.join(DIST, "preload", "preload.cjs"),
+  page: process.env.CONVERSATIONS_DEV_URL || path29.join(DIST, "renderer", "index.html")
 };
-var RESOURCES = app3.isPackaged ? process.resourcesPath : path26.resolve(DIST, "..", "resources");
-files.icon = path26.join(RESOURCES, "icon.ico");
+var RESOURCES = app4.isPackaged ? process.resourcesPath : path29.resolve(DIST, "..", "resources");
+files.icon = path29.join(RESOURCES, "icon.ico");
 var APP_VERSION = (() => {
   try {
-    return JSON.parse(fs26.readFileSync(path26.join(DIST, "app.json"), "utf8")).version || app3.getVersion();
+    return JSON.parse(fs28.readFileSync(path29.join(DIST, "app.json"), "utf8")).version || app4.getVersion();
   } catch {
-    return app3.getVersion();
+    return app4.getVersion();
   }
 })();
-if (process.env.CONVERSATIONS_DATA_DIR) app3.setPath("userData", path26.join(process.env.CONVERSATIONS_DATA_DIR, "electron"));
-if (!app3.requestSingleInstanceLock()) {
-  app3.quit();
+if (process.env.CONVERSATIONS_DATA_DIR || isMac2) app4.setPath("userData", path29.join(appDataDir(), "electron"));
+if (!app4.requestSingleInstanceLock()) {
+  app4.quit();
   process.exit(0);
 }
 if (process.argv.includes("--restart-for-update")) {
-  app3.quit();
+  app4.quit();
   process.exit(0);
 }
 var markingOpen = true;
@@ -5944,7 +6276,7 @@ function closeMark() {
   markingOpen = false;
   unmarkOpen(currentWorkspace().id);
 }
-app3.setAppUserModelId("com.samcan.conversations");
+if (process.platform === "win32") app4.setAppUserModelId("com.samcan.conversations");
 var mainWin = null;
 var settingsWin = null;
 var flyout = null;
@@ -5961,7 +6293,7 @@ function recordedCwdOnThisPc(id) {
   if (!index.ready) return null;
   const cwd = index.db.prepare("SELECT cwd FROM conversations WHERE id = ?").get(id)?.cwd ?? null;
   try {
-    return cwd && fs26.statSync(cwd).isDirectory() ? cwd : null;
+    return cwd && fs28.statSync(cwd).isDirectory() ? cwd : null;
   } catch {
     return null;
   }
@@ -5996,13 +6328,13 @@ var chat = new ChatManager({
   syncBeforeResume: prepareResume,
   terminalHas: (id) => isOpenInTerminal(id)
 });
-var ownedFile = () => path26.join(appDataDir(), "app-owned.json");
+var ownedFile = () => path29.join(appDataDir(), "app-owned.json");
 var ownedMarked = null;
 var ownedMarking = /* @__PURE__ */ new Set();
 async function markAppOwned(id) {
   if (!ownedMarked) {
     try {
-      const v = JSON.parse(fs26.readFileSync(ownedFile(), "utf8"));
+      const v = JSON.parse(fs28.readFileSync(ownedFile(), "utf8"));
       ownedMarked = new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
     } catch {
       ownedMarked = /* @__PURE__ */ new Set();
@@ -6016,8 +6348,8 @@ async function markAppOwned(id) {
     if (r.ok && !r.json?.nothing) {
       ownedMarked.add(id);
       const tmp = `${ownedFile()}.${process.pid}.tmp`;
-      fs26.writeFileSync(tmp, JSON.stringify([...ownedMarked]));
-      fs26.renameSync(tmp, ownedFile());
+      fs28.writeFileSync(tmp, JSON.stringify([...ownedMarked]));
+      fs28.renameSync(tmp, ownedFile());
     } else log("chat", `couldn't mark ${id.slice(0, 8)} as an app conversation: ${r.json?.nothing ? "the sync engine doesn't know the field yet" : r.stderr.split("\n")[0]}`);
   } catch (e) {
     log("chat", `marking ${id.slice(0, 8)} failed: ${e.message}`);
@@ -6052,7 +6384,7 @@ function inferredFolders() {
     for (const r of rows) {
       if (map[r.p]) continue;
       try {
-        if (fs26.statSync(r.cwd).isDirectory()) map[r.p] = r.cwd;
+        if (fs28.statSync(r.cwd).isDirectory()) map[r.p] = r.cwd;
       } catch {
       }
     }
@@ -6126,7 +6458,10 @@ function makeMain(show) {
   w.on("close", (e) => {
     if (!quitting) {
       e.preventDefault();
-      w.hide();
+      if (isMac2 && w.isFullScreen()) {
+        w.once("leave-full-screen", () => w.hide());
+        w.setFullScreen(false);
+      } else w.hide();
     }
   });
   const state = () => broadcast("window-state", { maximized: w.isMaximized(), focused: w.isFocused() });
@@ -6141,8 +6476,8 @@ function makeMain(show) {
   return w;
 }
 function appIcon(name) {
-  const p = path26.join(RESOURCES, name);
-  return fs26.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
+  const p = path29.join(RESOURCES, name);
+  return fs28.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
 }
 function toggleFlyout() {
   if (!tray) return;
@@ -6180,13 +6515,16 @@ function refreshTrayMenu() {
   trayPaused = paused;
   trayUpdate = updateReady;
   trayName = name;
-  tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(paused)));
+  trayMenu = Menu2.buildFromTemplate(trayMenuTemplate(paused));
+  if (!isMac2) tray.setContextMenu(trayMenu);
 }
+var trayMenu = null;
 function buildTray() {
-  tray = new Tray(appIcon("tray.ico"));
+  tray = new Tray(appIcon(trayIconFile(false)));
   tray.setToolTip(appLabel());
   tray.on("click", toggleFlyout);
   tray.on("double-click", showMain);
+  if (isMac2) tray.on("right-click", () => trayMenu && tray?.popUpContextMenu(trayMenu));
   refreshTrayMenu();
 }
 function openSettings(section) {
@@ -6211,7 +6549,7 @@ function refreshAppRepo() {
   if (engineOverridden() && !process.env.CONVERSATIONS_APP_HOME) return;
   if (Date.now() - appRefreshAt < 10 * 6e4) return;
   appRefreshAt = Date.now();
-  const child = spawn9(process.execPath, [engineScriptPath(), "app", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
+  const child = spawn10(process.execPath, [engineScriptPath(), "app", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
   child.on("error", (e) => log("app", `could not update the app's repository: ${e.message}`));
   child.on("exit", () => void retrySdk());
 }
@@ -6219,15 +6557,15 @@ var sdkTriedAt = 0;
 async function retrySdk() {
   if (sdkLoadedFrom() || Date.now() - sdkTriedAt < 3e4) return;
   sdkTriedAt = Date.now();
-  const r = await loadSdk(app3.getAppPath(), app3.isPackaged ? process.resourcesPath : null);
+  const r = await loadSdk(app4.getAppPath(), app4.isPackaged ? process.resourcesPath : null);
   if (r.ok) log("app", `Agent SDK from ${r.from}`);
 }
 function checkForUpdate() {
   refreshAppRepo();
   void retrySdk();
-  const source = fs26.existsSync(path26.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
+  const source = fs28.existsSync(path29.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
   return new Promise(
-    (done) => execFile("git", ["-C", source, "show", "HEAD:_app/dist/app.json"], { windowsHide: true, timeout: 2e4 }, (err, stdout) => {
+    (done) => execFile3("git", ["-C", source, "show", "HEAD:_app/dist/app.json"], { windowsHide: true, timeout: 2e4 }, (err, stdout) => {
       done();
       if (err) return;
       try {
@@ -6247,7 +6585,7 @@ function openWorkspaceWindow(id, extra = []) {
   const env = baseEnv();
   for (const k of ["CONVERSATIONS_RELAUNCH", "CONVERSATIONS_BASE_ENV", "CONVERSATIONS_CLAUDE_LAUNCHER", "ELECTRON_RUN_AS_NODE"]) delete env[k];
   try {
-    const child = spawn9(process.execPath, startArgs(process.argv, id, extra), { env, detached: true, stdio: "ignore" });
+    const child = spawn10(process.execPath, startArgs(process.argv, id, extra), { env, detached: true, stdio: "ignore" });
     child.on("error", (e) => log("app", `could not open workspace ${id} in its own window: ${e.message}`));
     child.unref();
     return true;
@@ -6261,7 +6599,7 @@ function restart({ into, others }) {
   markRelaunch();
   const inSight = mainWin && !mainWin.isDestroyed() && mainWin.isVisible() || needsWelcome();
   const extra = [...inSight ? [] : ["--hidden"], ...others ? ["--restart-others"] : []];
-  if (!process.env.CONVERSATIONS_TEST_NO_RELAUNCH) app3.relaunch({ args: startArgs(process.argv, into ?? self, extra) });
+  if (!process.env.CONVERSATIONS_TEST_NO_RELAUNCH) app4.relaunch({ args: startArgs(process.argv, into ?? self, extra) });
   quit();
 }
 function restartOthers() {
@@ -6279,12 +6617,12 @@ function quit() {
   cancelAllLogins();
   scheduler?.stop();
   index.stop();
-  app3.quit();
+  app4.quit();
 }
 var loginChoiceFile = () => sharedDataFile("start-at-login.json");
 function sharedStartAtLogin() {
   try {
-    const v = JSON.parse(fs26.readFileSync(loginChoiceFile(), "utf8"))?.on;
+    const v = JSON.parse(fs28.readFileSync(loginChoiceFile(), "utf8"))?.on;
     return typeof v === "boolean" ? v : null;
   } catch {
     return null;
@@ -6294,8 +6632,8 @@ function saveStartAtLogin(on) {
   try {
     const f = loginChoiceFile();
     const tmp = `${f}.${process.pid}.tmp`;
-    fs26.writeFileSync(tmp, JSON.stringify({ on }));
-    fs26.renameSync(tmp, f);
+    fs28.writeFileSync(tmp, JSON.stringify({ on }));
+    fs28.renameSync(tmp, f);
   } catch (e) {
     log("app", `could not keep the start-at-login choice: ${e.message}`);
   }
@@ -6305,7 +6643,7 @@ function applySettings(s, patch) {
   if ("theme" in patch) nativeTheme2.themeSource = s.theme;
   if ("startAtLogin" in patch) {
     saveStartAtLogin(s.startAtLogin);
-    if (app3.isPackaged) app3.setLoginItemSettings({ openAtLogin: s.startAtLogin && !needsWelcome(), args: ["--hidden"] });
+    if (app4.isPackaged) setStartAtLogin(s.startAtLogin && !needsWelcome());
   }
   if ("theme" in patch) {
     for (const w of [mainWin, settingsWin]) if (w && !w.isDestroyed()) setTitleBarColors(w);
@@ -6338,13 +6676,13 @@ async function applyEdit(id, field, value) {
   if (field === "deleted" && value === true) {
     if (chat.isRunning(id)) return { ok: false, err: "Claude is still working in this conversation. Stop it first, then delete it." };
     if (chat.agentsRunning(id)) return { ok: false, err: "Claude's agents are still working in this conversation. Stop them first, then delete it." };
-    if (await chat.openInTerminal(id)) return { ok: false, err: "This conversation is open in a terminal on this PC. Close it there first, then delete it." };
+    if (await chat.openInTerminal(id)) return { ok: false, err: `This conversation is open in a terminal on this ${PC}. Close it there first, then delete it.` };
     if (chat.isOpenInApp(id)) await chat.release(id);
     releasedAt = Date.now();
   }
   const before = overlay.apply(id, field, value);
   broadcast("index-changed", [id]);
-  if (await detectEngineVersion() < 3) return { ok: true, queued: true, err: "Saved on this PC; the sync engine on this PC needs its update to share it" };
+  if (await detectEngineVersion() < 3) return { ok: true, queued: true, err: `Saved on this ${PC}; the sync engine on this ${PC} needs its update to share it` };
   const deleting = field === "deleted" && value === true;
   const args = ["edit", "--json", "--ops", JSON.stringify([{ session: id, field, value }]), ...deleting ? ["--written-by", String(releasedAt)] : []];
   let r = await runEngineSerial(args);
@@ -6358,7 +6696,7 @@ async function applyEdit(id, field, value) {
     return { ok: false, err: r.json?.err ?? r.stderr.split("\n")[0] ?? "The change couldn't be saved" };
   }
   const queued = !!r.json?.queued;
-  scheduler.noteEdit(`${EDIT_TEXT[field](value)} a conversation${queued ? " on this PC" : ""}`, queued);
+  scheduler.noteEdit(`${EDIT_TEXT[field](value)} a conversation${queued ? ` on this ${PC}` : ""}`, queued);
   index.scan("edit");
   return { ok: true, queued, err: r.json?.err };
 }
@@ -6368,7 +6706,7 @@ function handle(channel, fn) {
 var BAD_ID = "That conversation id isn't valid";
 function isUsableFolder(p) {
   try {
-    return path26.isAbsolute(p) && fs26.statSync(p).isDirectory();
+    return path29.isAbsolute(p) && fs28.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -6395,7 +6733,7 @@ function registerIpc() {
   handle("app:openExternal", (url) => typeof url === "string" && /^https?:\/\//.test(url) ? shell2.openExternal(url) : void 0);
   handle("app:openPath", (p) => {
     try {
-      if (typeof p === "string" && path26.isAbsolute(p) && fs26.statSync(p).isDirectory()) return shell2.openPath(p);
+      if (typeof p === "string" && path29.isAbsolute(p) && fs28.statSync(p).isDirectory()) return shell2.openPath(p);
     } catch {
     }
     return "Only folders can be opened";
@@ -6418,8 +6756,8 @@ function registerIpc() {
     return { ...r, workspaces };
   });
   handle("workspace:switch", (id, force) => {
-    if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: "That workspace isn't set up on this PC" };
-    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: "That workspace is disconnected on this PC: reconnect it first" };
+    if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: `That workspace isn't set up on this ${PC}` };
+    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: `That workspace is disconnected on this ${PC}: reconnect it first` };
     if (id === currentWorkspace().id) return { ok: true };
     if (openElsewhere(id)) return { ok: openWorkspaceWindow(id), elsewhere: true };
     const running = chat.workingIds().size;
@@ -6431,8 +6769,8 @@ function registerIpc() {
     return { ok: true };
   });
   handle("workspace:openWindow", (id) => {
-    if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: "That workspace isn't set up on this PC" };
-    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: "That workspace is disconnected on this PC: reconnect it first" };
+    if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: `That workspace isn't set up on this ${PC}` };
+    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: `That workspace is disconnected on this ${PC}: reconnect it first` };
     if (id === currentWorkspace().id) {
       showMain();
       return { ok: true, already: true };
@@ -6450,8 +6788,8 @@ function registerIpc() {
     const w = id == null ? currentWorkspace() : listWorkspaces().workspaces.find((x) => x.id === id);
     if (!w) return { ok: false, err: "There's no such workspace" };
     const claudePath = claudeInstall().path;
-    if (!claudePath) return { ok: false, err: "Claude Code isn't installed on this PC" };
-    const fake = app3.isPackaged ? void 0 : process.env.CONVERSATIONS_TEST_LOGIN?.split("|");
+    if (!claudePath) return { ok: false, err: `Claude Code isn't installed on this ${PC}` };
+    const fake = app4.isPackaged ? void 0 : process.env.CONVERSATIONS_TEST_LOGIN?.split("|");
     const r = fake?.length === 2 ? await startLogin(w, fake[0], [fake[1]]) : await startLogin(w, claudePath);
     log("app", r.ok ? `sign-in started for workspace ${w.id}` : `sign-in for workspace ${w.id} didn't start: ${r.err}`);
     if (r.ok)
@@ -6490,7 +6828,7 @@ function registerIpc() {
     const forWindow = workspacesForWindow().workspaces;
     const next = all.find((w) => w.id !== id && !w.disconnected && forWindow.some((f) => f.id === w.id && f.setUp));
     if (!next) return { ok: false, err: "Add another workspace first: Conversations needs one to show" };
-    if (id === "main" && !fs26.existsSync(path26.join(appRepoDir(), ".git"))) return { ok: false, err: "This PC still gets the app's updates through this workspace: it can be disconnected after its next update" };
+    if (id === "main" && !fs28.existsSync(path29.join(appRepoDir(), ".git"))) return { ok: false, err: `This ${PC} still gets the app's updates through this workspace: it can be disconnected after its next update` };
     if (id !== currentWorkspace().id) {
       if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first: right-click its tray icon, then Quit ${target.name}.` };
       setDisconnected(id, true);
@@ -6519,7 +6857,7 @@ function registerIpc() {
     log("app", `reconnected workspace ${id}`);
     broadcast("workspaces-changed", null);
     const w = listWorkspaces().workspaces.find((x) => x.id === id);
-    return { ok: true, synced: !!w && fs26.existsSync(path26.join(w.syncHome, "config.json")) };
+    return { ok: true, synced: !!w && fs28.existsSync(path29.join(w.syncHome, "config.json")) };
   });
   handle("workspace:rename", (id, name) => {
     if (!isWorkspaceId(id) || typeof name !== "string" || !name.trim()) return;
@@ -6532,25 +6870,25 @@ function registerIpc() {
   handle("app:pickFolder", async () => {
     const win = BrowserWindow2.getFocusedWindow() ?? mainWin;
     const opts = { title: "New chat in which folder?", buttonLabel: "Chat here", properties: ["openDirectory"] };
-    const r = win ? await dialog2.showOpenDialog(win, opts) : await dialog2.showOpenDialog(opts);
+    const r = win ? await dialog3.showOpenDialog(win, opts) : await dialog3.showOpenDialog(opts);
     const p = r.filePaths[0];
     return p && isUsableFolder(p) ? p : null;
   });
   handle("app:pickFiles", async () => {
     const win = BrowserWindow2.getFocusedWindow() ?? mainWin;
     const opts = { title: "Attach", properties: ["openFile", "multiSelections"] };
-    const r = win ? await dialog2.showOpenDialog(win, opts) : await dialog2.showOpenDialog(opts);
+    const r = win ? await dialog3.showOpenDialog(win, opts) : await dialog3.showOpenDialog(opts);
     const images = [];
     const paths = [];
     for (const p of r.filePaths) {
-      const type = IMAGE_TYPES[path26.extname(p).toLowerCase()];
+      const type = IMAGE_TYPES[path29.extname(p).toLowerCase()];
       let size = 0;
       try {
-        size = fs26.statSync(p).size;
+        size = fs28.statSync(p).size;
       } catch {
         continue;
       }
-      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path26.basename(p), mediaType: type, data: fs26.readFileSync(p).toString("base64") });
+      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path29.basename(p), mediaType: type, data: fs28.readFileSync(p).toString("base64") });
       else paths.push(p);
     }
     return { images, paths };
@@ -6570,7 +6908,7 @@ function registerIpc() {
   handle("app:finishWelcome", (acceptedTerms) => {
     if (acceptedTerms !== true) return;
     settings.set({ welcomed: true, termsAcceptedAt: (/* @__PURE__ */ new Date()).toISOString() });
-    if (app3.isPackaged && !askedFor(process.argv)) app3.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin, args: ["--hidden"] });
+    if (app4.isPackaged && !askedFor(process.argv)) setStartAtLogin(settings.get().startAtLogin);
     if (welcomeWin && !welcomeWin.isDestroyed()) welcomeWin.close();
   });
   handle("list:sidebar", () => index.ready ? { ...sidebarData(index.db, ctx(), readDevices(repoDir()), folders2()), pcCount: devices().length } : null);
@@ -6605,14 +6943,14 @@ function registerIpc() {
   });
   handle("sync:status", () => scheduler.status());
   handle("sync:now", () => scheduler.syncNow());
-  handle("sync:signIn", () => scheduler.signIn());
+  handle("sync:signIn", () => isMac2 ? macGitHubSignIn() : scheduler.signIn());
   handle("sync:setPaused", (paused) => scheduler.setPaused(paused === true));
-  handle("sync:openLog", () => shell2.openPath(path26.join(syncDir(), "sync.log")));
+  handle("sync:openLog", () => shell2.openPath(path29.join(syncDir(), "sync.log")));
   handle("sync:setUploadQuiet", (seconds) => scheduler.setUploadQuiet(typeof seconds === "number" ? seconds : NaN));
   handle("cli:open", async (id) => {
     if (!isUuid(id)) return { ok: false, message: BAD_ID };
     const d = conversationDetail(index.db, id, ctx(), folders2());
-    if (!d) return { ok: false, message: "That conversation isn't on this PC yet" };
+    if (!d) return { ok: false, message: `That conversation isn't on this ${PC} yet` };
     if (chat.agentsRunning(id)) return { ok: false, message: "Claude's agents are still working in this chat. Stop them or let them finish, then open it in the CLI." };
     return openInCli({
       id,
@@ -6634,7 +6972,7 @@ function registerIpc() {
       folder = await chooseFolder(mainWin, pid.split("/").pop() ?? "the project", false);
       if (folder && !isGenericFolder(folder)) settings.set({ folders: { ...settings.get().folders, [pid]: folder } });
     }
-    return newChatInCli(folder ?? app3.getPath("home"));
+    return newChatInCli(folder ?? app4.getPath("home"));
   });
   handle("chat:send", async (rawId, text, opts) => {
     if (rawId !== null && !isUuid(rawId)) return { ok: false, err: BAD_ID };
@@ -6647,15 +6985,15 @@ function registerIpc() {
     let cwd = null;
     if (id) {
       const d = conversationDetail(index.db, id, ctx(), folders2());
-      if (!d) return { ok: false, err: "That conversation isn't on this PC yet" };
+      if (!d) return { ok: false, err: `That conversation isn't on this ${PC} yet` };
       cwd = d.folder;
-      if (!cwd || !fs26.existsSync(cwd)) {
-        const local3 = localTranscript(id);
-        cwd = local3 ? folderForTranscript(local3, []) : null;
+      if (!cwd || !fs28.existsSync(cwd)) {
+        const local = localTranscript(id);
+        cwd = local ? folderForTranscript(local, []) : null;
       }
-      if (!cwd || !fs26.existsSync(cwd)) {
+      if (!cwd || !fs28.existsSync(cwd)) {
         cwd = await chooseFolder(mainWin, d.row.projectLabel);
-        if (!cwd) return { ok: false, err: "Chat needs a folder to work in on this PC" };
+        if (!cwd) return { ok: false, err: `Chat needs a folder to work in on this ${PC}` };
         pickedFolder = { id, folder: cwd, at: Date.now() };
         if (!isGenericFolder(cwd)) settings.set({ folders: { ...settings.get().folders, [d.row.projectId]: cwd } });
       }
@@ -6669,7 +7007,7 @@ function registerIpc() {
         cwd = await chooseFolder(mainWin, pid.split("/").pop() ?? "the project", false);
         if (cwd && !isGenericFolder(cwd)) settings.set({ folders: { ...settings.get().folders, [pid]: cwd } });
       }
-      cwd ??= app3.getPath("home");
+      cwd ??= app4.getPath("home");
     }
     const askedMode = opts?.permissionMode;
     const askedModel = opts?.model;
@@ -6710,7 +7048,7 @@ function registerIpc() {
       const d = conversationDetail(index.db, id, ctx(), folders2());
       cwd = d?.folder ?? d?.row.cwd ?? null;
     } else if (isProjectId(projectId)) cwd = folders2()[projectId] ?? null;
-    if (!cwd || !fs26.existsSync(cwd)) cwd = app3.getPath("home");
+    if (!cwd || !fs28.existsSync(cwd)) cwd = app4.getPath("home");
     return { id, cwd };
   };
   handle("chat:commands", (rawId, projectId, folder) => {
@@ -6805,6 +7143,7 @@ function takeKeyboardWhenIdle(w, minimized) {
     } else {
       if (w.isMinimized()) w.restore();
       w.flashFrame(false);
+      if (isMac2) app4.focus({ steal: true });
       w.focus();
       setTimeout(() => {
         if (w.isDestroyed() || w.isFocused()) return;
@@ -6856,7 +7195,8 @@ function updateTrayBadge(onlyIfChanged = false) {
   lastWaiting = key;
   pruneApprovals(new Set(waiting.map((p) => p.requestId)));
   if (!tray) return;
-  tray.setImage(appIcon(waiting.length ? "tray-badge.ico" : "tray.ico"));
+  tray.setImage(appIcon(trayIconFile(waiting.length > 0)));
+  if (isMac2) app4.dock?.setBadge(waiting.length ? String(waiting.length) : "");
   tray.setToolTip(waiting.length ? `${appLabel()} \xB7 ${waiting.every((p) => p.questions) ? "Claude has a question" : "Claude needs your approval"}` : appLabel());
   broadcast("chat-pending", waiting);
 }
@@ -6886,10 +7226,24 @@ function handleSecondInstance(argv) {
   }
   showMain();
 }
-app3.on("second-instance", (_e, argv) => secondInstances.push(argv));
-app3.on("window-all-closed", () => {
+app4.on("second-instance", (_e, argv) => secondInstances.push(argv));
+var startedAt = Date.now();
+app4.on("activate", () => {
+  if (process.argv.includes("--hidden") && Date.now() - startedAt < 5e3) return;
+  secondInstances.push([]);
 });
-app3.on("before-quit", () => {
+app4.on("open-url", (e, url) => {
+  e.preventDefault();
+  secondInstances.push([url]);
+});
+app4.on("window-all-closed", () => {
+});
+app4.on("before-quit", () => {
+  if (isMac2 && !quitting) {
+    chat.closeAll();
+    scheduler?.stop();
+    index.stop();
+  }
   quitting = true;
   cancelAllLogins();
   composer.closing = true;
@@ -6897,8 +7251,8 @@ app3.on("before-quit", () => {
 });
 var forwarderStage = process.env.CONVERSATIONS_FORWARDER_STAGE || null;
 delete process.env.CONVERSATIONS_FORWARDER_STAGE;
-void app3.whenReady().then(async () => {
-  const sdk = await loadSdk(app3.getAppPath(), app3.isPackaged ? process.resourcesPath : null);
+void app4.whenReady().then(async () => {
+  const sdk = await loadSdk(app4.getAppPath(), app4.isPackaged ? process.resourcesPath : null);
   if (sdk.ok) log("app", `Agent SDK from ${sdk.from}`);
   else log("app", `Agent SDK not found: ${sdk.err}`);
   const s = settings.load();
@@ -6909,14 +7263,18 @@ void app3.whenReady().then(async () => {
   const loginChoice = sharedStartAtLogin();
   if (loginChoice !== null && loginChoice !== s.startAtLogin) settings.set({ startAtLogin: loginChoice });
   settings.on("change", applySettings);
-  if (app3.isPackaged && !askedFor(process.argv)) app3.setLoginItemSettings({ openAtLogin: settings.get().startAtLogin && !needsWelcome(), args: ["--hidden"] });
+  if (app4.isPackaged && !askedFor(process.argv)) setStartAtLogin(settings.get().startAtLogin && !needsWelcome());
+  if (isMac2) {
+    Menu2.setApplicationMenu(macAppMenu({ settings: () => openSettings(), quit: () => userQuit(), quitLabel: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations" }));
+    if (!app4.isPackaged) app4.dock?.setIcon(path29.join(RESOURCES, "icon-mac.png"));
+  }
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   electronSession.defaultSession.setPermissionCheckHandler(() => false);
   void refreshClaude();
   registerIpc();
   log("app", `starting ${APP_VERSION} on ${thisMachine()}; data in ${appDataDir()}`);
   try {
-    await index.start(path26.join(HERE, "index-worker.mjs"));
+    await index.start(path29.join(HERE, "index-worker.mjs"));
     index.watchLive(liveConversationIds);
   } catch (e) {
     log("index", `the index is not available: ${e.stack || e}`);
@@ -6946,11 +7304,11 @@ void app3.whenReady().then(async () => {
   setTimeout(checkForUpdate, 15e3).unref();
   setInterval(checkForUpdate, 2 * 6e4).unref();
   const mainHere = listWorkspaces().workspaces[0];
-  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs26.existsSync(path26.join(mainHere.syncHome, "config.json"))) {
+  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs28.existsSync(path29.join(mainHere.syncHome, "config.json"))) {
     const keepMainCurrent = () => {
       const open = openNow();
       if (open.includes("main") || open.some((id) => id < currentWorkspace().id)) return;
-      const child = spawn9(process.execPath, [baseEngine(), "pull-all", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
+      const child = spawn10(process.execPath, [baseEngine(), "pull-all", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
       child.on("error", (e) => log("sync", `main workspace sync could not start: ${e.message}`));
     };
     setTimeout(keepMainCurrent, 45e3).unref();
@@ -7007,7 +7365,12 @@ void app3.whenReady().then(async () => {
     const raisedNow = lastRaisedId === p.conversationId && Date.now() - lastRaisedAt < 2e3;
     if (!watching && !raisedNow) {
       const title = index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(p.conversationId)?.title ?? "A conversation";
-      notifyApproval(p, title, () => openConversation(p.conversationId), currentWorkspace().id);
+      const deny = () => {
+        clearApproval(p.requestId);
+        chat.respond(p.requestId, "deny");
+        updateTrayBadge();
+      };
+      notifyApproval(p, title, () => openConversation(p.conversationId), currentWorkspace().id, deny, () => isMac2 && app4.dock?.bounce("informational"));
     }
   });
   buildTray();
@@ -7041,7 +7404,7 @@ void app3.whenReady().then(async () => {
   }
   secondInstances.finish();
   powerMonitor.on("resume", () => markingOpen && markOpen(currentWorkspace().id));
-  fs26.watchFile(registryPath(), { interval: 2e3 }, () => {
+  fs28.watchFile(registryPath(), { interval: 2e3 }, () => {
     broadcast("workspaces-changed", null);
     refreshLabels();
   });

@@ -20,7 +20,8 @@ var api = {
     copyText: (text) => invoke("app:copyText", text),
     checkClaude: () => invoke("app:checkClaude"),
     finishWelcome: (acceptedTerms) => invoke("app:finishWelcome", acceptedTerms),
-    windowKind: () => windowKind
+    windowKind: () => windowKind,
+    platform: () => process.platform
   },
   window: {
     minimize: () => import_electron.ipcRenderer.send("window:minimize"),
