@@ -7,7 +7,7 @@ import { chooseDraftFolder } from "./Detail";
 import { useStore } from "../lib/store";
 import { SEP, agoLong, bytes, plural, rowTime, time24 } from "../lib/format";
 import { isMac, keyLabel } from "../lib/keys";
-import { pcWord } from "../lib/platform";
+import { computerWord, installClaudeCommand, pcWord } from "../lib/platform";
 
 /** Conversations shown before "Show all", as in the design: the actions stay in view. */
 const TOP_HITS = 3;
@@ -638,7 +638,7 @@ function WelcomeContent({ info, pcs, total, onDone, onClose }: { info: AppInfo; 
           <Icon name="message-square" size={36} strokeWidth={1.5} />
         </div>
         <h1 id="welcome-title">Welcome to Conversations</h1>
-        <p className="lede">Every Claude Code chat from all your PCs, in one place and kept in sync.</p>
+        <p className="lede">Every Claude Code chat from all your {computerWord()}s, in one place and kept in sync.</p>
         <div className="checklist">
           <div className="check-row">
             <Icon name={claude?.found ? "circle-check" : "triangle-alert"} className={claude?.found ? "ok" : "bad"} />
@@ -647,8 +647,8 @@ function WelcomeContent({ info, pcs, total, onDone, onClose }: { info: AppInfo; 
               <div className="t2">{claude?.found ? (claude.signedIn === false ? "Not signed in: open a terminal and run claude once" : "Signed in, so chats here use your existing plan") : `Chat and Open in CLI need it. Install it from ${isMac() ? "Terminal" : "PowerShell"}, then check again.`}</div>
               {!claude?.found && (
                 <div className="cmd">
-                  <span style={{ flex: 1 }}>npm install -g @anthropic-ai/claude-code</span>
-                  <IconButton icon="copy" label="Copy command" onClick={() => void api.app.copyText("npm install -g @anthropic-ai/claude-code")} />
+                  <span style={{ flex: 1 }}>{installClaudeCommand()}</span>
+                  <IconButton icon="copy" label="Copy command" onClick={() => void api.app.copyText(installClaudeCommand())} />
                 </div>
               )}
             </div>
@@ -664,7 +664,7 @@ function WelcomeContent({ info, pcs, total, onDone, onClose }: { info: AppInfo; 
             <Icon name="circle-check" className="ok" />
             <div>
               <div className="t1">
-                {plural(total, "conversation")} from {plural(pcs, "PC")}
+                {plural(total, "conversation")} from {plural(pcs, computerWord())}
               </div>
               <div className="t2">Chats filed under other folder names now sit with their project</div>
             </div>

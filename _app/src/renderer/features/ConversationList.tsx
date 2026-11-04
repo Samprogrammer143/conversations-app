@@ -7,7 +7,7 @@ import { useStore, visibleRows } from "../lib/store";
 import { api } from "../lib/api";
 import { SEP, groupLabel, plural, rowTime } from "../lib/format";
 import { keyLabel } from "../lib/keys";
-import { pcWord } from "../lib/platform";
+import { computerWord, pcWord } from "../lib/platform";
 
 type Entry = { type: "header"; label: string; key: string } | { type: "row"; row: ConversationRow; key: string; last: boolean };
 
@@ -170,7 +170,7 @@ export function ConversationList({ showSidebarToggle, onOpen }: { showSidebarTog
           <span className="t1 ellipsis">{title}</span>
           <span className="t2 ellipsis">
             {plural(counts.all, "conversation")}
-            {pcCount > 1 ? `${SEP}${pcCount} PCs` : ""}
+            {pcCount > 1 ? `${SEP}${pcCount} ${computerWord()}s` : ""}
           </span>
         </div>
         <GlassCircle
