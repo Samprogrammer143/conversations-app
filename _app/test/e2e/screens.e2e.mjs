@@ -59,9 +59,10 @@ try {
     await shot("context-menu", win, 500);
     await win.keyboard.press("Escape");
     await win.mouse.click(1100, 400);
-    await win.keyboard.down("Control");
+    // Held Ctrl on Windows, Cmd on a Mac.
+    await win.keyboard.down("ControlOrMeta");
     await shot("S8-hold-ctrl", win, 1100);
-    await win.keyboard.up("Control");
+    await win.keyboard.up("ControlOrMeta");
     await win.click('.segment:has-text("Updated")');
     await shot("empty-updated", win, 600);
     await win.click('.segment:has-text("All")');

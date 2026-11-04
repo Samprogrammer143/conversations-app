@@ -6,6 +6,7 @@ import { ContextMenu, SearchResults, ShortcutOverlay, SyncPopover, Toasts, Welco
 import { AddWorkspaceSheet, DisconnectWorkspaceSheet, RenameWorkspaceSheet, SignInSheet, SwitchingOverlay, switchWorkspace } from "./features/Workspaces";
 import { useStore } from "./lib/store";
 import { api } from "./lib/api";
+import { isBack, isDelete, mod, modKey } from "./lib/keys";
 
 /** Full three panes from 1100 px; the sidebar folds away below that; list and conversation stack below 900 px. */
 function useWidth() {
@@ -50,14 +51,15 @@ export function App() {
     return () => window.removeEventListener("app:toggle-sidebar", toggle);
   }, [wide]);
 
-  // Keyboard: every action has a shortcut; holding Ctrl shows them all.
+  // Keyboard: every action has a shortcut; holding Ctrl (Cmd on a Mac) shows them all.
   useEffect(() => {
     let holdTimer: number | undefined;
     const s = () => useStore.getState();
+    const hold = modKey();
     const onDown = (e: KeyboardEvent) => {
       // (The agent panel keeps its keys too: Delete, arrows and Enter there aren't for the chat list.)
       const typing = (e.target as HTMLElement)?.closest("input, textarea, [contenteditable], .agent-panel");
-      if (e.key === "Control" && !e.repeat) {
+      if (e.key === hold && !e.repeat) {
         holdTimer = window.setTimeout(() => useStore.setState({ showShortcuts: true }), 650);
         return;
       }
@@ -65,14 +67,14 @@ export function App() {
       if (s().showShortcuts) useStore.setState({ showShortcuts: false });
       const id = s().selectedId;
       const key = e.key.toLowerCase();
-      if (e.ctrlKey && !e.shiftKey && key === "f") {
+      if (mod(e) && !e.shiftKey && key === "f") {
         // Focus mode: only the chat, and the usage meters. The same key comes back.
         e.preventDefault();
         if (e.repeat) return;
         // What floats over the sidebar closes with it; a narrow window comes back to the chat.
         useStore.setState({ focus: !s().focus, sidebarOpen: false, popover: null, search: { ...s().search, open: false } });
         if (stacked && id) setShowDetail(true);
-      } else if (e.ctrlKey && !e.shiftKey && key === "k") {
+      } else if (mod(e) && !e.shiftKey && key === "k") {
         e.preventDefault();
         // Search lives in the sidebar: it comes back for it.
         if (s().focus) {
@@ -81,10 +83,10 @@ export function App() {
         }
         if (!wide && !s().sidebarOpen) useStore.setState({ sidebarOpen: true });
         window.setTimeout(() => window.dispatchEvent(new Event("app:focus-search")), 0);
-      } else if (e.ctrlKey && !e.shiftKey && key === "n") {
+      } else if (mod(e) && !e.shiftKey && key === "n") {
         e.preventDefault();
         s().startDraft(s().detail?.row.projectId ?? null);
-      } else if (e.ctrlKey && key === "b") {
+      } else if (mod(e) && key === "b") {
         e.preventDefault();
         if (s().focus) {
           useStore.setState({ focus: false, sidebarOpen: !wide });
@@ -92,38 +94,40 @@ export function App() {
         } else window.dispatchEvent(new Event("app:toggle-sidebar"));
       } else if (e.ctrlKey && e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
         // Ctrl+Shift+1, 2, …: the workspaces set up on this PC, in the switcher's order.
+        // Control on a Mac too: Cmd+Shift+3, 4 and 5 are the Mac's screenshots.
         e.preventDefault();
         const ws = s().workspaces;
         const w = ws?.workspaces.filter((x) => x.setUp && !x.disconnected)[Number(e.code.slice(5)) - 1];
         if (w && w.id !== ws?.current) void switchWorkspace(w);
-      } else if (e.ctrlKey && ["1", "2", "3"].includes(e.key) && !s().focus) {
+      } else if (mod(e) && ["1", "2", "3"].includes(e.key) && !s().focus) {
         e.preventDefault();
         s().setFilter((["all", "updated", "live"] as const)[Number(e.key) - 1]);
-      } else if (e.ctrlKey && !e.shiftKey && key === "d" && id) {
+      } else if (mod(e) && !e.shiftKey && key === "d" && id) {
         e.preventDefault();
         void s().togglePin(id);
-      } else if (e.ctrlKey && !e.shiftKey && key === "e" && id) {
+      } else if (mod(e) && !e.shiftKey && key === "e" && id) {
         e.preventDefault();
         void s().archive(id, true);
-      } else if (e.ctrlKey && e.shiftKey && key === "o" && id) {
+      } else if (mod(e) && e.shiftKey && key === "o" && id) {
         e.preventDefault();
         void api.cli.open(id).then((r) => s().toast({ text: r.message, icon: r.ok ? "terminal" : "alert" }));
-      } else if (e.ctrlKey && e.shiftKey && key === "c" && id && !typing) {
+      } else if (mod(e) && e.shiftKey && key === "c" && id && !typing) {
         e.preventDefault();
         copyResumeCommand(id);
-      } else if (e.ctrlKey && e.shiftKey && key === "s") {
+      } else if (mod(e) && e.shiftKey && key === "s") {
         e.preventDefault();
         void api.sync.now();
-      } else if (e.ctrlKey && e.key === ",") {
+      } else if (mod(e) && e.key === ",") {
+        // (A Mac's app menu takes Cmd+, before it gets here.)
         e.preventDefault();
         void api.app.showSettings();
       } else if (!typing && e.key === "F2" && id) {
         e.preventDefault();
         useStore.setState({ renaming: id });
-      } else if (!typing && e.key === "Delete" && id) {
+      } else if (!typing && isDelete(e) && id) {
         e.preventDefault();
         s().remove(id);
-      } else if (!s().focus && ((e.altKey && e.key === "ArrowLeft") || (!typing && e.key === "Escape" && stacked && showDetail))) {
+      } else if (!s().focus && (isBack(e) || (!typing && e.key === "Escape" && stacked && showDetail))) {
         if (stacked) setShowDetail(false);
       } else if (!typing && (e.key === "ArrowLeft" || e.key === "ArrowRight") && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
         // Left and Right, with nothing being typed: the workspace before or after this one.
@@ -141,7 +145,7 @@ export function App() {
       }
     };
     const onUp = (e: KeyboardEvent) => {
-      if (e.key === "Control") {
+      if (e.key === hold) {
         window.clearTimeout(holdTimer);
         useStore.setState({ showShortcuts: false });
       }

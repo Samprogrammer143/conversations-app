@@ -6,6 +6,8 @@ import { api } from "../lib/api";
 import { chooseDraftFolder } from "./Detail";
 import { useStore } from "../lib/store";
 import { SEP, agoLong, bytes, plural, rowTime, time24 } from "../lib/format";
+import { isMac, keyLabel } from "../lib/keys";
+import { pcWord } from "../lib/platform";
 
 /** Conversations shown before "Show all", as in the design: the actions stay in view. */
 const TOP_HITS = 3;
@@ -54,7 +56,7 @@ export function SearchResults() {
       id: "new",
       icon: "plus",
       title: hits.length || !q ? `New chat${project ? ` in ${project}` : ""}` : `Start a chat about “${q}”`,
-      sub: `Starts Claude Code${folderName ? ` in ${folderName}` : ""} on this PC`,
+      sub: `Starts Claude Code${folderName ? ` in ${folderName}` : ""} on this ${pcWord()}`,
       key: "Ctrl+N",
       run: () => useStore.getState().startDraft(detail?.row.projectId ?? null),
     });
@@ -63,14 +65,14 @@ export function SearchResults() {
         id: "cli",
         icon: "square-terminal",
         title: "Open selected in CLI",
-        sub: "claude --resume in Windows Terminal",
+        sub: `claude --resume in ${isMac() ? "Terminal" : "Windows Terminal"}`,
         key: "Ctrl+Shift+O",
         run: async () => {
           const r = await api.cli.open(detail.row.id);
           toast({ text: r.message, icon: r.ok ? "terminal" : "alert" });
         },
       });
-    list.push({ id: "folder", icon: "folder-open", title: "New chat in a folder…", sub: "Pick any folder on this PC; its project appears once the chat starts", key: "", run: () => void chooseDraftFolder() });
+    list.push({ id: "folder", icon: "folder-open", title: "New chat in a folder…", sub: `Pick any folder on this ${pcWord()}; its project appears once the chat starts`, key: "", run: () => void chooseDraftFolder() });
     list.push({ id: "sync", icon: "refresh-cw", title: "Sync now", sub: hits.length ? `Last synced ${sync?.lastSyncAt ? agoLong(sync.lastSyncAt) : "a while ago"}` : "A chat from another PC may not be here yet", key: "Ctrl+Shift+S", run: () => void api.sync.now() });
     return list;
   }, [search.text, hits.length, detail, project, folderName, sync?.lastSyncAt]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -190,7 +192,7 @@ export function SearchResults() {
                     <span className="title">{r.a.title}</span>
                     <span className="sub ellipsis">{r.a.sub}</span>
                   </span>
-                  {r.a.key && <Kbd>{r.a.key}</Kbd>}
+                  {r.a.key && <Kbd>{keyLabel(r.a.key)}</Kbd>}
                 </button>
               </Fragment>
             );
@@ -205,10 +207,10 @@ export function SearchResults() {
           <b>↵</b>Open here
         </span>
         <span>
-          <b>Ctrl+↵</b>Open in CLI
+          <b>{keyLabel("Ctrl+↵")}</b>Open in CLI
         </span>
         <span>
-          <b>Hold Ctrl</b>Show all shortcuts
+          <b>Hold {keyLabel("Ctrl")}</b>Show all shortcuts
         </span>
       </div>
     </div>
@@ -253,7 +255,7 @@ export function SyncPopover() {
           <div className="t2">
             {sync.phase === "attention"
               ? `Last upload ${sync.lastSyncAt ? time24(sync.lastSyncAt) : "a while ago"}${SEP}trying again${next != null ? ` in ${next} s` : ""}`
-              : `This PC synced ${sync.lastSyncAt ? agoLong(sync.lastSyncAt) : "not yet"}${next != null && !sync.paused ? `${SEP}next check in ${next} s` : ""}`}
+              : `This ${pcWord()} synced ${sync.lastSyncAt ? agoLong(sync.lastSyncAt) : "not yet"}${next != null && !sync.paused ? `${SEP}next check in ${next} s` : ""}`}
           </div>
         </div>
       </div>
@@ -265,7 +267,7 @@ export function SyncPopover() {
               <div className="t1">{d.name}</div>
               <div className="t2">
                 {d.isThisPc
-                  ? `This PC${SEP}${sync.pendingUploads ? `${plural(sync.pendingUploads, "change")} waiting to upload` : `synced ${sync.lastSyncAt ? agoLong(sync.lastSyncAt) : "not yet"}`}`
+                  ? `This ${pcWord()}${SEP}${sync.pendingUploads ? `${plural(sync.pendingUploads, "change")} waiting to upload` : `synced ${sync.lastSyncAt ? agoLong(sync.lastSyncAt) : "not yet"}`}`
                   : `Seen ${agoLong(d.lastSeenAt)}`}
               </div>
             </div>
@@ -277,7 +279,7 @@ export function SyncPopover() {
         <div className="sync-note">
           <Icon name="info" className="info" />
           <div className="text">
-            <div className="t1">GitHub refused this PC's login</div>
+            <div className="t1">GitHub refused this {pcWord()}'s login</div>
             <div className="t2">Your chats are safe here and Claude still works. They sync again once you sign in.</div>
           </div>
           <Button kind="plain" disabled={githubSigningIn} onClick={() => void signInToGitHub()}>
@@ -288,7 +290,7 @@ export function SyncPopover() {
         <div className="sync-note">
           <Icon name="info" className="info" />
           <div className="text">
-            <div className="t1">Your changes are safe on this PC</div>
+            <div className="t1">Your changes are safe on this {pcWord()}</div>
             <div className="t2">They upload by themselves once GitHub answers. Nothing needs doing.</div>
           </div>
         </div>
@@ -311,7 +313,7 @@ export function SyncPopover() {
           <Icon name="triangle-alert" className="warn" />
           <div className="text">
             <div className="t1">Your Claude folder is inside {cloudName(sync.cloudSyncedClaudeDir)}</div>
-            <div className="t2">It copies every PC’s Claude Code files here as well. Sync only changes this PC’s own folders, but moving the Claude folder out of {cloudName(sync.cloudSyncedClaudeDir)} is safest.</div>
+            <div className="t2">It copies every PC’s Claude Code files here as well. Sync only changes this {pcWord()}’s own folders, but moving the Claude folder out of {cloudName(sync.cloudSyncedClaudeDir)} is safest.</div>
           </div>
         </div>
       )}
@@ -399,7 +401,7 @@ export function ContextMenu() {
             icon: "folder-open",
             run: () =>
               void api.app.openPath(row.cwd!).then((err: unknown) => {
-                if (typeof err === "string" && err) toast({ text: err === "Only folders can be opened" ? "That folder isn't on this PC" : err, icon: "alert" });
+                if (typeof err === "string" && err) toast({ text: err === "Only folders can be opened" ? `That folder isn't on this ${pcWord()}` : err, icon: "alert" });
               }),
           },
         ]
@@ -445,7 +447,7 @@ export function ContextMenu() {
           >
             <Icon name={it.icon} />
             {it.label}
-            {it.key && <span className="shortcut">{it.key}</span>}
+            {it.key && <span className="shortcut">{keyLabel(it.key)}</span>}
           </button>
         ),
       )}
@@ -482,9 +484,10 @@ export function Toasts() {
   );
 }
 
-// ------------------------------------------------------------------ hold Ctrl
+// ------------------------------------------------------------------ hold Ctrl (Cmd on a Mac)
 
 type Place = "left" | "right" | "below-right" | "above" | "above-right";
+// Keys written the Windows way; keyLabel shows them as a Mac does there.
 const BADGES: { selector: string; keys: string; label: string; place: Place }[] = [
   { selector: '.sb-titlebar [aria-label^="Hide sidebar"], .list-toolbar [aria-label^="Show sidebar"]', keys: "Ctrl+B", label: "Sidebar", place: "left" },
   { selector: ".search-field", keys: "Ctrl+K", label: "Search", place: "below-right" },
@@ -516,7 +519,7 @@ function badgeStyle(place: Place, r: DOMRect): React.CSSProperties {
   }
 }
 
-/** "Release Ctrl" sits centred over the conversation, 8 px above the composer. */
+/** "Release Ctrl" ("Release ⌘" on a Mac) sits centred over the conversation, 8 px above the composer. */
 function releaseHintStyle(): React.CSSProperties {
   const pane = document.querySelector(".detail")?.getBoundingClientRect();
   const composer = document.querySelector(".detail .composer")?.getBoundingClientRect();
@@ -541,12 +544,12 @@ export function ShortcutOverlay() {
         if (!el) return null;
         return (
           <span key={b.keys} className="kbd-badge" style={badgeStyle(b.place, el.getBoundingClientRect())}>
-            <b>{b.keys}</b> {b.label}
+            <b>{keyLabel(b.keys)}</b> {b.label}
           </span>
         );
       })}
       <span className="release-hint" style={releaseHintStyle()}>
-        Release Ctrl to hide shortcuts
+        Release {keyLabel("Ctrl")} to hide shortcuts
       </span>
     </>
   );
@@ -641,7 +644,7 @@ function WelcomeContent({ info, pcs, total, onDone, onClose }: { info: AppInfo; 
             <Icon name={claude?.found ? "circle-check" : "triangle-alert"} className={claude?.found ? "ok" : "bad"} />
             <div className="text" style={{ flex: 1 }}>
               <div className="t1">{claude?.found ? `Claude Code ${claude.version ?? ""} found` : "Claude Code not found"}</div>
-              <div className="t2">{claude?.found ? (claude.signedIn === false ? "Not signed in: open a terminal and run claude once" : "Signed in, so chats here use your existing plan") : "Chat and Open in CLI need it. Install it from PowerShell, then check again."}</div>
+              <div className="t2">{claude?.found ? (claude.signedIn === false ? "Not signed in: open a terminal and run claude once" : "Signed in, so chats here use your existing plan") : `Chat and Open in CLI need it. Install it from ${isMac() ? "Terminal" : "PowerShell"}, then check again.`}</div>
               {!claude?.found && (
                 <div className="cmd">
                   <span style={{ flex: 1 }}>npm install -g @anthropic-ai/claude-code</span>
@@ -653,8 +656,8 @@ function WelcomeContent({ info, pcs, total, onDone, onClose }: { info: AppInfo; 
           <div className="check-row">
             <Icon name={info.syncSetUp ? "circle-check" : "triangle-alert"} className={info.syncSetUp ? "ok" : "bad"} />
             <div>
-              <div className="t1">{info.syncSetUp ? "Sync repository connected" : "Sync isn't set up on this PC"}</div>
-              <div className="t2">{info.syncSetUp ? `${repoLabel(info.repo)}${SEP}private` : "Run Set up Conversations on this PC, with your conversations repository"}</div>
+              <div className="t1">{info.syncSetUp ? "Sync repository connected" : `Sync isn't set up on this ${pcWord()}`}</div>
+              <div className="t2">{info.syncSetUp ? `${repoLabel(info.repo)}${SEP}private` : `Run Set up Conversations on this ${pcWord()}, with your conversations repository`}</div>
             </div>
           </div>
           <div className="check-row">
@@ -669,7 +672,7 @@ function WelcomeContent({ info, pcs, total, onDone, onClose }: { info: AppInfo; 
           <div className="check-row">
             <Icon name="circle-check" className="ok" />
             <div>
-              <div className="t1">This PC is “{info.machine}”</div>
+              <div className="t1">This {pcWord()} is “{info.machine}”</div>
               <div className="t2">Change it any time in Settings</div>
             </div>
           </div>

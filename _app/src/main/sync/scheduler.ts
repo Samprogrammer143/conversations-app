@@ -16,6 +16,7 @@ import { log } from "../log";
 import { stripUrlCredentials } from "../remote-display";
 import { detectEngineVersion, runEngine, runEngineSerial } from "./engine-bridge";
 import { HeadStore, RETRY_SKIPPED_MS, shouldPull } from "./pull-decision";
+import { PC } from "../words";
 
 /** The repository's size on disk, from `git count-objects -v`, without blocking the app. */
 export function repoSizeBytes(dir: string): Promise<number | null> {
@@ -355,7 +356,7 @@ export class SyncScheduler extends EventEmitter {
     const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null);
     if (this.phase === "not-set-up") {
       headline = "Sync is not set up";
-      detail = "Run the installer on this PC";
+      detail = `Run the installer on this ${PC}`;
     } else if (paused) {
       headline = "Sync paused";
       detail = lastSync ? `Last synced ${time(lastSync)}` : "Resume in the sync menu";
@@ -364,10 +365,10 @@ export class SyncScheduler extends EventEmitter {
       detail = "Chats aren't syncing";
     } else if (this.phase === "offline") {
       headline = noNetwork ? "Offline" : "Can't reach GitHub";
-      detail = lastSync ? `Last synced ${time(lastSync)}` : "Saved on this PC";
+      detail = lastSync ? `Last synced ${time(lastSync)}` : `Saved on this ${PC}`;
     } else if (this.phase === "attention") {
       headline = "Can't reach GitHub";
-      detail = "Retrying · saved on this PC";
+      detail = `Retrying · saved on this ${PC}`;
     } else if (this.phase === "downloading" || this.phase === "uploading" || this.phase === "checking") {
       headline = total > 1 && behind.length ? `${current} of ${total} PCs up to date` : this.phase === "checking" ? "Up to date" : "Syncing…";
       detail = this.phase === "checking" ? (lastSync ? `Last synced ${time(lastSync)}` : "Checking GitHub") : this.phase === "downloading" ? "Downloading…" : "Uploading…";

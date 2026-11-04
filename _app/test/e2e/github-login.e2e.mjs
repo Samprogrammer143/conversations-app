@@ -145,7 +145,7 @@ try {
   await win.waitForTimeout(500);
   const popover = await win.evaluate(() => document.querySelector(".sync-popover")?.innerText ?? "");
   if (popover) {
-    check("the sync menu says so too, with Sign in", /Sign in to GitHub/.test(popover) && /refused this PC's login/.test(popover) && /Sign in/.test(popover), popover.slice(0, 120));
+    check("the sync menu says so too, with Sign in", /Sign in to GitHub/.test(popover) && /refused this (PC|Mac)'s login/.test(popover) && /Sign in/.test(popover), popover.slice(0, 120));
     await shot("signin-popover");
     await win.keyboard.press("Escape");
     await win.waitForTimeout(200);

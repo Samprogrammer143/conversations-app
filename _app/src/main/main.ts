@@ -45,6 +45,7 @@ import { loadSdk, sdkLoadedFrom } from "./chat/sdk";
 import { authStatus, cancelAllLogins, cancelLogin, loginEnded, signingIn, startLogin, submitLoginCode } from "./auth";
 import { isMac, macAppMenu, setStartAtLogin, trayIconFile } from "./mac";
 import { useLoginShellPath } from "../shared/login-path";
+import { PC } from "./words";
 
 // A Mac app started from the Finder has only the system's folders on PATH (the installed
 // app's shell has done this already; development and tests start here).
@@ -612,7 +613,7 @@ async function applyEdit(id: string, field: EditField, value: boolean | string |
     // Never delete under a writer: Claude would recreate the file a moment later.
     if (chat.isRunning(id)) return { ok: false, err: "Claude is still working in this conversation. Stop it first, then delete it." };
     if (chat.agentsRunning(id)) return { ok: false, err: "Claude's agents are still working in this conversation. Stop them first, then delete it." };
-    if (await chat.openInTerminal(id)) return { ok: false, err: "This conversation is open in a terminal on this PC. Close it there first, then delete it." };
+    if (await chat.openInTerminal(id)) return { ok: false, err: `This conversation is open in a terminal on this ${PC}. Close it there first, then delete it.` };
     // An idle chat in the app is simply closed first.
     if (chat.isOpenInApp(id)) await chat.release(id);
     releasedAt = Date.now();
@@ -620,7 +621,7 @@ async function applyEdit(id: string, field: EditField, value: boolean | string |
   // Shown at once; GitHub catches up in the background. Taken back if the engine refuses it.
   const before = overlay.apply(id, field, value);
   broadcast("index-changed", [id]);
-  if ((await detectEngineVersion()) < 3) return { ok: true, queued: true, err: "Saved on this PC; the sync engine on this PC needs its update to share it" };
+  if ((await detectEngineVersion()) < 3) return { ok: true, queued: true, err: `Saved on this ${PC}; the sync engine on this ${PC} needs its update to share it` };
   const deleting = field === "deleted" && value === true;
   // Writes up to now were the app's own (it has just closed its session): they don't stop the delete.
   const args = ["edit", "--json", "--ops", JSON.stringify([{ session: id, field, value }]), ...(deleting ? ["--written-by", String(releasedAt)] : [])];
@@ -636,7 +637,7 @@ async function applyEdit(id: string, field: EditField, value: boolean | string |
     return { ok: false, err: r.json?.err ?? r.stderr.split("\n")[0] ?? "The change couldn't be saved" };
   }
   const queued = !!r.json?.queued;
-  scheduler.noteEdit(`${EDIT_TEXT[field](value)} a conversation${queued ? " on this PC" : ""}`, queued);
+  scheduler.noteEdit(`${EDIT_TEXT[field](value)} a conversation${queued ? ` on this ${PC}` : ""}`, queued);
   index.scan("edit");
   return { ok: true, queued, err: r.json?.err };
 }
@@ -709,8 +710,8 @@ function registerIpc() {
     return { ...r, workspaces };
   });
   handle("workspace:switch", (id: unknown, force: unknown) => {
-    if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: "That workspace isn't set up on this PC" };
-    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: "That workspace is disconnected on this PC: reconnect it first" };
+    if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: `That workspace isn't set up on this ${PC}` };
+    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: `That workspace is disconnected on this ${PC}: reconnect it first` };
     if (id === currentWorkspace().id) return { ok: true };
     // Open in a window of its own already: that window comes forward, and this one stays as it is.
     if (openElsewhere(id)) return { ok: openWorkspaceWindow(id), elsewhere: true };
@@ -724,8 +725,8 @@ function registerIpc() {
   });
   // Opens another workspace in a window of its own, beside this one (or brings its window forward).
   handle("workspace:openWindow", (id: unknown) => {
-    if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: "That workspace isn't set up on this PC" };
-    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: "That workspace is disconnected on this PC: reconnect it first" };
+    if (!isWorkspaceId(id) || !workspacesForWindow().workspaces.some((w) => w.id === id && w.setUp)) return { ok: false, err: `That workspace isn't set up on this ${PC}` };
+    if (listWorkspaces().workspaces.some((w) => w.id === id && w.disconnected)) return { ok: false, err: `That workspace is disconnected on this ${PC}: reconnect it first` };
     if (id === currentWorkspace().id) {
       showMain();
       return { ok: true, already: true };
@@ -748,7 +749,7 @@ function registerIpc() {
     const w = id == null ? currentWorkspace() : listWorkspaces().workspaces.find((x) => x.id === id);
     if (!w) return { ok: false, err: "There's no such workspace" };
     const claudePath = claudeInstall().path;
-    if (!claudePath) return { ok: false, err: "Claude Code isn't installed on this PC" };
+    if (!claudePath) return { ok: false, err: `Claude Code isn't installed on this ${PC}` };
     // Tests sign in with a stand-in ("<node>|<script>"), never with a real browser sign-in.
     const fake = app.isPackaged ? undefined : process.env.CONVERSATIONS_TEST_LOGIN?.split("|");
     const r = fake?.length === 2 ? await startLogin(w, fake[0], [fake[1]]) : await startLogin(w, claudePath);
@@ -796,7 +797,7 @@ function registerIpc() {
     if (!next) return { ok: false, err: "Add another workspace first: Conversations needs one to show" };
     // On a PC still on the old layout the app's updates come through the first workspace's
     // repository, which only its sync brings: it stays until this PC has the app's own.
-    if (id === "main" && !fs.existsSync(path.join(appRepoDir(), ".git"))) return { ok: false, err: "This PC still gets the app's updates through this workspace: it can be disconnected after its next update" };
+    if (id === "main" && !fs.existsSync(path.join(appRepoDir(), ".git"))) return { ok: false, err: `This ${PC} still gets the app's updates through this workspace: it can be disconnected after its next update` };
     if (id !== currentWorkspace().id) {
       // Its own window would carry on in a workspace that is no longer here.
       if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first: right-click its tray icon, then Quit ${target.name}.` };
@@ -929,7 +930,7 @@ function registerIpc() {
   handle("cli:open", async (id: unknown) => {
     if (!isUuid(id)) return { ok: false, message: BAD_ID };
     const d = conversationDetail(index.db, id, ctx(), folders());
-    if (!d) return { ok: false, message: "That conversation isn't on this PC yet" };
+    if (!d) return { ok: false, message: `That conversation isn't on this ${PC} yet` };
     if (chat.agentsRunning(id)) return { ok: false, message: "Claude's agents are still working in this chat. Stop them or let them finish, then open it in the CLI." };
     return openInCli({
       id,
@@ -965,7 +966,7 @@ function registerIpc() {
     let cwd: string | null = null;
     if (id) {
       const d = conversationDetail(index.db, id, ctx(), folders());
-      if (!d) return { ok: false, err: "That conversation isn't on this PC yet" };
+      if (!d) return { ok: false, err: `That conversation isn't on this ${PC} yet` };
       cwd = d.folder;
       // Last used in a folder only another PC has (or a project this PC has no folder for):
       // the chat's own file on this PC says which folder it belongs to here.
@@ -975,7 +976,7 @@ function registerIpc() {
       }
       if (!cwd || !fs.existsSync(cwd)) {
         cwd = await chooseFolder(mainWin, d.row.projectLabel);
-        if (!cwd) return { ok: false, err: "Chat needs a folder to work in on this PC" };
+        if (!cwd) return { ok: false, err: `Chat needs a folder to work in on this ${PC}` };
         pickedFolder = { id, folder: cwd, at: Date.now() };
         if (!isGenericFolder(cwd)) settings.set({ folders: { ...settings.get().folders, [d.row.projectId]: cwd } });
       }

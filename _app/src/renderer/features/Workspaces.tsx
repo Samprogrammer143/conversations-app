@@ -6,6 +6,8 @@ import type { WorkspaceInfo } from "../../shared/types";
 import { Icon } from "../components/Icon";
 import { Button, IconButton, Spinner } from "../components/controls";
 import { api } from "../lib/api";
+import { ctrlLabel, keyLabel } from "../lib/keys";
+import { pcWord } from "../lib/platform";
 import { useStore } from "../lib/store";
 
 /** Switches, after a word when chats are running here (the switch restarts the app, which stops them). */
@@ -225,7 +227,7 @@ async function reconnectWorkspace(w: WorkspaceInfo) {
   await useStore.getState().loadWorkspaces();
   if (!r.synced) {
     // Never synced on this PC: its chats show only when you go to it, and stay on this PC.
-    useStore.getState().toast({ text: `${w.name} is back in this menu. Its chats aren't synced on this PC.`, icon: "check", actionLabel: `Switch to ${w.name}`, onAction: () => void switchWorkspace({ ...w, disconnected: false }), durationMs: 10_000 });
+    useStore.getState().toast({ text: `${w.name} is back in this menu. Its chats aren't synced on this ${pcWord()}.`, icon: "check", actionLabel: `Switch to ${w.name}`, onAction: () => void switchWorkspace({ ...w, disconnected: false }), durationMs: 10_000 });
     return;
   }
   void switchWorkspace({ ...w, disconnected: false });
@@ -272,7 +274,7 @@ export function WorkspaceSwitcher() {
         className="ws-button no-drag"
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Switch workspace (Ctrl+Shift+1, 2, …)"
+        title={`Switch workspace (${ctrlLabel("Ctrl+Shift+1, 2, …")})`}
         onClick={() => {
           setActive(Math.max(0, list.findIndex((w) => w.id === ws?.current)));
           // Which ones are open in other windows may have changed since.
@@ -321,7 +323,7 @@ export function WorkspaceSwitcher() {
                     <span className="ellipsis">{w.name}</span>
                     {!w.setUp ? <span className="ws-sub">On another PC · set up here</span> : w.openElsewhere ? <span className="ws-sub">Already open in another window</span> : !w.signedIn ? <span className="ws-sub">Not signed in</span> : w.account ? <span className="ws-sub ellipsis">{w.account}</span> : null}
                   </span>
-                  {w.id === ws?.current ? <Icon name="check" /> : w.setUp ? <span className="shortcut">Ctrl+Shift+{setUp.indexOf(w) + 1}</span> : null}
+                  {w.id === ws?.current ? <Icon name="check" /> : w.setUp ? <span className="shortcut">{ctrlLabel(`Ctrl+Shift+${setUp.indexOf(w) + 1}`)}</span> : null}
                 </button>
                 {ownWindow && (
                   <button
@@ -329,7 +331,7 @@ export function WorkspaceSwitcher() {
                     className="ws-window"
                     tabIndex={-1}
                     aria-label={`Open ${w.name} in a new window`}
-                    title="Open in a new window (Shift+Enter)"
+                    title={`Open in a new window (${keyLabel("Shift+Enter")})`}
                     onClick={() => {
                       setOpen(false);
                       void openWorkspaceWindow(w);
@@ -359,7 +361,7 @@ export function WorkspaceSwitcher() {
           {off.length > 0 && (
             <>
               <div className="menu-sep" role="separator" />
-              <div className="menu-label">Not in Conversations on this PC</div>
+              <div className="menu-label">Not in Conversations on this {pcWord()}</div>
               {off.map((w) => {
                 const i = at((it) => "reconnect" in it && it.reconnect.id === w.id);
                 return (
@@ -452,7 +454,7 @@ export function AddWorkspaceSheet() {
         </div>
         {step !== "signin" ? (
           <>
-            <h1 id="ws-title">{prefill ? `Set up ${prefill.name} on this PC` : "Add a workspace"}</h1>
+            <h1 id="ws-title">{prefill ? `Set up ${prefill.name} on this ${pcWord()}` : "Add a workspace"}</h1>
             <p className="lede">{prefill ? "Its conversations come down from its repository, and you sign in to its Claude account." : "A workspace is one Claude account with its own conversations, synced through its own private GitHub repository."}</p>
             <div className="ws-form">
               <label>
@@ -483,7 +485,7 @@ export function AddWorkspaceSheet() {
             <h1 id="ws-title">{signedIn ? `${name} is ready` : `Sign in to ${name}'s Claude account`}</h1>
             <p className="lede">
               {signedIn
-                ? "Its Claude account is signed in on this PC. Switch this window to it, or open it in a window of its own beside this one."
+                ? `Its Claude account is signed in on this ${pcWord()}. Switch this window to it, or open it in a window of its own beside this one.`
                 : "Claude's sign-in opens in your browser. Sign in with the account for this workspace, then paste the code it shows."}
             </p>
             {error && <p className="ws-error" role="alert">{error}</p>}
@@ -612,7 +614,7 @@ export function DisconnectWorkspaceSheet() {
         <IconButton icon="x" label="Close" className="close" onClick={close} />
         <h1 id="ws-off-title">Disconnect {w.name}?</h1>
         <p className="lede">
-          Conversations stops showing and syncing {w.name}'s chats on this PC{next ? `, and switches to ${next.name}` : ""}. Nothing is deleted: Claude Code keeps them as they are, and you can reconnect {w.name} from this menu any time.
+          Conversations stops showing and syncing {w.name}'s chats on this {pcWord()}{next ? `, and switches to ${next.name}` : ""}. Nothing is deleted: Claude Code keeps them as they are, and you can reconnect {w.name} from this menu any time.
         </p>
         {error && <p className="ws-error" role="alert">{error}</p>}
         <div className="row-actions">

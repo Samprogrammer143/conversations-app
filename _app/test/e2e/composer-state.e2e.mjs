@@ -131,7 +131,7 @@ try {
   await win.evaluate(() => document.body.classList.remove("solid"));
 
   // A new chat whose first input is a long command: Stop works, and the chat is made with what it printed.
-  await win.keyboard.press("Control+n");
+  await win.keyboard.press("ControlOrMeta+n");
   await win.waitForTimeout(800);
   const isDraft = await win.evaluate(() => document.querySelector(".detail")?.getAttribute("aria-label") === "New chat");
   check("Ctrl+N opens a new chat", isDraft);

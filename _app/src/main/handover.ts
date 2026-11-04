@@ -13,11 +13,13 @@
 // Everything that touches the PC comes in through HandoverDeps, so the rules
 // above are tested without starting anything.
 
-export const OPEN_ON_THIS_PC = "It's open in Claude Code on this PC — switch to that window.";
-export const WRITTEN_JUST_NOW = "It was written to on this PC in the last two minutes. If Claude Code has it open, switch to that window; otherwise try again in a moment.";
-export const NOT_HERE = "That conversation isn't on this PC yet, and it couldn't be downloaded.";
+import { PC } from "./words";
+
+export const OPEN_ON_THIS_PC = `It's open in Claude Code on this ${PC} — switch to that window.`;
+export const WRITTEN_JUST_NOW = `It was written to on this ${PC} in the last two minutes. If Claude Code has it open, switch to that window; otherwise try again in a moment.`;
+export const NOT_HERE = `That conversation isn't on this ${PC} yet, and it couldn't be downloaded.`;
 export const NO_FOLDER = "This chat couldn't be moved to that folder. It may not have finished uploading from the other PC: try again in a few minutes.";
-export const NEEDS_FOLDER = "This chat needs a folder to work in on this PC.";
+export const NEEDS_FOLDER = `This chat needs a folder to work in on this ${PC}.`;
 export const CONTINUING = process.platform === "darwin" ? "Continuing in Terminal" : "Continuing in Windows Terminal";
 
 /** What a pull of one conversation said. live: the engine left it alone because it is in use on this PC. */
@@ -99,7 +101,7 @@ export async function handOver(id: string, where: { projectFolder: string | null
     if (!(ours > 0 && mtime !== null && mtime <= ours + OWN_WRITE_SLACK_MS)) return { ok: false, message: WRITTEN_JUST_NOW };
   }
   const transcript = (pulled?.ok ? pulled.dest : null) ?? deps.localTranscript(id);
-  if (!transcript) return { ok: false, message: pulled && !pulled.ok && !pulled.live && pulled.err ? `Couldn't bring it to this PC: ${pulled.err}` : NOT_HERE };
+  if (!transcript) return { ok: false, message: pulled && !pulled.ok && !pulled.live && pulled.err ? `Couldn't bring it to this ${PC}: ${pulled.err}` : NOT_HERE };
 
   // 4. Started where --resume finds it.
   let folder = deps.folderFor(transcript, [where.recordedCwd, where.projectFolder]);

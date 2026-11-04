@@ -17,7 +17,7 @@ try {
   const win = await app.firstWindow();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].show());
   await win.waitForTimeout(3000);
-  await win.keyboard.press("Control+N");
+  await win.keyboard.press("ControlOrMeta+N");
   await win.waitForTimeout(800);
   const box = 'textarea[aria-label="Message"]';
   const chip = () => win.evaluate(() => document.querySelector('button[aria-label="Model"]')?.textContent?.trim());
@@ -51,6 +51,7 @@ try {
   await win.keyboard.press("ArrowUp");
   await win.waitForTimeout(200);
   check("over several lines, Up moves the cursor, not the model", (await chip()) === multi);
+  // Control on a Mac too: Cmd+M minimises there.
   await win.keyboard.press("Control+M");
   await win.waitForTimeout(200);
   check("Ctrl+M still switches there", (await chip()) !== multi, await chip());

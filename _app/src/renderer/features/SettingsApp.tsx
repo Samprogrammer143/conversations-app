@@ -4,6 +4,8 @@ import { Icon } from "../components/Icon";
 import { Button, Segmented, Toggle } from "../components/controls";
 import { api } from "../lib/api";
 import { bytes, plural } from "../lib/format";
+import { ctrlLabel, isMac, keyLabel } from "../lib/keys";
+import { pcWord } from "../lib/platform";
 
 type Section = "general" | "appearance" | "sync" | "folders" | "claude" | "shortcuts";
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
@@ -69,7 +71,7 @@ function MachineName({ name }: { name: string }) {
   return (
     <Disclosure label="Name" value={name}>
       <div className="s-text">
-        <div className="s-detail">Set when sync was installed on this PC. Every PC labels its conversations and its sync status with this name, so it stays the same once chosen.</div>
+        <div className="s-detail">Set when sync was installed on this {pcWord()}. Every PC labels its conversations and its sync status with this name, so it stays the same once chosen.</div>
       </div>
     </Disclosure>
   );
@@ -117,14 +119,14 @@ export function SettingsApp() {
           {section === "general" && (
             <>
               <Group>
-                <Row label="Start at login" detail="Keeps sync running in the notification area, so the window opens instantly.">
+                <Row label="Start at login" detail={`Keeps sync running in the ${isMac() ? "menu bar" : "notification area"}, so the window opens instantly.`}>
                   <Toggle label="Start at login" checked={settings.startAtLogin} onChange={(v) => set({ startAtLogin: v })} />
                 </Row>
                 <Row label="Show archived conversations" detail="Archived conversations stay synced; they are only hidden from the list.">
                   <Toggle label="Show archived conversations" checked={settings.showArchived} onChange={(v) => set({ showArchived: v })} />
                 </Row>
               </Group>
-              <Group title="This PC">
+              <Group title={`This ${pcWord()}`}>
                 <MachineName name={info.machine} />
                 <Row label="Version">
                   <Value chevron={null}>Conversations {info.version}</Value>
@@ -137,15 +139,16 @@ export function SettingsApp() {
               <Row label="Appearance">
                 <Segmented label="Appearance" value={settings.theme} onChange={(v) => set({ theme: v })} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} />
               </Row>
-              <Row label="Sidebar material" detail="Mica lets the desktop colour show through the sidebar. Takes effect next time the window opens.">
-                <Segmented label="Sidebar material" value={settings.windowMaterial} onChange={(v) => set({ windowMaterial: v })} options={[{ value: "mica", label: "Mica" }, { value: "solid", label: "Solid" }]} />
+              {/* Mica is Windows' name; the same setting is the Mac's vibrancy, so it's called what it does there. */}
+              <Row label="Sidebar material" detail={`${isMac() ? "Translucent" : "Mica"} lets the desktop colour show through the sidebar. Takes effect next time the window opens.`}>
+                <Segmented label="Sidebar material" value={settings.windowMaterial} onChange={(v) => set({ windowMaterial: v })} options={[{ value: "mica", label: isMac() ? "Translucent" : "Mica" }, { value: "solid", label: "Solid" }]} />
               </Row>
             </Group>
           )}
           {section === "sync" && (
             <>
               <Group>
-                <Row label="Sync automatically" detail={`Checks GitHub every ${settings.checkWhileOpenSeconds} s while the window is open and every ${Math.round(settings.checkFromTraySeconds / 60)} min from the tray.`}>
+                <Row label="Sync automatically" detail={`Checks GitHub every ${settings.checkWhileOpenSeconds} s while the window is open and every ${Math.round(settings.checkFromTraySeconds / 60)} min from the ${isMac() ? "menu bar" : "tray"}.`}>
                   <Toggle label="Sync automatically" checked={settings.syncAutomatically} onChange={(v) => void api.sync.setPaused(!v)} />
                 </Row>
                 <Row label="Upload after a reply">
@@ -172,11 +175,11 @@ export function SettingsApp() {
                     <Value chevron={null}>After 2 minutes of quiet</Value>
                   )}
                 </Row>
-                <Row label="Keep Claude Code’s /resume up to date" detail="Writes downloaded conversations into each project folder on this PC.">
+                <Row label="Keep Claude Code’s /resume up to date" detail={`Writes downloaded conversations into each project folder on this ${pcWord()}.`}>
                   <Toggle label="Keep Claude Code’s /resume up to date" checked={settings.keepResumeUpToDate} onChange={(v) => set({ keepResumeUpToDate: v })} />
                 </Row>
               </Group>
-              <Group title="This PC">
+              <Group title={`This ${pcWord()}`}>
                 <MachineName name={info.machine} />
                 <button type="button" className="s-row s-link" onClick={() => setSection("folders")}>
                   <div className="s-text">
@@ -213,9 +216,9 @@ export function SettingsApp() {
             </>
           )}
           {section === "folders" && (
-            <Group title="Where each project lives on this PC">
+            <Group title={`Where each project lives on this ${pcWord()}`}>
               {(sidebar?.projects ?? []).map((p) => (
-                <Row key={p.id} label={p.label} detail={settings.folders[p.id] ?? p.folder ?? "Not on this PC yet. Open in CLI asks for the folder once."}>
+                <Row key={p.id} label={p.label} detail={settings.folders[p.id] ?? p.folder ?? `Not on this ${pcWord()} yet. Open in CLI asks for the folder once.`}>
                   <Value chevron={null}>{plural(p.count, "conversation")}</Value>
                 </Row>
               ))}
@@ -226,7 +229,7 @@ export function SettingsApp() {
               <Row label="Claude Code" detail={info.claude.path ?? "Install it with npm install -g @anthropic-ai/claude-code"}>
                 <Value chevron={null}>{info.claude.found ? `Version ${info.claude.version ?? "?"}` : "Not found"}</Value>
               </Row>
-              <Row label="Signed in" detail="Chats in the app use your own Claude Code login on this PC.">
+              <Row label="Signed in" detail={`Chats in the app use your own Claude Code login on this ${pcWord()}.`}>
                 <Value chevron={null}>{info.claude.signedIn ? "Yes" : info.claude.signedIn === false ? "No" : "Unknown"}</Value>
               </Row>
               <Row label="Ask before tools run" detail="New chats start in this mode. Bypassing permissions is not offered.">
@@ -242,31 +245,34 @@ export function SettingsApp() {
                   ]}
                 />
               </Row>
-              <Row label="Windows Terminal" detail="Open in CLI uses it; without it, a command prompt opens instead.">
-                <Value chevron={null}>{info.windowsTerminal ? "Found" : "Not found"}</Value>
-              </Row>
+              {/* A Mac always has Terminal, which Open in CLI uses there: nothing to report. */}
+              {!isMac() && (
+                <Row label="Windows Terminal" detail="Open in CLI uses it; without it, a command prompt opens instead.">
+                  <Value chevron={null}>{info.windowsTerminal ? "Found" : "Not found"}</Value>
+                </Row>
+              )}
             </Group>
           )}
           {section === "shortcuts" && (
             <Group>
               {[
-                ["Search", "Ctrl+K"],
-                ["New chat", "Ctrl+N"],
-                ["Show or hide the sidebar", "Ctrl+B"],
-                ["Focus mode: only the chat and usage", "Ctrl+F"],
+                ["Search", keyLabel("Ctrl+K")],
+                ["New chat", keyLabel("Ctrl+N")],
+                ["Show or hide the sidebar", keyLabel("Ctrl+B")],
+                ["Focus mode: only the chat and usage", keyLabel("Ctrl+F")],
                 ["Switch model", "Up, Down"],
-                ["Switch model (while typing several lines)", "Ctrl+M"],
+                ["Switch model (while typing several lines)", ctrlLabel("Ctrl+M")],
                 ["Previous or next workspace (not typing)", "Left, Right"],
-                ["All · Updated · Live", "Ctrl+1 2 3"],
-                ["Pin", "Ctrl+D"],
-                ["Archive", "Ctrl+E"],
+                ["All · Updated · Live", keyLabel("Ctrl+1 2 3")],
+                ["Pin", keyLabel("Ctrl+D")],
+                ["Archive", keyLabel("Ctrl+E")],
                 ["Rename", "F2"],
-                ["Copy the resume command", "Ctrl+Shift+C"],
-                ["Delete from all PCs", "Del"],
-                ["Open in CLI", "Ctrl+Shift+O"],
-                ["Sync now", "Ctrl+Shift+S"],
-                ["Settings", "Ctrl+,"],
-                ["Show every shortcut", "Hold Ctrl"],
+                ["Copy the resume command", keyLabel("Ctrl+Shift+C")],
+                ["Delete from all PCs", keyLabel("Del")],
+                ["Open in CLI", keyLabel("Ctrl+Shift+O")],
+                ["Sync now", keyLabel("Ctrl+Shift+S")],
+                ["Settings", keyLabel("Ctrl+,")],
+                ["Show every shortcut", `Hold ${keyLabel("Ctrl")}`],
               ].map(([l, k]) => (
                 <Row key={l} label={l}>
                   <span className="kbd">{k}</span>

@@ -38,7 +38,10 @@ try {
     const states = await w.evaluate((sel) => [...document.querySelectorAll(sel)].map((b) => b.disabled), goOn);
     check("going on waits for the box", states.length > 0 && states.every(Boolean), JSON.stringify(states));
     const exited = new Promise((r) => app.process().once("exit", () => r(true)));
-    await w.locator(".welcome-window .close").click();
+    // A Mac hides the page's close button (the window's own is used there): close the window itself.
+    // (The app may quit before the call returns: that isn't an error.)
+    if (process.platform === "darwin") await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close()).catch(() => {});
+    else await w.locator(".welcome-window .close").click();
     const quit = await Promise.race([exited, new Promise((r) => setTimeout(() => r(false), 15_000))]);
     check("closing the welcome without accepting quits the app", quit === true);
     const s = saved();

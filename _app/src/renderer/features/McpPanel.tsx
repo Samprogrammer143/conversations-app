@@ -10,6 +10,7 @@ import { IconButton, Spinner } from "../components/controls";
 import { api } from "../lib/api";
 import { useStore } from "../lib/store";
 import { SEP } from "../lib/format";
+import { pcWord } from "../lib/platform";
 
 const STATUS: Record<McpServerInfo["status"], { label: string; dot: string }> = {
   connected: { label: "Connected", dot: "success" },
@@ -22,7 +23,10 @@ const STATUS: Record<McpServerInfo["status"], { label: string; dot: string }> = 
 const WHERE: Record<string, string> = {
   user: "Your settings (all folders)",
   project: "This project's .mcp.json",
-  local: "This folder, on this PC only",
+  // Getters: the platform is read when shown, not when this module loads.
+  get local() {
+    return `This folder, on this ${pcWord()} only`;
+  },
   claudeai: "claude.ai connector",
   plugin: "A plugin",
   sdk: "The app",
@@ -30,7 +34,15 @@ const WHERE: Record<string, string> = {
   managed: "Your organisation",
 };
 
-const TRANSPORT: Record<string, string> = { stdio: "Runs on this PC", http: "Web (HTTP)", sse: "Web (SSE)", "claudeai-proxy": "Through claude.ai", sdk: "In the app" };
+const TRANSPORT: Record<string, string> = {
+  get stdio() {
+    return `Runs on this ${pcWord()}`;
+  },
+  http: "Web (HTTP)",
+  sse: "Web (SSE)",
+  "claudeai-proxy": "Through claude.ai",
+  sdk: "In the app",
+};
 
 /** Servers that sign in with OAuth in the browser (Sign out only for the first two). */
 const usesSignIn = (s: McpServerInfo) => s.transport === "http" || s.transport === "sse" || s.transport === "claudeai-proxy" || s.scope === "claudeai";

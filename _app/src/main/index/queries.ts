@@ -4,6 +4,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ConversationDetail, ConversationRow, DeviceSummary, ItemsPage, ListQuery, ListResult, ProjectSummary, SearchHit, SearchResult, SidebarData, TranscriptItem } from "../../shared/types";
 import type { DeviceRecord } from "../sync/repo-read";
+import { PC } from "../words";
 
 export const LIVE_MS = 2 * 60 * 1000;
 
@@ -190,7 +191,7 @@ export function conversationDetail(db: DatabaseSync, id: string, ctx: QueryConte
   if (!r) return null;
   const row = toRow(r, ctx);
   const where = row.folderLabel ?? row.projectLabel;
-  const who = row.runningHere || (row.live && row.lastPc === ctx.thisMachine) ? "Live on this PC" : `Last on ${row.lastPc === ctx.thisMachine ? "this PC" : row.lastPc ?? "another PC"}`;
+  const who = row.runningHere || (row.live && row.lastPc === ctx.thisMachine) ? `Live on this ${PC}` : `Last on ${row.lastPc === ctx.thisMachine ? `this ${PC}` : row.lastPc ?? "another PC"}`;
   const subtitle = [who, where, `${row.prompts} prompt${row.prompts === 1 ? "" : "s"}`].join("  ·  ");
   const folder = folders[row.projectId] ?? (r.cwd && r.local_path ? r.cwd : null);
   const recentElsewhere = row.lastPc && row.lastPc !== ctx.thisMachine && row.lastAt && ctx.now - Date.parse(row.lastAt) < LIVE_MS ? { pc: row.lastPc, at: row.lastAt } : null;

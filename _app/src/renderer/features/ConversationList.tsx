@@ -6,6 +6,8 @@ import { Button, GlassCircle, IconButton, Segmented } from "../components/contro
 import { useStore, visibleRows } from "../lib/store";
 import { api } from "../lib/api";
 import { SEP, groupLabel, plural, rowTime } from "../lib/format";
+import { keyLabel } from "../lib/keys";
+import { pcWord } from "../lib/platform";
 
 type Entry = { type: "header"; label: string; key: string } | { type: "row"; row: ConversationRow; key: string; last: boolean };
 
@@ -93,11 +95,11 @@ function emptyTitle(filter: Filter, scope: Scope, title: string): string {
 function emptyLine(filter: Filter, scope: Scope): string {
   if (filter === "updated") return "Conversations that change on another PC show up here until you open them.";
   if (filter === "live") return "Conversations open in Claude Code on any PC show up here.";
-  if (scope.kind === "pinned") return "Press Ctrl+D on a conversation to pin it.";
-  if (scope.kind === "archived") return "Archived conversations stay synced and come back with Ctrl+E.";
+  if (scope.kind === "pinned") return `Press ${keyLabel("Ctrl+D")} on a conversation to pin it.`;
+  if (scope.kind === "archived") return `Archived conversations stay synced and come back with ${keyLabel("Ctrl+E")}.`;
   if (scope.kind === "device") return "They appear here after that PC uploads one.";
   if (scope.kind === "project") return "Start one here, or run claude in that folder on any PC.";
-  return "Run claude in any project folder, or start a chat here with Ctrl+N.";
+  return `Run claude in any project folder, or start a chat here with ${keyLabel("Ctrl+N")}.`;
 }
 
 export function ConversationList({ showSidebarToggle, onOpen }: { showSidebarToggle: boolean; onOpen?: () => void }) {
@@ -163,7 +165,7 @@ export function ConversationList({ showSidebarToggle, onOpen }: { showSidebarTog
   return (
     <section className="list-col" aria-label="Conversations">
       <div className="list-toolbar drag">
-        {showSidebarToggle && <IconButton icon="panel-left" label="Show sidebar (Ctrl+B)" onClick={() => window.dispatchEvent(new Event("app:toggle-sidebar"))} />}
+        {showSidebarToggle && <IconButton icon="panel-left" label={`Show sidebar (${keyLabel("Ctrl+B")})`} onClick={() => window.dispatchEvent(new Event("app:toggle-sidebar"))} />}
         <div className="list-title">
           <span className="t1 ellipsis">{title}</span>
           <span className="t2 ellipsis">
@@ -173,7 +175,7 @@ export function ConversationList({ showSidebarToggle, onOpen }: { showSidebarTog
         </div>
         <GlassCircle
           icon="square-pen"
-          label="New chat (Ctrl+N)"
+          label={`New chat (${keyLabel("Ctrl+N")})`}
           onClick={() => {
             const projectId = scope.kind === "project" && scope.id !== "folder:*" ? scope.id : useStore.getState().detail?.row.projectId ?? null;
             useStore.getState().startDraft(projectId);
@@ -212,7 +214,7 @@ export function ConversationList({ showSidebarToggle, onOpen }: { showSidebarTog
             <Icon name={noNetwork ? "wifi-off" : "cloud-off"} />
             <div className="text">
               <span className="title">{noNetwork ? "You're offline" : "Can't reach GitHub right now"}</span>
-              <span className="sub">{noNetwork ? "Everything on this PC still works. Changes upload when you reconnect." : "Claude still works. Chats upload once GitHub answers."}</span>
+              <span className="sub">{noNetwork ? `Everything on this ${pcWord()} still works. Changes upload when you reconnect.` : "Claude still works. Chats upload once GitHub answers."}</span>
             </div>
           </div>
         </div>

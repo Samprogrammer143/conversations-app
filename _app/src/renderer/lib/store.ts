@@ -5,6 +5,7 @@ import { create } from "zustand";
 import type { Attachment, WorkspaceInfo } from "../../shared/types";
 import type { AppInfo, ComposerPrefs, ComposerState, ConversationDetail, ConversationRow, ListFilter, ListQuery, ListResult, PlanUsage, SearchResult, Settings, SidebarData, SyncStatus } from "../../shared/types";
 import { api } from "./api";
+import { pcWord } from "./platform";
 
 export interface Toast {
   id: number;
@@ -457,7 +458,7 @@ export const useStore = create<State>((set, get) => ({
     // Never two writers: a conversation still open here is left alone (the main
     // process checks again before anything is deleted).
     if (row.runningHere) {
-      get().toast({ text: "It's open in Claude Code on this PC. Close it there first, then delete.", icon: "alert" });
+      get().toast({ text: `It's open in Claude Code on this ${pcWord()}. Close it there first, then delete.`, icon: "alert" });
       return;
     }
     if (get().selectedId === id) selectNeighbour(get(), id);

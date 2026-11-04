@@ -30,7 +30,8 @@ try {
     });
   const before = await state();
   check("normally: sidebar and list show, no strip", before.sidebar && before.list && !before.strip, JSON.stringify(before));
-  await win.keyboard.press("Control+F");
+  // ControlOrMeta: Ctrl on Windows, Cmd on a Mac, as the app's shortcuts are.
+  await win.keyboard.press("ControlOrMeta+F");
   await win.waitForTimeout(400);
   const focused = await state();
   check("Ctrl+F: only the chat, full width, with the usage strip", !focused.sidebar && !focused.list && focused.strip && focused.meters === before.meters && focused.detailWidth === focused.width, JSON.stringify(focused));
@@ -41,7 +42,7 @@ try {
       const c = document.querySelector(".composer")?.getBoundingClientRect();
       return { left: Math.round(u?.left ?? -1), right: Math.round(u?.right ?? -1), top: Math.round(u?.top ?? -1), bottom: Math.round(u?.bottom ?? -1), composerLeft: Math.round(c?.left ?? -1), composerBottom: Math.round(c?.bottom ?? -1) };
     });
-  await win.keyboard.press("Control+N");
+  await win.keyboard.press("ControlOrMeta+N");
   await win.waitForTimeout(500);
   const wide = await place();
   check("the meters sit at the bottom left, clear of the message box", wide.left === 20 && wide.composerLeft > 0 && wide.right < wide.composerLeft, JSON.stringify(wide));
@@ -53,13 +54,13 @@ try {
   await win.screenshot({ path: path.join(out, "focus-mode-narrow.png") });
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1320, 860));
   await win.waitForTimeout(500);
-  await win.keyboard.press("Control+F");
+  await win.keyboard.press("ControlOrMeta+F");
   await win.waitForTimeout(400);
   const back = await state();
   check("Ctrl+F again: everything comes back", back.sidebar && back.list && !back.strip, JSON.stringify(back));
-  await win.keyboard.press("Control+F");
+  await win.keyboard.press("ControlOrMeta+F");
   await win.waitForTimeout(300);
-  await win.keyboard.press("Control+K");
+  await win.keyboard.press("ControlOrMeta+K");
   await win.waitForTimeout(400);
   const search = await win.evaluate(() => ({ sidebar: !!document.querySelector(".sidebar"), typing: !!document.activeElement?.closest(".search-field") }));
   check("Ctrl+K in focus mode brings the sidebar back to search", search.sidebar && search.typing, JSON.stringify(search));

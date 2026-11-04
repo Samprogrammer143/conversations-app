@@ -14,6 +14,7 @@ import { sessionProcesses } from "./chat/terminals";
 import { detectEngineVersion, runEngineSerial } from "./sync/engine-bridge";
 import { settings } from "./settings";
 import { log } from "./log";
+import { PC } from "./words";
 
 /**
  * A chat from another PC, whose folder isn't known here: says what is being asked first
@@ -23,10 +24,10 @@ export async function chooseFolder(win: BrowserWindow | null, projectLabel: stri
   const ask: Electron.MessageBoxOptions = {
     type: "question",
     title: "Conversations",
-    message: `Where should Claude work on this PC?`,
+    message: `Where should Claude work on this ${PC}?`,
     detail: fromOtherPc
-      ? `This chat ran in ${projectLabel} on another PC, and this PC doesn't know that folder. Pick your copy of the project, or start with a new empty folder. The whole conversation comes along, but files that are only on the other PC don't.`
-      : `This PC doesn't know where ${projectLabel} is yet. Pick your copy of the project, or start with a new empty folder.`,
+      ? `This chat ran in ${projectLabel} on another PC, and this ${PC} doesn't know that folder. Pick your copy of the project, or start with a new empty folder. The whole conversation comes along, but files that are only on the other PC don't.`
+      : `This ${PC} doesn't know where ${projectLabel} is yet. Pick your copy of the project, or start with a new empty folder.`,
     buttons: ["Pick my copy", "New empty folder", "Cancel"],
     defaultId: 0,
     cancelId: 2,
@@ -134,7 +135,7 @@ export async function openInCli(args: {
   localTranscript: (id: string) => string | null;
 }): Promise<{ ok: boolean; message: string }> {
   const claude = await refreshClaude();
-  if (!claude.found || !claude.path) return { ok: false, message: "Claude Code isn't installed on this PC" };
+  if (!claude.found || !claude.path) return { ok: false, message: `Claude Code isn't installed on this ${PC}` };
   // In a workspace other than the first, its own `claude-<id>` command (it carries the workspace's folders).
   const exe = process.env.CONVERSATIONS_CLAUDE_LAUNCHER || claude.path;
   let projectFolder = isDir(args.folder) ? args.folder : null;
@@ -184,7 +185,7 @@ export async function openInCli(args: {
 
 export async function newChatInCli(folder: string): Promise<{ ok: boolean; message: string }> {
   const claude = await refreshClaude();
-  if (!claude.found || !claude.path) return { ok: false, message: "Claude Code isn't installed on this PC" };
+  if (!claude.found || !claude.path) return { ok: false, message: `Claude Code isn't installed on this ${PC}` };
   launchInTerminal(folder, process.env.CONVERSATIONS_CLAUDE_LAUNCHER || claude.path, []);
   return { ok: true, message: `Claude Code started in ${TERMINAL}` };
 }

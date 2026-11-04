@@ -14,6 +14,7 @@ import { log } from "./log";
 import { openElsewhere } from "./open-windows";
 import { findClaudeNow } from "./claude";
 import { localBase } from "../shared/dirs";
+import { PC } from "./words";
 
 /** Is this workspace's Claude Code signed in? (Only whether a login exists is read, never the login itself.) */
 export function signedIn(w: Workspace): boolean {
@@ -166,13 +167,13 @@ export async function setUpWorkspace(input: { id?: string; name: string; remote:
       } catch {}
     }
     const github = /could not read from remote|authentication failed|permission denied|repository not found|returned error: 40[34]/i.test(r.out);
-    return { ok: false, id, err: github ? "GitHub didn't let this PC into that repository. Check the address, and that you can open it on github.com while signed in." : why };
+    return { ok: false, id, err: github ? `GitHub didn't let this ${PC} into that repository. Check the address, and that you can open it on github.com while signed in.` : why };
   }
   addWorkspace({ id, name, remote });
   await shareWorkspace({ id, name, remote });
   writeLauncher(w);
   seedSettings(w);
-  log("app", `workspace ${id} set up on this PC`);
+  log("app", `workspace ${id} set up on this ${PC}`);
   return { ok: true, id };
 }
 

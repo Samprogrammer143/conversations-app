@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatStatus } from "../src/shared/types";
 import { CONTINUING, handOver, NO_FOLDER, NOT_HERE, OPEN_ON_THIS_PC, WRITTEN_JUST_NOW, type HandoverDeps, type PullOutcome } from "../src/main/handover";
 import { ChatManager, STOPPED_BEFORE_START, type SessionLike } from "../src/main/chat/manager";
+import { PC } from "../src/main/words";
 import type { SessionOptions } from "../src/main/chat/session";
 
 process.env.CONVERSATIONS_DATA_DIR = path.join(os.tmpdir(), `conversations-test-${process.pid}`);
@@ -123,7 +124,7 @@ describe("N3: the folder where --resume finds it", () => {
     const a = deps({ pull: failing });
     expect((await handOver(ID, { projectFolder: PROJECT, recordedCwd: null }, a.d)).folder).toBe(PROJECT);
     const b = deps({ pull: failing, localTranscript: () => null });
-    expect(await handOver(ID, { projectFolder: PROJECT, recordedCwd: null }, b.d)).toEqual({ ok: false, message: "Couldn't bring it to this PC: github.com didn't answer" });
+    expect(await handOver(ID, { projectFolder: PROJECT, recordedCwd: null }, b.d)).toEqual({ ok: false, message: `Couldn't bring it to this ${PC}: github.com didn't answer` });
     const c = deps({ pull: async () => null, localTranscript: () => null });
     expect(await handOver(ID, { projectFolder: PROJECT, recordedCwd: null }, c.d)).toEqual({ ok: false, message: NOT_HERE });
   });

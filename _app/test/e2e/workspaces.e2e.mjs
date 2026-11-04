@@ -180,7 +180,7 @@ try {
   check("the menu offers Sign in for the workspace, and says it isn't signed in", signItem === "Sign in to Test WS…" && sub === "Not signed in", `${signItem} | ${sub}`);
   await win.keyboard.press("Escape");
   // A new chat (where a new workspace starts) says so too.
-  await win.keyboard.press("Control+N");
+  await win.keyboard.press("ControlOrMeta+N");
   const draftBanner = await waitFor(win, () => (document.querySelector('section[aria-label="New chat"]') ? [...document.querySelectorAll(".banner")].map((b) => b.textContent).find((t) => t.includes("isn't signed in")) ?? null : null), null, 10_000);
   check("a new chat says the workspace isn't signed in, with Sign in", !!draftBanner && draftBanner.includes("Sign in"), draftBanner ?? "");
   // Sign in from the banner: a sheet, no terminal. A wrong code says why; the right one signs in.
@@ -220,6 +220,7 @@ try {
   const gone = closed(app);
   await win.click(".list-toolbar, .sb-content");
   // The app closes while the key is still going down: the runner may call that an error.
+  // Control on a Mac too: Cmd+Shift+3, 4 and 5 are the Mac's screenshots.
   await win.keyboard.press("Control+Shift+Digit1").catch(() => {});
   check("Ctrl+Shift+1 switches back", await Promise.race([gone, new Promise((r) => setTimeout(() => r(false), 15_000))]));
 } catch (e) {
@@ -272,7 +273,7 @@ try {
     label: document.querySelector(".ws-menu .menu-label")?.textContent ?? null,
   }));
   await win.screenshot({ path: path.join(out, "ws-disconnected-menu.png") });
-  check("the menu lists it apart, to reconnect", menu.label === "Not in Conversations on this PC" && menu.items.some((t) => t.includes("Acme & Co") && t.includes("Disconnected · reconnect")), JSON.stringify(menu));
+  check("the menu lists it apart, to reconnect", menu.label === `Not in Conversations on this ${process.platform === "darwin" ? "Mac" : "PC"}` && menu.items.some((t) => t.includes("Acme & Co") && t.includes("Disconnected · reconnect")), JSON.stringify(menu));
   check("the last connected workspace can't be disconnected (nothing else to show)", !menu.items.some((t) => t.startsWith("Disconnect")), JSON.stringify(menu.items));
   const keys = await win.evaluate(() => [...document.querySelectorAll(".ws-menu .shortcut")].map((s) => s.textContent));
   check("Ctrl+Shift numbers count only connected workspaces", keys.length === 0, JSON.stringify(keys));

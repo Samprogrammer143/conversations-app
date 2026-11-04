@@ -8,6 +8,8 @@ import { api } from "../lib/api";
 import { sentLabel, useStore } from "../lib/store";
 import { SEP, modelLabel } from "../lib/format";
 import { fitImage, fromBase64, MAX_BASE64 } from "../lib/images";
+import { ctrlLabel, keyLabel, mod } from "../lib/keys";
+import { pcWord } from "../lib/platform";
 import { Transcript } from "./Transcript";
 import { McpPanel } from "./McpPanel";
 import { signInWorkspace } from "./Workspaces";
@@ -153,7 +155,7 @@ function PermissionCard({ p }: { p: PermissionRequest }) {
       aria-label={p.title}
       onKeyDown={(e) => {
         if (e.key === "Escape") respond("deny");
-        if (e.key === "Enter" && e.ctrlKey && p.destructive) {
+        if (e.key === "Enter" && mod(e) && p.destructive) {
           e.preventDefault();
           respond("allow");
         }
@@ -171,7 +173,7 @@ function PermissionCard({ p }: { p: PermissionRequest }) {
       {p.body && <pre className="command">{p.body}</pre>}
       {p.consequence && <div className="reason">{p.consequence}</div>}
       <div className="actions">
-        <span className="hint">{p.destructive ? `Enter to deny${SEP}Ctrl+Enter to allow` : `Enter to allow${SEP}Esc to deny`}</span>
+        <span className="hint">{p.destructive ? `Enter to deny${SEP}${keyLabel("Ctrl+Enter")} to allow` : `Enter to allow${SEP}Esc to deny`}</span>
         {p.allowAlways && !p.destructive && (
           <Button kind="plain" onClick={() => respond("allow-always")}>
             Always allow
@@ -254,7 +256,7 @@ function QuestionCard({ p }: { p: PermissionRequest }) {
       onKeyDown={(e) => {
         // Esc skips only before anything is chosen: a stray key never throws answers away.
         if (e.key === "Escape" && !(e.target instanceof HTMLInputElement) && !touched) skip();
-        if (e.key === "Enter" && e.ctrlKey) {
+        if (e.key === "Enter" && mod(e)) {
           e.preventDefault();
           void send();
         }
@@ -316,7 +318,7 @@ function QuestionCard({ p }: { p: PermissionRequest }) {
                   if (!q.multiSelect && v.trim()) setPicked((s) => ({ ...s, [q.question]: [] }));
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.ctrlKey) {
+                  if (e.key === "Enter" && !mod(e)) {
                     e.preventDefault();
                     void send();
                   }
@@ -327,7 +329,7 @@ function QuestionCard({ p }: { p: PermissionRequest }) {
         );
       })}
       <div className="actions">
-        <span className="hint">{touched ? "Ctrl+Enter to send" : `Ctrl+Enter to send${SEP}Esc to skip`}</span>
+        <span className="hint">{touched ? `${keyLabel("Ctrl+Enter")} to send` : `${keyLabel("Ctrl+Enter")} to send${SEP}Esc to skip`}</span>
         <Button kind="plain" onClick={skip}>
           Skip
         </Button>
@@ -758,7 +760,8 @@ function Composer({
   const shownModel = (chosen && models.find((m) => m.value === chosen)?.label) ?? modelLabel(chosen) ?? "Default model";
   // Up and Down go round the current models, in the message box (while typing too) and anywhere
   // else in the window; Ctrl+M does at any time. A message over several lines keeps its cursor
-  // keys, and a menu, a card or a list with its own arrows keeps them.
+  // keys, and a menu, a card or a list with its own arrows keeps them. Ctrl+M is Control on a
+  // Mac too (Cmd+M minimises there), so Cmd with anything is never for this.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.altKey || e.shiftKey || e.metaKey) return;
@@ -890,7 +893,7 @@ function Composer({
           </span>
         ) : (
           <>
-            <button type="button" className="chip" aria-label="Model" title={`${shownModel}. Switch model: Up and Down in the message box, or Ctrl+M`} aria-haspopup="menu" aria-expanded={menu?.kind === "model"} onClick={(e) => setMenu({ kind: "model", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
+            <button type="button" className="chip" aria-label="Model" title={`${shownModel}. Switch model: Up and Down in the message box, or ${ctrlLabel("Ctrl+M")}`} aria-haspopup="menu" aria-expanded={menu?.kind === "model"} onClick={(e) => setMenu({ kind: "model", at: (e.currentTarget as HTMLElement).getBoundingClientRect() })}>
               <Icon name="sparkle" size={14} />
               <span className="chip-label always">{shownModel}</span>
               <Icon name="chevron-down" size={12} />
@@ -910,7 +913,7 @@ function Composer({
           </button>
         )}
         <span className="spacer" />
-        <span className="alert-switch" title="Alert mode: this chat comes to the front of your screen when it finishes or needs you. Only on this PC.">
+        <span className="alert-switch" title={`Alert mode: this chat comes to the front of your screen when it finishes or needs you. Only on this ${pcWord()}.`}>
           <span aria-hidden>Alert</span>
           <Toggle label="Alert mode: bring this chat to the front when it finishes or needs you" checked={!!prefs?.alert} onChange={(v) => setPrefs(key, { alert: v })} />
         </span>
@@ -998,7 +1001,7 @@ function SignInBanner() {
     <div className="banner accent">
       <Icon name="info" />
       <div className="text">
-        <span className="title">{signedOut.name} isn't signed in to Claude on this PC</span>
+        <span className="title">{signedOut.name} isn't signed in to Claude on this {pcWord()}</span>
         <span className="sub">Claude can't answer until it is. The sign-in opens in your browser.</span>
       </div>
       <Button kind="primary" icon="lock" onClick={() => signInWorkspace(signedOut)}>
@@ -1036,7 +1039,7 @@ function Draft({ narrow }: { narrow: boolean }) {
           <span className="t2 ellipsis" title={draft.folder ?? undefined}>
             in {draft.label}
             {SEP}
-            {info?.machine ?? "this PC"}
+            {info?.machine ?? `this ${pcWord()}`}
           </span>
         </div>
         <ToolbarButton icon="folder-open" title="Choose the folder this chat runs in" onClick={() => void chooseDraftFolder()}>
@@ -1048,7 +1051,7 @@ function Draft({ narrow }: { narrow: boolean }) {
           <Icon name="square-pen" size={16} />
         </span>
         <div className="title">New chat in {draft.label}</div>
-        <div className="line">{draft.folder ? `Claude Code runs in ${draft.folder}, with that folder’s CLAUDE.md, tools and MCP servers.` : "Claude Code runs in this project’s folder on this PC, with its CLAUDE.md, tools and MCP servers."}</div>
+        <div className="line">{draft.folder ? `Claude Code runs in ${draft.folder}, with that folder’s CLAUDE.md, tools and MCP servers.` : `Claude Code runs in this project’s folder on this ${pcWord()}, with its CLAUDE.md, tools and MCP servers.`}</div>
       </div>
       <div className="composer-wrap">
         {waitingFor ? (
@@ -1058,7 +1061,7 @@ function Draft({ narrow }: { narrow: boolean }) {
           </div>
         ) : null}
         <SignInBanner />
-        <Composer id={null} projectId={draft.projectId} folder={draft.folder ?? null} status={null} disabledReason={!info?.claude.found ? "Chat needs Claude Code on this PC" : null} onSent={(cid) => setWaitingFor(cid)} lastModel={resolveAlias(info?.claude.defaultModel ?? null)} />
+        <Composer id={null} projectId={draft.projectId} folder={draft.folder ?? null} status={null} disabledReason={!info?.claude.found ? `Chat needs Claude Code on this ${pcWord()}` : null} onSent={(cid) => setWaitingFor(cid)} lastModel={resolveAlias(info?.claude.defaultModel ?? null)} />
       </div>
     </section>
   );
@@ -1126,7 +1129,7 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
         <div className="detail-toolbar drag" />
         <div className="empty">
           <div className="title">No conversation selected</div>
-          <div className="line">{useStore.getState().focus ? "Press Ctrl+F to leave focus mode, or Ctrl+N for a new chat." : "Pick one from the list, or press Ctrl+K."}</div>
+          <div className="line">{useStore.getState().focus ? `Press ${keyLabel("Ctrl+F")} to leave focus mode, or ${keyLabel("Ctrl+N")} for a new chat.` : `Pick one from the list, or press ${keyLabel("Ctrl+K")}.`}</div>
         </div>
       </section>
     );
@@ -1136,12 +1139,12 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
     const r = await api.cli.open(row.id);
     toast({ text: r.message, icon: r.ok ? "terminal" : "alert" });
   };
-  const chatBlocked = !info?.claude.found ? "Chat needs Claude Code on this PC" : null;
+  const chatBlocked = !info?.claude.found ? `Chat needs Claude Code on this ${pcWord()}` : null;
   const running = !!status && BUSY.includes(status.state);
   // "Live on this PC · website · 6 prompts": the same words whether the
   // chat runs in this app or in a terminal here, with "Live" in medium weight.
   const parts = detail.subtitle.split("  ·  ");
-  if (running && !parts[0].startsWith("Live")) parts[0] = "Live on this PC";
+  if (running && !parts[0].startsWith("Live")) parts[0] = `Live on this ${pcWord()}`;
   const lead = parts[0];
   const rest = parts.slice(1).join(SEP);
   const agents = agentList;
@@ -1151,7 +1154,7 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
   return (
     <section className={`detail${agentsOpen ? (roomBeside ? " agents-beside" : " agents-over") : ""}`} aria-label={row.title} ref={section}>
       <div className={`detail-toolbar drag${onBack ? " with-back" : ""}`}>
-        {onBack && <IconButton icon="arrow-left" label="Back (Alt+Left)" onClick={onBack} />}
+        {onBack && <IconButton icon="arrow-left" label={`Back (${keyLabel("Alt+Left")})`} onClick={onBack} />}
         <div className="detail-title">
           <span className="t1 ellipsis">
             <span className="title-text">{row.title}</span>
@@ -1170,9 +1173,9 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
           </span>
         </div>
         {narrow ? (
-          <GlassCircle icon="terminal" label="Open in CLI (Ctrl+Shift+O)" onClick={openCli} />
+          <GlassCircle icon="terminal" label={`Open in CLI (${keyLabel("Ctrl+Shift+O")})`} onClick={openCli} />
         ) : (
-          <ToolbarButton icon="square-terminal" onClick={openCli} title="Open in CLI (Ctrl+Shift+O)">
+          <ToolbarButton icon="square-terminal" onClick={openCli} title={`Open in CLI (${keyLabel("Ctrl+Shift+O")})`}>
             Open in CLI
           </ToolbarButton>
         )}
@@ -1211,7 +1214,7 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
             <Icon name="git-fork" />
             <div className="text">
               <span className="title">Also open on {detail.alsoOpenOn.pc}, updated just now</span>
-              <span className="sub">Sending from this PC starts a branch. Both parts are kept.</span>
+              <span className="sub">Sending from this {pcWord()} starts a branch. Both parts are kept.</span>
             </div>
           </div>
         )}

@@ -23,7 +23,7 @@ try {
   await win.waitForTimeout(2500);
   const projectId = "folder:big-image-e2e";
   await win.evaluate(({ projectId, scratch }) => window.conversations.settings.get().then((s) => window.conversations.settings.set({ folders: { ...s.folders, [projectId]: scratch } })), { projectId, scratch });
-  await win.keyboard.press("Control+N");
+  await win.keyboard.press("ControlOrMeta+N");
   await win.waitForTimeout(800);
   await win.fill('textarea[aria-label="Message"]', "");
 

@@ -11,6 +11,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type * as Sdk from "@anthropic-ai/claude-agent-sdk";
 import { appRepoDir } from "../paths";
+import { PC } from "../words";
 
 const PKG = path.join("node_modules", "@anthropic-ai", "claude-agent-sdk");
 let mod: typeof Sdk | null = null;
@@ -53,7 +54,7 @@ export function sdkCandidates(installDir: string | null, resourcesDir: string | 
 
 export async function loadSdk(installDir: string | null, resourcesDir: string | null = null): Promise<{ ok: boolean; from: string | null; err?: string }> {
   if (mod) return { ok: true, from: loadedFrom };
-  let lastErr = "Claude's Agent SDK isn't installed on this PC";
+  let lastErr = `Claude's Agent SDK isn't installed on this ${PC}`;
   for (const dir of sdkCandidates(installDir, resourcesDir)) {
     if (!hasSdk(dir)) continue;
     try {
@@ -71,6 +72,6 @@ export const sdkLoadedFrom = () => loadedFrom;
 
 /** The SDK's query(), once loadSdk() found it. */
 export const query: typeof Sdk.query = ((...args: Parameters<typeof Sdk.query>) => {
-  if (!mod) throw new Error("Claude's Agent SDK isn't installed on this PC yet. The app installs it from npm by itself while this PC is online: try again in a few minutes, or run Set up Conversations again");
+  if (!mod) throw new Error(`Claude's Agent SDK isn't installed on this ${PC} yet. The app installs it from npm by itself while this ${PC} is online: try again in a few minutes, or run Set up Conversations again`);
   return mod.query(...args);
 }) as typeof Sdk.query;

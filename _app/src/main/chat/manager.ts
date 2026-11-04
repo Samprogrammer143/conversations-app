@@ -21,6 +21,7 @@ import { log } from "../log";
 import { projectsDir } from "../paths";
 import { encodeCwd } from "../resume-folder";
 import { agentLogFile, mergeAgentLogs, readAgentLog, type AgentResult } from "./agents";
+import { PC } from "../words";
 
 export interface ChatManagerLike extends EventEmitter {
   isRunning(id: string): boolean;
@@ -110,7 +111,7 @@ export interface ManagerDeps {
 /** `ran`: a "!" command ran, so the window must not offer it to run again. */
 export type SendResult = { ok: boolean; conversationId?: string; err?: string; ran?: boolean };
 
-export const OPEN_IN_TERMINAL = "This conversation is open in a terminal on this PC. Carry on there, or close it first.";
+export const OPEN_IN_TERMINAL = `This conversation is open in a terminal on this ${PC}. Carry on there, or close it first.`;
 export const STILL_STARTING = "Claude Code is still starting for this conversation. Send it again in a moment.";
 export const STOPPED_BEFORE_START = "Stopped before Claude Code started.";
 
@@ -255,7 +256,7 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
    */
   async shell(args: StartArgs & { command: string; draftKey?: string }): Promise<SendResult> {
     const claudePath = this.deps.claudePath();
-    if (!claudePath) return { ok: false, err: "Chat needs Claude Code on this PC" };
+    if (!claudePath) return { ok: false, err: `Chat needs Claude Code on this ${PC}` };
     const id = args.id;
     const key = id ?? draftShellKey(args.draftKey ?? args.cwd);
     // Checked before and after the await, and the command registered before the next one.
@@ -331,7 +332,7 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
    */
   async mcp(id: string | null, cwd: string, opts: Pick<StartArgs, "model" | "effort" | "permissionMode"> = {}, look?: { noStart?: boolean }): Promise<McpPanelData> {
     const claudePath = this.deps.claudePath();
-    if (!claudePath) throw new Error("Claude Code isn't installed on this PC");
+    if (!claudePath) throw new Error(`Claude Code isn't installed on this ${PC}`);
     let note: string | undefined;
     // Looking again while a sign-in waits: only the running Claude Code (a new one wouldn't be waiting for the browser).
     if (look?.noStart) {
@@ -363,7 +364,7 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
     if (start) await start.done;
     else {
       const r = await this.resume(id, { id, text: "", cwd, idle: true, model: opts.model ?? null, effort: opts.effort ?? null, permissionMode: opts.permissionMode ?? "default" }, claudePath);
-      if (!r.ok) return { err: r.err === OPEN_IN_TERMINAL ? "This chat is open in a terminal on this PC: use /mcp there, or close it first." : r.err };
+      if (!r.ok) return { err: r.err === OPEN_IN_TERMINAL ? `This chat is open in a terminal on this ${PC}: use /mcp there, or close it first.` : r.err };
     }
     const s = this.sessions.get(id);
     return s?.alive ? { s, fresh: !start } : { err: "Claude Code didn't start for this chat." };
@@ -390,7 +391,7 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
     if (!s?.alive) {
       // It stopped since the panel opened (idle for a while): start it again for this.
       const claudePath = this.deps.claudePath();
-      if (!claudePath) return { ok: false, err: "Chat needs Claude Code on this PC" };
+      if (!claudePath) return { ok: false, err: `Chat needs Claude Code on this ${PC}` };
       const live = await this.ensureLive(id, s?.cwd ?? cwd, opts, claudePath);
       if (!live.s) return { ok: false, err: live.err ?? "Claude Code didn't start for this chat." };
       s = live.s;
@@ -454,7 +455,7 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
 
   async send(args: StartArgs): Promise<SendResult> {
     const claudePath = this.deps.claudePath();
-    if (!claudePath) return { ok: false, err: "Chat needs Claude Code on this PC" };
+    if (!claudePath) return { ok: false, err: `Chat needs Claude Code on this ${PC}` };
     if (!args.id) return this.startNew(args, claudePath);
     const id = args.id;
     // While a "!" command runs here, a message would race its record into the conversation.

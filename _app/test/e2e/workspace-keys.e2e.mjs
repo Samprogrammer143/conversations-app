@@ -38,7 +38,7 @@ let wsId = null;
 let { app, win } = await launch();
 try {
   const box = 'textarea[aria-label="Message"]';
-  await win.keyboard.press("Control+N");
+  await win.keyboard.press("ControlOrMeta+N");
   await win.waitForTimeout(600);
   // One workspace: the keys do nothing.
   await win.evaluate(() => document.activeElement?.blur());
@@ -74,7 +74,7 @@ try {
 try {
   const name = await win.evaluate(() => document.querySelector(".ws-name")?.textContent);
   check("it comes back in the next workspace", name === "Test WS", name ?? "");
-  await win.keyboard.press("Control+N");
+  await win.keyboard.press("ControlOrMeta+N");
   await win.waitForTimeout(600);
   await win.evaluate(() => document.activeElement?.blur());
   const gone = closed(app);

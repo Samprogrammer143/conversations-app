@@ -15,6 +15,7 @@ import { log } from "../log";
 import { isDecision, type Decision, type EffortLevel, type PermissionMode } from "../validate";
 import { classifyTool, destructiveFallback, serverName } from "./destructive";
 import { remember, rememberCommands, toChoices, toCommands, type ModelChoice } from "./models";
+import { PC } from "../words";
 
 /** Streamed text reaches the window at most this often (20 times a second). */
 const STREAM_EMIT_MS = 50;
@@ -979,6 +980,6 @@ const stripDiagnostics = (s: string) => s.replace(/\[[a-z_]+_diagnostic\][^\n]*/
 function plainError(msg: string): string {
   const m = stripDiagnostics(msg);
   if (!m) return "The conversation is saved up to here.";
-  if (/ENOENT|not found|spawn/i.test(m)) return "Claude Code could not be started on this PC. Check that it is installed, then try again.";
+  if (/ENOENT|not found|spawn/i.test(m)) return `Claude Code could not be started on this ${PC}. Check that it is installed, then try again.`;
   return `${m.slice(0, 280)}${m.length > 280 ? "…" : ""} The conversation is saved up to here.`;
 }

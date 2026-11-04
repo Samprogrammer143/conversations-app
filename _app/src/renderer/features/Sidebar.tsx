@@ -4,6 +4,8 @@ import { Icon } from "../components/Icon";
 import { IconButton, Kbd, Spinner, Tile } from "../components/controls";
 import { useStore } from "../lib/store";
 import { api } from "../lib/api";
+import { keyLabel, mod } from "../lib/keys";
+import { pcWord } from "../lib/platform";
 import { chooseDraftFolder } from "./Detail";
 import { WorkspaceSwitcher } from "./Workspaces";
 import { ago, resetText, time24 } from "../lib/format";
@@ -99,7 +101,7 @@ export function SearchField() {
             ref.current?.blur();
           } else if (e.key === "Enter") {
             e.preventDefault();
-            window.dispatchEvent(new CustomEvent("app:search-enter", { detail: { ctrl: e.ctrlKey } }));
+            window.dispatchEvent(new CustomEvent("app:search-enter", { detail: { ctrl: mod(e) } }));
           }
         }}
       />
@@ -108,7 +110,7 @@ export function SearchField() {
           <Icon name="x" size={10} strokeWidth={2.5} />
         </button>
       ) : (
-        <Kbd>Ctrl+K</Kbd>
+        <Kbd>{keyLabel("Ctrl+K")}</Kbd>
       )}
     </div>
   );
@@ -140,7 +142,7 @@ export function Sidebar({ overlay = false }: { overlay?: boolean }) {
       <div className="sb-titlebar drag">
         <WorkspaceSwitcher />
         <span className="spacer" />
-        <IconButton icon="panel-left" label="Hide sidebar (Ctrl+B)" onClick={() => window.dispatchEvent(new Event("app:toggle-sidebar"))} />
+        <IconButton icon="panel-left" label={`Hide sidebar (${keyLabel("Ctrl+B")})`} onClick={() => window.dispatchEvent(new Event("app:toggle-sidebar"))} />
       </div>
       <div className="sb-content scroll">
         <SearchField />
@@ -166,7 +168,7 @@ export function Sidebar({ overlay = false }: { overlay?: boolean }) {
             label={d.name}
             lead={<Tile size={16} glyphSize={13} glyph={d.glyph} />}
             status={d.status === "old-sync" ? "warning" : null}
-            trail={d.name === machine ? "This PC" : d.lastSeenAt ? ago(d.lastSeenAt) : ""}
+            trail={d.name === machine ? `This ${pcWord()}` : d.lastSeenAt ? ago(d.lastSeenAt) : ""}
           />
         ))}
       </div>
@@ -179,7 +181,7 @@ export function Sidebar({ overlay = false }: { overlay?: boolean }) {
             <span className="t2 ellipsis">{sync?.detail ?? ""}</span>
           </span>
         </button>
-        <IconButton icon="settings" label="Settings (Ctrl+,)" onClick={() => void api.app.showSettings()} />
+        <IconButton icon="settings" label={`Settings (${keyLabel("Ctrl+,")})`} onClick={() => void api.app.showSettings()} />
       </div>
     </aside>
   );
