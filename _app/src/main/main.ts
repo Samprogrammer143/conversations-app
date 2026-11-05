@@ -348,6 +348,7 @@ function makeMain(show: boolean): BrowserWindow {
     // Closing the window keeps the tray agent (and sync) running.
     if (!quitting) {
       e.preventDefault();
+      stopDrawing(w);
       // (A Mac window in full screen leaves full screen first, or its empty Space stays behind.)
       if (isMac && w.isFullScreen()) {
         w.once("leave-full-screen", () => w.hide());
@@ -1167,6 +1168,55 @@ function takeKeyboardWhenIdle(w: BrowserWindow, minimized: boolean) {
     }
   }, 500);
 }
+// A window that sat behind another program stops being drawn, and brought forward without the
+// keyboard it can go on showing the picture from before for a while, until a click (a finished
+// reply missing: photos of the screen showed the chat as it was a minute earlier). So it is told
+// to draw again, and comes forward a moment later; the usual saving is back once you're in the
+// window, or it is hidden or minimized, or after half a minute.
+const DRAW_FIRST_MS = 150;
+let drawing: { w: BrowserWindow; timer: NodeJS.Timeout | null; done: () => void; before: boolean } | null = null;
+function drawNow(w: BrowserWindow) {
+  if (drawing && drawing.w !== w) drawing.done();
+  if (!drawing) {
+    const done = () => {
+      if (drawing?.done !== done) return;
+      const { w: win, timer, before } = drawing;
+      drawing = null;
+      if (timer) clearTimeout(timer);
+      win.off("focus", done);
+      win.off("hide", done);
+      win.off("minimize", done);
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.setBackgroundThrottling(before);
+    };
+    drawing = { w, timer: null, done, before: w.webContents.getBackgroundThrottling() };
+    w.once("focus", done);
+    w.once("hide", done);
+    w.once("minimize", done);
+  }
+  if (drawing.timer) clearTimeout(drawing.timer);
+  drawing.timer = setTimeout(drawing.done, 30_000);
+  drawing.timer.unref?.();
+  // (For the log: whether Chromium had the covered page as hidden, read before it is shown again,
+  // but never waited on for long: a busy page mustn't hold up the drawing.)
+  const wc = w.webContents;
+  const t0 = Date.now();
+  const state = `window ${w.isVisible() ? "shown" : "hidden"}${w.isMinimized() ? ", minimized" : ""}`;
+  const read = wc.executeJavaScript("document.visibilityState").then(
+    (v) => `${v} (${state}, answered in ${Date.now() - t0} ms)`,
+    () => `unknown (${state})`,
+  );
+  void Promise.race([read, new Promise<string>((r) => setTimeout(() => r(`unknown (${state}, no answer in 50 ms)`), 50))]).then((seen) => {
+    log("app", `alert mode: the page was ${seen}`);
+    // Ended meanwhile (you came into the window, it was hidden, or it's another window now): nothing to switch.
+    if (wc.isDestroyed() || drawing?.w !== w) return;
+    wc.setBackgroundThrottling(false);
+    wc.invalidate();
+  });
+}
+/** Back to the usual saving before a window is hidden (hidden first, Chromium would keep drawing it). */
+function stopDrawing(w: BrowserWindow) {
+  if (drawing?.w === w) drawing.done();
+}
 const RAISE_GAP_MS = 8000;
 let lastRaisedId: string | null = null;
 function alertChat(id: string, why: AlertWhy, again = false) {
@@ -1191,15 +1241,25 @@ function alertChat(id: string, why: AlertWhy, again = false) {
   lastRaisedId = id;
   log("app", `alert mode: bringing ${id.slice(0, 8)} forward (${why})`);
   const minimized = w.isMinimized();
-  if (!w.isVisible()) w.showInactive();
-  if (!minimized) {
-    w.setAlwaysOnTop(true);
-    w.moveTop();
-    w.setAlwaysOnTop(false);
-  }
-  w.webContents.send("event:alert", { id, raised: true, text, why });
-  // Settings or the tray popup in use: the chat comes into view, but the keyboard stays there.
-  if (!BrowserWindow.getFocusedWindow()) takeKeyboardWhenIdle(w, minimized);
+  const wasVisible = w.isVisible();
+  // (A minimized window draws again as it comes back.)
+  if (!minimized) drawNow(w);
+  setTimeout(
+    () => {
+      // (Closed in that moment: it stays closed.)
+      if (w.isDestroyed() || quitting || (wasVisible && !w.isVisible())) return;
+      if (!w.isVisible()) w.showInactive();
+      if (!minimized) {
+        w.setAlwaysOnTop(true);
+        w.moveTop();
+        w.setAlwaysOnTop(false);
+      }
+      w.webContents.send("event:alert", { id, raised: true, text, why });
+      // Settings or the tray popup in use: the chat comes into view, but the keyboard stays there.
+      if (!BrowserWindow.getFocusedWindow()) takeKeyboardWhenIdle(w, minimized);
+    },
+    minimized ? 0 : DRAW_FIRST_MS,
+  );
 }
 const alerts = new AlertWatcher(alertChat);
 

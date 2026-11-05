@@ -6499,6 +6499,7 @@ function makeMain(show) {
   w.on("close", (e) => {
     if (!quitting) {
       e.preventDefault();
+      stopDrawing(w);
       if (isMac2 && w.isFullScreen()) {
         w.once("leave-full-screen", () => w.hide());
         w.setFullScreen(false);
@@ -7195,6 +7196,46 @@ function takeKeyboardWhenIdle(w, minimized) {
     }
   }, 500);
 }
+var DRAW_FIRST_MS = 150;
+var drawing = null;
+function drawNow(w) {
+  if (drawing && drawing.w !== w) drawing.done();
+  if (!drawing) {
+    const done = () => {
+      if (drawing?.done !== done) return;
+      const { w: win, timer, before } = drawing;
+      drawing = null;
+      if (timer) clearTimeout(timer);
+      win.off("focus", done);
+      win.off("hide", done);
+      win.off("minimize", done);
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.setBackgroundThrottling(before);
+    };
+    drawing = { w, timer: null, done, before: w.webContents.getBackgroundThrottling() };
+    w.once("focus", done);
+    w.once("hide", done);
+    w.once("minimize", done);
+  }
+  if (drawing.timer) clearTimeout(drawing.timer);
+  drawing.timer = setTimeout(drawing.done, 3e4);
+  drawing.timer.unref?.();
+  const wc = w.webContents;
+  const t0 = Date.now();
+  const state = `window ${w.isVisible() ? "shown" : "hidden"}${w.isMinimized() ? ", minimized" : ""}`;
+  const read = wc.executeJavaScript("document.visibilityState").then(
+    (v) => `${v} (${state}, answered in ${Date.now() - t0} ms)`,
+    () => `unknown (${state})`
+  );
+  void Promise.race([read, new Promise((r) => setTimeout(() => r(`unknown (${state}, no answer in 50 ms)`), 50))]).then((seen) => {
+    log("app", `alert mode: the page was ${seen}`);
+    if (wc.isDestroyed() || drawing?.w !== w) return;
+    wc.setBackgroundThrottling(false);
+    wc.invalidate();
+  });
+}
+function stopDrawing(w) {
+  if (drawing?.w === w) drawing.done();
+}
 var RAISE_GAP_MS = 8e3;
 var lastRaisedId = null;
 function alertChat(id, why, again = false) {
@@ -7214,14 +7255,22 @@ function alertChat(id, why, again = false) {
   lastRaisedId = id;
   log("app", `alert mode: bringing ${id.slice(0, 8)} forward (${why})`);
   const minimized = w.isMinimized();
-  if (!w.isVisible()) w.showInactive();
-  if (!minimized) {
-    w.setAlwaysOnTop(true);
-    w.moveTop();
-    w.setAlwaysOnTop(false);
-  }
-  w.webContents.send("event:alert", { id, raised: true, text, why });
-  if (!BrowserWindow2.getFocusedWindow()) takeKeyboardWhenIdle(w, minimized);
+  const wasVisible = w.isVisible();
+  if (!minimized) drawNow(w);
+  setTimeout(
+    () => {
+      if (w.isDestroyed() || quitting || wasVisible && !w.isVisible()) return;
+      if (!w.isVisible()) w.showInactive();
+      if (!minimized) {
+        w.setAlwaysOnTop(true);
+        w.moveTop();
+        w.setAlwaysOnTop(false);
+      }
+      w.webContents.send("event:alert", { id, raised: true, text, why });
+      if (!BrowserWindow2.getFocusedWindow()) takeKeyboardWhenIdle(w, minimized);
+    },
+    minimized ? 0 : DRAW_FIRST_MS
+  );
 }
 var alerts = new AlertWatcher(alertChat);
 function openConversation(id) {
