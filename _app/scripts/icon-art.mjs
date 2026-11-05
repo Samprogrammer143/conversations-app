@@ -93,6 +93,25 @@ export function iconSvg({ size = 1024, grid = "full", inset = 0.06, small = fals
 }
 
 /**
+ * The mark alone: the chat with the prompt, no tile, filling the square. For a browser tab, where
+ * the tab bar may be dark or light and a dark tile would vanish on a dark one.
+ */
+export function markSvg({ size = 1024, ids = "mk" } = {}) {
+  // The chat's own box is x 252..772, y 320..792; fitted with a small margin and centred.
+  const s = 1.8;
+  const tx = (1024 - 520 * s) / 2 - 252 * s;
+  const ty = (1024 - 472 * s) / 2 - 320 * s;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 1024 1024">
+  <defs><linearGradient id="${ids}-chat" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${COLORS.chatTop}"/><stop offset="1" stop-color="${COLORS.chatBottom}"/></linearGradient></defs>
+  <g transform="translate(${tx.toFixed(1)} ${ty.toFixed(1)}) scale(${s})">
+    <path d="${CHAT}" fill="url(#${ids}-chat)"/>
+    <path d="${PROMPT}" fill="none" stroke="#fff" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${CURSOR}" fill="none" stroke="#fff" stroke-width="62" stroke-linecap="round"/>
+  </g>
+</svg>`;
+}
+
+/**
  * The Mac menu bar icon: a template image (black on clear; macOS draws it light or dark). The
  * chat in black with the prompt cut out of it; with a dot at the top right, cut clear of the
  * chat, when Claude is waiting for you (a template can't be orange: the dot says it by shape).
