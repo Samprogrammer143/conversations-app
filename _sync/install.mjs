@@ -7,6 +7,8 @@
 // New PC:
 //   git clone https://github.com/Samprogrammer143/conversations-app <app folder>
 //   node <app folder>/_sync/install.mjs --remote <your conversations repo> --machine "Home PC"
+// The chats Claude Code already has on it are uploaded then and there (with
+// --no-upload-existing, each only when it is next carried on).
 //
 // Upgrade an existing install (safe to run again at any time):
 //   node "<app folder>/_sync/install.mjs"
@@ -77,6 +79,7 @@ const machineArg = args.includes("--machine") ? args[args.indexOf("--machine") +
 // The conversations repository to set up (a new PC; another workspace of this one,
 // with its own sync folder in CLAUDE_SYNC_HOME).
 const remoteArg = args.includes("--remote") ? args[args.indexOf("--remote") + 1] : null;
+const uploadExistingArg = !args.includes("--no-upload-existing");
 const say = (m) => console.log(m);
 function die(msg) {
   console.error(msg);
@@ -121,6 +124,8 @@ await import(pathToFileURL(${JSON.stringify(path.join(SYNC_DIR, "repo", "_sync",
     } catch {}
   }
 }
+// A PC (or workspace) set up for the first time; later runs, an update's among them, are not.
+const firstInstall = !fs.existsSync(path.join(SYNC_DIR, "config.json"));
 
 // git runs in the working copy only under the sync's own lock, so the installer never
 // changes it while a sync (a Claude Code hook, or the Conversations app) is at work there.
@@ -298,6 +303,10 @@ let config = {};
 try { config = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch {}
 config.remote = remote;
 config.machine = machineArg || config.machine || os.hostname();
+// Due until it begins (step 7), so a set-up that stops before then still has the chats
+// already here uploaded, by the next sync.
+if (firstInstall && uploadExistingArg) config.uploadExistingDue = true;
+if (!uploadExistingArg) delete config.uploadExistingDue;
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
 
 // 4. Skills, with this PC's path to the tool filled in.
@@ -394,6 +403,14 @@ if (JSON.stringify(settings) !== before) {
     fs.mkdirSync(path.dirname(rulesAbs), { recursive: true });
     fs.writeFileSync(rulesAbs, "# Rules shared across all my PCs\n\nEvery Claude Code chat on every PC reads this file. Edit it anywhere; the other PCs have it after their next sync.\n");
   }
+}
+
+// 7. Set up for the first time, the chats Claude Code already has here go up now, not only
+// when each is next carried on: Claude Code's clean-up (chats unused for 30 days, by default)
+// could delete them first. (Set-up's "Keep them out" gives a new Claude folder, with none.)
+if (config.uploadExistingDue) {
+  const up = spawnSync(process.execPath, [path.join(HERE, "sync.mjs"), "upload-existing"], { stdio: "inherit", env: process.env });
+  if (up.status !== 0) say("      Uploading the earlier chats didn't finish (see above). Conversations uploads the rest by itself later.");
 }
 
 say(`

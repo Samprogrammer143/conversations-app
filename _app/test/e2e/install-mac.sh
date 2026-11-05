@@ -75,18 +75,22 @@ check "...under the name given" 'grep -q "CI Mac" "$SUP/claude-conversation-sync
 check "the app's list names the workspace" 'grep -q "Everything" "$SUP/Conversations/workspaces.json"'
 check "Claude Code's hooks run through conversations-node" 'grep -q "conversations-node" "$HOME/.claude/settings.json"'
 check "...and so do the /push and /pull skills" 'grep -q "Bash(conversations-node:\*)" "$HOME/.claude/skills/push/SKILL.md"'
+check "the set-up itself uploaded the earlier chat, and said so" 'grep -q "Done: 1 chat uploaded to GitHub." "$OUT/install-1.txt" && git --git-dir="$WORK/chats.git" log --all --name-only --format= > "$WORK/setup-files" && grep -q "$SID" "$WORK/setup-files"'
 NODE_VER="$(env -i HOME="$HOME" PATH="$BARE_PATH" "$HOME/.local/bin/conversations-node" -e 'process.stdout.write(process.versions.electron || "")' 2>/dev/null)"
 check "conversations-node runs the app's own Node (Electron $NODE_VER)" '[ -n "$NODE_VER" ]'
 check "the sync engine runs that way, with no Node on PATH" 'env -i HOME="$HOME" PATH="$BARE_PATH" "$HOME/.local/bin/conversations-node" "$SUP/conversations-app/_sync/sync.mjs" status --json'
+# A chat started after the set-up (the earlier one is up already), for the hook and the upload.
+SID2=aaaaaaaa-0000-4000-8000-000000000002
+printf '{"type":"user","message":{"role":"user","content":"hello after the set-up"},"sessionId":"%s","cwd":"/Users/someone/site","timestamp":"2026-11-05T10:00:00.000Z"}\n' "$SID2" > "$HOME/.claude/projects/-Users-someone-site/$SID2.jsonl"
 # A Stop hook, as Claude Code runs it: its command in a shell, the event on its input.
 STOP_CMD="$(env -i HOME="$HOME" PATH="$BARE_PATH" "$HOME/.local/bin/conversations-node" -e 'const s=require(process.env.HOME+"/.claude/settings.json"); process.stdout.write(s.hooks.Stop[s.hooks.Stop.length-1].hooks[0].command)' 2>/dev/null)"
-check "a Stop hook runs as Claude Code would run it" 'echo "{\"session_id\":\"$SID\",\"cwd\":\"/Users/someone/site\"}" | env -i HOME="$HOME" PATH="$BARE_PATH" /bin/sh -c "$STOP_CMD"'
+check "a Stop hook runs as Claude Code would run it" 'echo "{\"session_id\":\"$SID2\",\"cwd\":\"/Users/someone/site\"}" | env -i HOME="$HOME" PATH="$BARE_PATH" /bin/sh -c "$STOP_CMD"'
 # A hook always exits 0 (it must never hold Claude Code up), so that can't fail on a sync
 # problem: the chat is uploaded through conversations-node and looked for where it lands.
-PUSHED="$(env -i HOME="$HOME" PATH="$BARE_PATH" "$HOME/.local/bin/conversations-node" "$SUP/conversations-app/_sync/sync.mjs" push --session "$SID" --cwd /Users/someone/site --json 2>&1)"
+PUSHED="$(env -i HOME="$HOME" PATH="$BARE_PATH" "$HOME/.local/bin/conversations-node" "$SUP/conversations-app/_sync/sync.mjs" push --session "$SID2" --cwd /Users/someone/site --json 2>&1)"
 printf '%s\n' "$PUSHED" > "$OUT/push-1.txt"
-check "the earlier chat uploads through conversations-node" 'case "$PUSHED" in *"\"ok\":true"*) true ;; *) false ;; esac'
-check "...and the repository has it" 'git --git-dir="$WORK/chats.git" log --all --name-only --format= > "$WORK/pushed-files" && grep -q "$SID" "$WORK/pushed-files"'
+check "a new chat uploads through conversations-node" 'case "$PUSHED" in *"\"ok\":true"*) true ;; *) false ;; esac'
+check "...and the repository has it" 'git --git-dir="$WORK/chats.git" log --all --name-only --format= > "$WORK/pushed-files" && grep -q "$SID2" "$WORK/pushed-files"'
 
 # The set-up opened the app at the end (as launchd does: the system's PATH only).
 for i in $(seq 1 45); do grep -q "starting" "$SUP/Conversations/app.log" 2>/dev/null && break; sleep 2; done
@@ -118,6 +122,7 @@ check "the set-up finished" '[ $code = 0 ]'
 check "the workspace has its own Claude folder" '[ -d "$H2/.claude-work" ] && grep -q "conversations-node" "$H2/.claude-work/settings.json"'
 check "...and its own sync, with its repository" 'grep -q "work.git" "$SUP2/claude-conversation-sync-work/config.json"'
 check "the earlier chats' folder is left as it was" '[ ! -f "$SUP2/claude-conversation-sync/config.json" ] && ! grep -q conversations-node "$H2/.claude/settings.json"'
+check "...and none of its chats is uploaded" 'git --git-dir="$WORK/work.git" log --all --name-only --format= > "$WORK/work-files"; ! grep -q "$SID" "$WORK/work-files"'
 check "the app's list makes it current and leaves the earlier chats out" 'grep -q "\"current\": \"work\"" "$SUP2/Conversations/workspaces.json" && grep -A2 "\"disconnected\"" "$SUP2/Conversations/workspaces.json" > "$WORK/disconnected" && grep -q "\"main\"" "$WORK/disconnected"'
 check "claude-work starts Claude Code in it" '[ -x "$H2/.local/bin/claude-work" ] && grep -q "CLAUDE_CONFIG_DIR=.*\.claude-work" "$H2/.local/bin/claude-work"'
 check "claude-work runs" 'env -i HOME="$H2" PATH="$BARE_PATH" "$H2/.local/bin/claude-work" --version'

@@ -38,6 +38,10 @@ node "$env:LOCALAPPDATA\conversations-app\_sync\sync.mjs" app
 node "$env:LOCALAPPDATA\conversations-app\_sync\install.mjs" --remote <your conversations repository> --machine "Work Laptop"
 ```
 
+The chats Claude Code already has on the PC upload to that repository straight away, so
+Claude Code's clean-up of chats unused for 30 days can't take them first. Add
+`--no-upload-existing` to leave each one until it is next carried on.
+
 ## Upgrade a PC that already has it
 
 Nothing to do: the engine keeps its copy of this repository current, and the app loads

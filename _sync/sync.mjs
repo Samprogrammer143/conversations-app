@@ -18,6 +18,7 @@
 //   node sync.mjs edit --json --ops '<json>'  pin, rename, archive, delete or mark as an app chat: [{session, field, value}]
 //   node sync.mjs folders --json [--refresh]  which folder each project lives in on this PC
 //   node sync.mjs push-pending --json         upload commits made while offline
+//   node sync.mjs upload-existing [--json]     upload this PC's chats that were never uploaded (set-up)
 //   node sync.mjs signin --json               sign in to GitHub (Git Credential Manager's window may open)
 //   node sync.mjs announce --json [--app-version x]  record this PC's versions on GitHub
 //   node sync.mjs config --json [--set uploadQuietSeconds=60|120|300]  read or change a sync setting
@@ -100,6 +101,7 @@ import {
   isProjectFolder,
   isDeleted,
   drainPendingUploads,
+  uploadExisting,
   shareWorkspace,
   APP_DIR,
   CLAUDE_DIR,
@@ -481,6 +483,63 @@ function doHook(event) {
   if (event === "session-end") spawnBackground(background);
 }
 
+// --------------------------------------------------------- upload-existing
+
+// Set-up's "Bring them into ...": the chats already on this PC go up now, with a count.
+function doUploadExisting(args) {
+  const pc = process.platform === "darwin" ? "Mac" : "PC";
+  const chats = (n) => `${n} chat${n === 1 ? "" : "s"}`;
+  const isAre = (n) => (n === 1 ? "is" : "are");
+  const later = (n) => `Conversations uploads ${n === 1 ? "it" : "them"} by itself later.`;
+  const say = (text) => console.log(`      ${text}`);
+  const tty = !args.json && process.stdout.isTTY;
+  let shown = 0; // (a batch tried again counts from its start again: the line never goes back)
+  let shownTenth = 0;
+  let saidWaiting = false;
+  const r = uploadExisting({
+    ...(Number(args.batch) > 0 ? { batchChats: Number(args.batch) } : {}), // tests: smaller batches
+    onWait: () => {
+      if (args.json || saidWaiting) return;
+      saidWaiting = true;
+      if (tty && shown) process.stdout.write("\n");
+      say("Waiting for another sync to finish ...");
+    },
+    onProgress: ({ done, total }) => {
+      if (args.json || !total) return;
+      if (done === 0) {
+        console.log("");
+        // (The count includes chats with nothing to upload: an empty or scripted one is left out.)
+        say(`Uploading this ${pc}'s earlier chats: ${total} to go through.${total > 50 ? " With this many it takes a few minutes." : ""}`);
+        return;
+      }
+      if (done <= shown) return;
+      shown = done;
+      const line = `      ${done} of ${total}`;
+      if (tty) process.stdout.write(`\r${line.padEnd(30)}`);
+      else if (Math.floor((done * 10) / total) > shownTenth || done === total) {
+        shownTenth = Math.floor((done * 10) / total);
+        console.log(line);
+      }
+    },
+  });
+  if (args.json) return printJson(r);
+  if (!r.total) return;
+  if (tty && shown) process.stdout.write("\n");
+  const w = r.waiting;
+  if (r.ok) say(`Done: ${chats(r.uploaded)} uploaded to GitHub.`);
+  else if (!w) say("Done: they're all on GitHub now."); // (another sync on this PC finished them)
+  else {
+    if (r.uploaded && !r.offline) say(`${chats(r.uploaded)} uploaded to GitHub.`);
+    if (r.offline) say(`${r.uploaded ? `GitHub stopped answering after ${chats(r.uploaded)}` : "Couldn't reach GitHub"}, so ${chats(w)} ${isAre(w)} still to upload. ${later(w)}`);
+    else if (r.code === "auth") say(`GitHub refused this ${pc}'s login, so ${chats(w)} ${isAre(w)} still to upload. Conversations uploads ${w === 1 ? "it" : "them"} once you sign in again.`);
+    else if (r.code === "busy") say(`Another sync is busy right now, so ${chats(w)} ${isAre(w)} still to upload. ${later(w)}`);
+    else say(`The upload to GitHub didn't finish, so ${chats(w)} ${isAre(w)} still to upload. ${later(w)}`);
+  }
+  if (r.skipped) say(`${chats(r.skipped)} left out (empty, scripted, or deleted on another ${pc}).`);
+  if (r.tooBig) say(`${chats(r.tooBig)} ${isAre(r.tooBig)} too large for GitHub (over 100 MB even compressed), so ${r.tooBig === 1 ? "it stays" : "they stay"} on this ${pc} only.`);
+  if (r.ok && w) say(`${chats(w)} couldn't upload yet. ${later(w)}`);
+}
+
 // ------------------------------------------------------------------- main
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -503,6 +562,7 @@ try {
   else if (cmd === "edit") doEdit(args);
   else if (cmd === "folders") printJson({ ok: true, folders: localProjectFolders({ refresh: !!args.refresh }) });
   else if (cmd === "push-pending") printJson(pushPending());
+  else if (cmd === "upload-existing") doUploadExisting(args);
   else if (cmd === "announce") doAnnounce(args);
   else if (cmd === "config") doConfig(args);
   else if (cmd === "rules") doRules(args);
@@ -515,7 +575,7 @@ try {
     printJson({ ok: clone.ok && (refresh?.ok ?? true) && runtime?.ok !== false, dir: APP_DIR, clone, refresh, runtime });
   } else if (cmd === "share-workspace") printJson(shareWorkspace({ id: argText(args.id), name: argText(args.name), remote: argText(args.remote) }));
   else if (cmd === "version") console.log(ENGINE_VERSION);
-  else fail("Usage: sync.mjs setup|push|pull|status|where|hook <event>|list|pull-all|check|signin|edit|folders|push-pending|announce|config|app|version");
+  else fail("Usage: sync.mjs setup|push|pull|status|where|hook <event>|list|pull-all|check|signin|edit|folders|push-pending|upload-existing|announce|config|app|version");
 } catch (e) {
   log(`error in ${cmd}: ${e.stack || e}`);
   if (cmd === "hook" || cmd === "worker" || args.auto) process.exit(0); // never break Claude over a sync problem

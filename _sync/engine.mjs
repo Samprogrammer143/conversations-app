@@ -1723,20 +1723,22 @@ export function aheadCount() {
 /**
  * Stages paths, commits and pushes. Every git step is checked: a stale git lock or
  * any other failure is reported, never mistaken for "nothing to upload".
+ * hold: commit only; the caller pushes a batch of commits at once (uploadMany).
  */
-export function commitAndPush(message, paths, { redo = false } = {}) {
+export function commitAndPush(message, paths, { redo = false, hold = false } = {}) {
   const add = git(["add", "-A", "--", ...[...paths, ...sharedPaths()].map(toGitPath)]);
   if (!add.ok) return { ok: false, err: `git add failed: ${add.err}`, code: "git-error" };
   const d = git(["diff", "--cached", "--quiet"], { quiet: true });
   if (d.code !== 0 && d.code !== 1) return { ok: false, err: `git diff failed: ${d.err}`, code: "git-error" };
   if (d.code === 0) {
     // Nothing new to commit, but an earlier commit may still be waiting to go up.
-    if (!aheadCount()) return { ok: true, nothing: true };
+    if (hold || !aheadCount()) return { ok: true, nothing: true };
     const p = pushHead({ redo });
     return p.ok ? { ok: true, nothing: true } : { ok: false, err: p.err, committed: !p.recovered, recovered: !!p.recovered };
   }
   const c = git(["commit", "--quiet", "-m", message]);
   if (!c.ok) return { ok: false, err: `git commit failed: ${c.err}`, code: "git-error" };
+  if (hold) return { ok: true, held: true };
   const p = pushHead({ redo });
   return p.ok ? { ok: true } : { ok: false, err: p.err, committed: !p.recovered, recovered: !!p.recovered };
 }
@@ -2038,7 +2040,7 @@ export function appendStateOps(ops, { push = true, writtenBy = null } = {}) {
     if (!c.ok) return { ok: false, code: "git-error", err: `git commit failed: ${c.err}` };
     if (!push || !rf.ok) return { ok: true, queued: true, err: rf.ok ? undefined : rf.err };
     const pr = pushHead();
-    if (pr.ok) uploadPending(); // uploads waiting on this PC go up while GitHub is reachable
+    if (pr.ok) uploadPending({ limit: PENDING_ALONGSIDE }); // uploads waiting on this PC go up while GitHub is reachable
     return pr.ok ? { ok: true, pushed: true } : { ok: true, queued: true, err: pr.err };
   });
 }
@@ -2191,7 +2193,9 @@ function retireDeletedCopies(state, open = openSessions(), known = knownOwnedNam
  * Uploads one conversation. Returns { ok, auto, id, key, msg, ... }, or undefined
  * when an automatic upload decided there was nothing to do.
  */
-export function pushSession(args) {
+export function pushSession(args, { hold = false } = {}) {
+  // hold: part of a batch (uploadMany). The caller holds the lock, has just brought the copy
+  // up to date, and pushes the batch's commits together, so this only commits.
   const cwd = path.resolve(argText(args.cwd) ?? process.cwd());
   const auto = !!args.auto;
   const dryRun = !!args["dry-run"];
@@ -2268,7 +2272,7 @@ export function pushSession(args) {
 
   function uploadOne() {
     for (let attempt = 0; ; attempt++) {
-      const rf = refreshRepo();
+      const rf = hold ? { ok: true } : refreshRepo();
       if (!rf.ok && rf.code === "git-busy") return { ok: false, auto, id, msg: `Could not upload: ${rf.err}`, code: "git-error" };
       if (!rf.ok && rf.code === "auth") return { ok: false, auto, id, msg: `GitHub refused this PC's login: ${stripLogin(rf.err)}`, code: "auth" };
       if (!rf.ok) return { ok: false, auto, id, msg: `Could not reach GitHub: ${stripLogin(rf.err)}`, offline: true };
@@ -2343,7 +2347,7 @@ export function pushSession(args) {
       }
       paths.push(...pruneResurrected(state));
 
-      const res = commitAndPush(`${remote ? "Update" : "Add"} ${key}: ${info.title.slice(0, 60)} (${machine})`, paths, { redo: true });
+      const res = commitAndPush(`${remote ? "Update" : "Add"} ${key}: ${info.title.slice(0, 60)} (${machine})`, paths, { redo: true, hold });
       // Another PC uploaded the same conversation at the same moment: merge again on top of it.
       if (!res.ok && res.recovered && attempt < 3) {
         log(`upload of ${id} met another PC's upload of it; merging again`);
@@ -2356,19 +2360,20 @@ export function pushSession(args) {
         // otherwise the next start must still download the other PC's entries.
         s.sessions[id] = { ...(s.sessions[id] || {}), key, sha256: localSha, remoteSha: remoteOnly ? undefined : sha(merged), pushedAt: now };
         if (remoteOnly) delete s.sessions[id].remoteSha;
-        delete s.sessions[id].pending;
+        // (Held for a batch, it is only committed: it waits until the batch is pushed.)
+        if (!hold) delete s.sessions[id].pending;
         if (s.sessions[id].skip === "too-big") delete s.sessions[id].skip;
         s.pushCount = (s.pushCount || 0) + 1;
       });
-      if (auto && st.pushCount % GC_EVERY_PUSHES === 0) git(["gc", "--quiet"], { quiet: true, timeout: 30 * 60_000 });
+      if (auto && !hold && st.pushCount % GC_EVERY_PUSHES === 0) git(["gc", "--quiet"], { quiet: true, timeout: 30 * 60_000 });
 
       const what = res.nothing ? "Already up to date" : remote ? "Updated" : "Uploaded";
       const lines = [`${what}: "${info.title}" (${humanBytes(merged.length)}, ${info.prompts} prompts)${guessed ? " [detected as the most recently active conversation in this folder]" : ""}`];
       if (redacted) lines.push(`Redacted in the uploaded copy: ${redacted}`);
       if (remoteOnly) lines.push(`GitHub also has ${remoteOnly} newer entries from ${meta.lastPushedFrom ?? "another PC"} that this window does not show. Both are kept. To see them here: exit, reopen Claude in this folder, and /resume this conversation.`);
       lines.push(sessionUrl(config, key, id));
-      // Other conversations waiting to upload again go up with this one.
-      const others = uploadPending({ exclude: id });
+      // Other conversations waiting to upload again go up with this one (a batch does its own).
+      const others = hold ? { uploaded: [] } : uploadPending({ exclude: id, limit: PENDING_ALONGSIDE });
       if (others.uploaded.length) log(`also uploaded ${others.uploaded.length} conversation(s) that were waiting: ${others.uploaded.join(", ")}`);
       return { ok: true, auto, id, key, nothing: !!res.nothing, uploaded: !res.nothing, remoteOnly, title: info.title, msg: lines.join("\n") };
     }
@@ -2402,20 +2407,27 @@ export const pendingIds = (st = loadState()) => Object.entries(st.sessions || {}
 
 let drainingPending = false;
 
+// How many waiting uploads go up alongside another job (an upload, an edit): two batches, so a
+// long list left by set-up never keeps the app's next edit waiting for minutes. The rest go up
+// with the next sync that is for them (the hooks' worker, push-pending, pull-all).
+const PENDING_ALONGSIDE = 50;
+
 /**
- * Uploads every conversation waiting to go up again. Returns the ids uploaded, failed
- * (kept for next time) and dropped (nothing left to upload: no transcript here, deleted,
- * skipped, or too big for GitHub).
+ * Uploads the conversations waiting to go up again (at most limit of them), a batch at a time
+ * (uploadMany). Returns the ids uploaded, failed (kept for next time) and dropped (nothing
+ * left to upload: no transcript here, deleted, skipped, or too big for GitHub).
  */
-export function uploadPending({ exclude = null } = {}) {
+export function uploadPending({ exclude = null, limit = Infinity } = {}) {
   const out = { uploaded: [], failed: [], dropped: [] };
   if (drainingPending) return out;
-  const ids = pendingIds().filter((x) => x !== exclude);
+  queueExistingIfDue();
+  const ids = pendingIds().filter((x) => x !== exclude).slice(0, limit);
   if (!ids.length) return out;
   drainingPending = true;
   try {
     return withLock(() => {
       const known = knownOwnedNames();
+      const items = [];
       for (const id of ids) {
         const p = loadState().sessions[id]?.pending;
         if (!p) continue;
@@ -2426,26 +2438,12 @@ export function uploadPending({ exclude = null } = {}) {
           log(`pending upload of ${id} dropped: its transcript is no longer on this PC`);
           continue;
         }
-        let cwd = p.cwd && isDir(p.cwd) ? p.cwd : null;
-        if (!cwd) {
-          const c = inspectTranscript(fs.readFileSync(transcript)).cwd;
-          cwd = (c && isDir(c) ? c : null) ?? localDirForProjectName(path.basename(path.dirname(transcript))) ?? HOME;
-        }
-        let r;
-        try {
-          r = pushSession({ session: id, transcript, cwd, auto: true, retry: true });
-        } catch (e) {
-          r = { ok: false, busy: e?.code === "busy", msg: String(e?.message || e) };
-        }
-        if (r?.ok && !r.deleted) out.uploaded.push(id);
-        else if (!r || r.ok || r.tooBig) {
-          clearPending(id); // skipped, deleted or too big: nothing more to do for it
-          out.dropped.push(id);
-        } else {
-          out.failed.push(id);
-          if (r.offline || r.busy) break; // the others would fail the same way; next time
-        }
+        items.push({ id, transcript, cwd: p.cwd });
       }
+      const r = uploadMany(items);
+      out.uploaded.push(...r.uploaded);
+      out.dropped.push(...r.dropped, ...r.tooBig);
+      out.failed.push(...r.failed);
       return out;
     });
   } finally {
@@ -2453,11 +2451,133 @@ export function uploadPending({ exclude = null } = {}) {
   }
 }
 
+/** Where a transcript was last written from: the cwd of its last lines (or of its first). */
+function transcriptCwd(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+    const size = fs.fstatSync(fd).size;
+    const span = Math.min(size, 1024 * 1024);
+    const read = (pos) => {
+      const b = Buffer.alloc(span);
+      return b.subarray(0, fs.readSync(fd, b, 0, span, pos)).toString("utf8");
+    };
+    for (const text of size > span ? [read(size - span), read(0)] : [read(0)]) {
+      const lines = text.split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('"cwd"')) continue;
+        try {
+          const c = JSON.parse(lines[i]).cwd;
+          if (typeof c === "string" && c) return c;
+        } catch {} // a line cut by the window read
+      }
+    }
+  } catch {} finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
+  }
+  return null;
+}
+
+/**
+ * The folder an upload of this transcript is filed from, the same whichever way it goes up:
+ * where it was last written, when that folder is here; else the folder its projects folder's
+ * name stands for; else where it was written all the same (its project is then named after
+ * that folder); and only with nothing recorded at all, the home folder.
+ */
+function uploadCwdFor(transcript, hint = null) {
+  if (hint && isDir(hint)) return hint;
+  const written = transcriptCwd(transcript);
+  if (written && isDir(written)) return written;
+  return localDirForProjectName(path.basename(path.dirname(transcript))) ?? hint ?? written ?? HOME;
+}
+
+/**
+ * Uploads these conversations a batch at a time: up to batchChats of them, or about
+ * batchBytes with their session files, with one refresh and one push for the batch. Each
+ * goes up as a hook's upload would (pushSession: the same skips, redaction and size limit).
+ * Each must already be marked as waiting, and stays so until its batch is on GitHub, so
+ * whatever this leaves behind (GitHub out of reach, the lock busy, the window closed) goes up
+ * with the next sync. Unless the caller holds the lock already, it is taken a batch at a time,
+ * so a hook's upload gets in between. items: { id, transcript, cwd? }. onProgress({ done,
+ * total }) after each; onWait() when another sync has the lock and this waits for it.
+ */
+function uploadMany(items, { onProgress = () => {}, onWait = () => {}, batchChats = 25, batchBytes = 50 * 1024 * 1024 } = {}) {
+  const out = { uploaded: [], tooBig: [], dropped: [], failed: [], stopped: null };
+  const bytesOf = (t) => [t, ...listFiles(t.replace(/\.jsonl$/, ""))].reduce((n, f) => n + Math.max(0, sizeOf(f)), 0);
+  for (let i = 0; i < items.length; ) {
+    const start = i;
+    const batch = [];
+    for (let bytes = 0; i < items.length && batch.length < batchChats; i++) {
+      const b = bytesOf(items[i].transcript);
+      if (batch.length && bytes + b > batchBytes) break;
+      bytes += b;
+      batch.push(items[i]);
+    }
+    let r;
+    // Another PC's upload at the same moment sets the batch's commits aside: it goes again.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (!lockHeld && lockHolder()) onWait();
+        r = withLock(() => uploadBatch(batch, start), WORKER_LOCK_WAIT_MS);
+      } catch (e) {
+        if (e?.code !== "busy") throw e;
+        r = { ok: false, code: "busy", err: e.message, held: [], tooBig: [], dropped: [], failed: [] };
+      }
+      if (!r.recovered) break;
+      log(`a batch of ${batch.length} uploads met another PC's upload; uploading it again`);
+    }
+    out.tooBig.push(...r.tooBig);
+    out.dropped.push(...r.dropped);
+    if (!r.ok) {
+      const settled = new Set([...r.tooBig, ...r.dropped]);
+      out.failed.push(...items.slice(start).map((x) => x.id).filter((id) => !settled.has(id)));
+      out.stopped = { offline: !!r.offline, code: r.code ?? null, err: r.err ?? null };
+      break;
+    }
+    out.uploaded.push(...r.held);
+    out.failed.push(...r.failed);
+  }
+  return out;
+
+  function uploadBatch(batch, start) {
+    const rf = refreshRepo();
+    if (!rf.ok) return { ok: false, offline: !rf.code, code: rf.code, err: rf.err, held: [], tooBig: [], dropped: [], failed: [] };
+    const res = { ok: true, held: [], tooBig: [], dropped: [], failed: [] };
+    let committed = false;
+    batch.forEach((c, k) => {
+      let r;
+      try {
+        r = pushSession({ session: c.id, transcript: c.transcript, cwd: uploadCwdFor(c.transcript, c.cwd), auto: true, retry: true }, { hold: true });
+      } catch (e) {
+        r = { ok: false, msg: String(e?.message || e) };
+      }
+      if (r?.ok && !r.deleted) {
+        res.held.push(c.id);
+        if (r.uploaded) committed = true;
+      } else if (r?.tooBig) {
+        res.tooBig.push(c.id);
+        clearPending(c.id);
+      } else if (!r || r.ok) {
+        res.dropped.push(c.id); // left out, as a hook leaves it out, or deleted on another PC
+        clearPending(c.id);
+      } else res.failed.push(c.id); // still waiting
+      onProgress({ done: start + k + 1, total: items.length });
+    });
+    // (Pushed whenever something was committed: with no branch on GitHub yet, aheadCount says 0.)
+    if (committed || aheadCount()) {
+      const p = pushHead({ redo: true });
+      if (!p.ok) return { ...res, ok: false, recovered: !!p.recovered, code: p.recovered ? "conflict" : p.code ?? "push", err: p.err };
+    }
+    for (const id of res.held) clearPending(id);
+    return res;
+  }
+}
+
 /** Retries waiting uploads, if any (a background worker, after its own job). */
 export function drainPendingUploads() {
   if (!loadConfig()?.remote || !fs.existsSync(path.join(REPO_DIR, ".git"))) return null;
   // Also a commit left between "git commit" and "git push" by a process that died.
-  if (!pendingIds().length && !aheadCount()) return null;
+  if (!pendingIds().length && !aheadCount() && !loadConfig()?.uploadExistingDue) return null;
   return withLock(() => {
     const rf = refreshRepo();
     if (!rf.ok) return { ok: false, offline: !rf.code, err: rf.err };
@@ -2465,6 +2585,92 @@ export function drainPendingUploads() {
     if (aheadCount()) pushHead();
     return { ok: true, ...up };
   }, WORKER_LOCK_WAIT_MS);
+}
+
+// ------------------------------------------------ chats already on this PC
+//
+// When a PC joins with chats Claude Code already has (set-up's "Bring them into ..."),
+// they are uploaded straight away, not only when each is next continued: until then
+// Claude Code's clean-up (chats unused for 30 days, by default) could delete them first.
+// They are all marked as waiting at once, then go up through uploadMany; set-up notes in
+// config.json that this is due (uploadExistingDue) until then, so a set-up that stopped
+// before it began still has them uploaded by the next sync.
+
+/**
+ * The chats on this PC that have never been uploaded or downloaded, oldest first. With
+ * ~/.claude in a cloud folder, only this PC's own project folders: the rest are other PCs'.
+ */
+export function existingLocalChats() {
+  const known = loadState().sessions || {};
+  const owned = cloudSyncedClaudeDir() ? knownOwnedNames() : null;
+  const copies = new Map();
+  let dirs = [];
+  try { dirs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true }); } catch {}
+  for (const d of dirs) {
+    if (!d.isDirectory()) continue;
+    const dir = path.join(PROJECTS_DIR, d.name);
+    if (owned && !ownsProjectDir(dir, owned)) continue;
+    let files = [];
+    try { files = fs.readdirSync(dir); } catch { continue; }
+    for (const f of files) {
+      const id = f.endsWith(".jsonl") ? f.slice(0, -".jsonl".length) : null;
+      if (!isUuid(id)) continue;
+      const s = known[id];
+      if (s?.pushedAt || s?.pulledAt || s?.skip) continue;
+      copies.set(id, [...(copies.get(id) || []), path.join(dir, f)]);
+    }
+  }
+  return [...copies].map(([id, list]) => {
+    const transcript = biggest(list);
+    return { id, transcript, mtimeMs: mtimeOf(transcript) };
+  }).sort((a, b) => a.mtimeMs - b.mtimeMs);
+}
+
+/**
+ * Marks every chat existingLocalChats finds as waiting to upload, in one write, and clears
+ * set-up's note that this is due: from then on any sync on this PC uploads them.
+ */
+function queueExistingChats() {
+  const chats = existingLocalChats();
+  if (chats.length) {
+    const at = new Date().toISOString();
+    updateState((s) => {
+      for (const c of chats) {
+        const cur = s.sessions[c.id] || {};
+        // (One already waiting keeps the folder its hook recorded.)
+        s.sessions[c.id] = { ...cur, pending: { at, reason: "existing", transcript: c.transcript, cwd: cur.pending?.cwd ?? null } };
+      }
+    });
+  }
+  if (loadConfig()?.uploadExistingDue) saveConfig({ uploadExistingDue: undefined });
+  return chats;
+}
+
+/** Set-up asked for this PC's chats to go up, and that never began (it stopped first). */
+function queueExistingIfDue() {
+  if (loadConfig()?.uploadExistingDue) queueExistingChats();
+}
+
+/**
+ * Set-up's "Bring them into ...": every chat existingLocalChats finds goes up now, oldest
+ * first, through uploadMany. onProgress({ done, total }), first with done 0. Returns the
+ * counts: total, uploaded, too big for GitHub, left out (nothing typed in it, a scripted run,
+ * an excluded project, deleted on another PC) and still waiting; with ok false when it
+ * stopped, and why: offline, or code "busy", "auth", "push" or "conflict".
+ */
+export function uploadExisting({ onProgress = () => {}, onWait = () => {}, batchChats, batchBytes } = {}) {
+  ensureRepo();
+  const chats = queueExistingChats();
+  onProgress({ done: 0, total: chats.length });
+  const sizes = { ...(batchChats ? { batchChats } : {}), ...(batchBytes ? { batchBytes } : {}) };
+  const queued = loadState().sessions || {};
+  const items = chats.map((c) => ({ id: c.id, transcript: c.transcript, cwd: queued[c.id]?.pending?.cwd ?? null }));
+  const r = uploadMany(items, { onProgress, onWait, ...sizes });
+  const waiting = new Set(pendingIds());
+  const out = { ok: !r.stopped, total: chats.length, uploaded: r.uploaded.length, tooBig: r.tooBig.length, skipped: r.dropped.length, waiting: chats.filter((c) => waiting.has(c.id)).length };
+  if (r.stopped) Object.assign(out, r.stopped);
+  log(`earlier chats: ${out.uploaded} uploaded, ${out.tooBig} too big, ${out.skipped} left out, ${out.waiting} waiting${r.stopped ? ` (stopped: ${r.stopped.code ?? "offline"})` : ""}`);
+  return out;
 }
 
 // ------------------------------------------------------------------- pull

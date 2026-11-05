@@ -1422,5 +1422,175 @@ console.log(JSON.stringify({ ...r, asked }));`;
   check("release line: a copy that never saw a release branch follows main", h.r?.ok && h.r.branch === "main" && h.v === "6" && h.clean, h.detail);
 }
 
+// ---- 63. set-up's "Bring them into ...": the chats already on a PC upload at once, oldest first
+{
+  const write = (m, proj, id, body, ageMin) => {
+    const p = tpath(m, proj, id);
+    fs.writeFileSync(p, body);
+    const t = new Date(Date.now() - ageMin * 60_000);
+    fs.utimesSync(p, t, t);
+    return p;
+  };
+  const json = (r) => { try { return JSON.parse(r.stdout); } catch { return null; } };
+  const stateOf63 = (m) => readJsonT(path.join(m.sync, "state.json")) ?? { sessions: {} };
+  const configOf63 = (m) => readJsonT(path.join(m.sync, "config.json")) ?? {};
+  const commitsTo = (dir) => { remoteFile("x", "x"); return sh("git", ["log", "--format=%s", "--", dir], { cwd: path.join(T, "inspect") }).stdout.split("\n").filter(Boolean); };
+  const holdLock = (m) => fs.writeFileSync(path.join(m.sync, "repo.lock"), JSON.stringify({ pid: process.pid, at: Date.now(), host: os.hostname() }));
+
+  const E = pc("pcE63");
+  const PE = project("pcE63-work/notes", "https://github.com/Acme/Notes");
+  const PE2 = project("pcE63-work/notes-copy", "https://github.com/Acme/Notes-copy");
+  const gone = path.join(T, "pcE63-work", "deleted-project"); // the folder these chats ran in is gone
+  const ids = [1, 2, 3, 4].map((n) => `63636363-0000-4000-8000-00000000006${n}`);
+  write(E, PE, ids[0], line("oldest chat on E, token " + FAKE_TOKEN, PE, ids[0]), 300);
+  write(E, gone, ids[1], line("a chat from a folder that's gone", gone, ids[1]), 250);
+  write(E, PE, ids[2], line("second chat on E", PE, ids[2]), 200);
+  write(E, PE, ids[3], line("newest chat on E", PE, ids[3]), 10);
+  const empty = "63636363-0000-4000-8000-000000000065";
+  write(E, PE, empty, JSON.stringify({ type: "ai-title", aiTitle: "nothing typed", sessionId: empty }) + "\n", 100);
+  const scripted = "63636363-0000-4000-8000-000000000066";
+  write(E, PE, scripted, line("a scripted run", PE, scripted, { entrypoint: "sdk-ts" }), 100);
+  // The same chat in two project folders: it goes up once, from the copy with more in it.
+  const dup = "63636363-0000-4000-8000-000000000067";
+  write(E, PE, dup, line("a chat kept twice", PE, dup) + line("only the bigger copy has this", PE, dup), 5);
+  write(E, PE2, dup, line("a chat kept twice", PE2, dup), 5);
+  const setE = run(E, ["setup", "--remote", REMOTE, "--machine", "PC-E"]);
+  // A chat downloaded from GitHub isn't this PC's to upload.
+  run(E, ["pull", ID, "--cwd", PE]);
+  const pulledHere = stateOf63(E).sessions[ID]?.pulledAt;
+  const e1 = run(E, ["upload-existing", "--json", "--batch", "2"]);
+  const j1 = json(e1);
+  check("earlier chats: set-up uploads every chat already on the PC, in batches", setE.status === 0 && j1?.ok && j1.total === 7 && j1.uploaded === 5 && j1.skipped === 2 && !j1.waiting, e1.stdout + e1.stderr);
+  check("earlier chats: each is on GitHub, one from a folder that's gone under that folder's name", [0, 2, 3].every((k) => !!remoteFile("notes", ids[k])) && !!remoteFile("deleted-project", ids[1]));
+  check("earlier chats: what a hook leaves out stays out (nothing typed, a scripted run)", !remoteFile("notes", empty) && !remoteFile("notes", scripted));
+  check("earlier chats: a chat kept in two folders goes up once, from the fuller copy", commitsTo(`notes/${dup}`).length === 1 && !!remoteFile("notes", dup)?.toString().includes("only the bigger copy") && commitsTo(`notes-copy/${dup}`).length === 0, JSON.stringify(commitsTo(`notes/${dup}`)));
+  check("earlier chats: a chat downloaded from GitHub isn't uploaded again from this PC", !!pulledHere && !commitsTo(`notes/${ID}`).length && !commitsTo("website").some((s) => s.includes("(PC-E)")), String(pulledHere));
+  const up0 = remoteFile("notes", ids[0])?.toString() ?? "";
+  check("earlier chats: redacted on the way like any upload, the local copy untouched", up0.includes("[REDACTED GitHub token") && !up0.includes(FAKE_TOKEN) && has(tpath(E, PE, ids[0]), FAKE_TOKEN));
+  const order = sh("git", ["log", "--reverse", "--format=%s", "-n", "40"], { cwd: path.join(T, "inspect") }).stdout.split("\n").filter((x) => /^Add .*\(PC-E\)$/.test(x));
+  check("earlier chats: oldest first (the nearest to Claude Code's clean-up)", order.length === 5 && order[0].includes("oldest chat") && order[1].includes("folder that's gone") && order[2].includes("second chat") && order[3].includes("newest chat") && order[4].includes("kept twice"), order.join(" | "));
+  const stE = stateOf63(E);
+  check("earlier chats: nothing left waiting once they're up", [...ids, dup, empty, scripted].every((id) => !stE.sessions[id]?.pending) && [...ids, dup].every((id) => stE.sessions[id]?.pushedAt), JSON.stringify(stE.sessions));
+  const j2 = json(run(E, ["upload-existing", "--json"]));
+  check("earlier chats: running it again uploads nothing more", j2?.ok && j2.uploaded === 0 && !j2.waiting, JSON.stringify(j2));
+
+  // GitHub refusing the push: they wait, and the next sync uploads them.
+  const F = pc("pcF63");
+  const PF = project("pcF63-work/notes", "https://github.com/Acme/Notes");
+  const fids = [1, 2, 3].map((n) => `63636363-0000-4000-8000-00000000007${n}`);
+  fids.forEach((id, k) => write(F, PF, id, line(`F chat ${k}`, PF, id), 100 - k));
+  run(F, ["setup", "--remote", REMOTE, "--machine", "PC-F"]);
+  fs.writeFileSync(deny56, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const f1 = json(run(F, ["upload-existing", "--json", "--batch", "2"]));
+  fs.unlinkSync(deny56);
+  const stF = stateOf63(F);
+  check("earlier chats: when GitHub refuses, every one is left waiting", f1?.ok === false && f1.code === "push" && f1.waiting === 3 && fids.every((id) => stF.sessions[id]?.pending && !remoteFile("notes", id)), JSON.stringify(f1));
+  run(F, ["push-pending", "--json"]);
+  const stF2 = stateOf63(F);
+  check("earlier chats: the next sync uploads the ones left waiting", fids.every((id) => !!remoteFile("notes", id) && !stF2.sessions[id]?.pending) && aheadOf(F) === "0", JSON.stringify(stF2.sessions));
+
+  // What set-up shows.
+  const G = pc("pcG63");
+  const PG = project("pcG63-work/notes", "https://github.com/Acme/Notes");
+  ["63636363-0000-4000-8000-000000000081", "63636363-0000-4000-8000-000000000082"].forEach((id, k) => write(G, PG, id, line(`G chat ${k}`, PG, id), 50 - k));
+  run(G, ["setup", "--remote", REMOTE, "--machine", "PC-G"]);
+  const g1 = run(G, ["upload-existing"]);
+  check("earlier chats: set-up shows how many, how far it's got, and the result", g1.status === 0 && /Uploading this (PC|Mac)'s earlier chats: 2 to go through\./.test(g1.stdout) && /\b2 of 2\b/.test(g1.stdout) && /Done: 2 chats uploaded to GitHub\./.test(g1.stdout), g1.stdout + g1.stderr);
+
+  // One too big for GitHub in the middle of a batch: the others go up, it stays here.
+  const K = pc("pcK63");
+  const PK = project("pcK63-work/notes", "https://github.com/Acme/Notes");
+  const kids = [1, 2, 3].map((n) => `63636363-0000-4000-8000-00000000008${n + 2}`);
+  kids.forEach((id, k) => write(K, PK, id, line(k === 1 ? "K big chat " + "x".repeat(6000) : `K chat ${k}`, PK, id), 30 - k));
+  run(K, ["setup", "--remote", REMOTE, "--machine", "PC-K"]);
+  const k1 = run(K, ["upload-existing"], { CLAUDE_SYNC_MAX_FILE_BYTES: "4000", CLAUDE_SYNC_GZIP_OVER_BYTES: "100000000" });
+  const stK = stateOf63(K);
+  check("earlier chats: one too big for GitHub stays here, the rest of its batch goes up", k1.status === 0 && /Done: 2 chats uploaded to GitHub\./.test(k1.stdout) && /1 chat is too large for GitHub/.test(k1.stdout) && !!remoteFile("notes", kids[0]) && !!remoteFile("notes", kids[2]) && !remoteFile("notes", kids[1]) && stK.sessions[kids[1]]?.skip === "too-big" && !kids.some((id) => stK.sessions[id]?.pending), k1.stdout + k1.stderr);
+
+  // Another sync holding the lock: it ends calmly, and they go up later.
+  const L = pc("pcL63");
+  const PL = project("pcL63-work/notes", "https://github.com/Acme/Notes");
+  const lids = ["63636363-0000-4000-8000-000000000091", "63636363-0000-4000-8000-000000000092"];
+  lids.forEach((id, k) => write(L, PL, id, line(`L chat ${k}`, PL, id), 20 - k));
+  run(L, ["setup", "--remote", REMOTE, "--machine", "PC-L"]);
+  holdLock(L);
+  const l1 = run(L, ["upload-existing"], { CLAUDE_SYNC_LOCK_WAIT_MS: "1500" });
+  fs.unlinkSync(path.join(L.sync, "repo.lock"));
+  const stL = stateOf63(L);
+  check("earlier chats: with another sync busy it says it's waiting, stops calmly and leaves them waiting", l1.status === 0 && /Waiting for another sync to finish/.test(l1.stdout) && /Another sync is busy right now, so 2 chats are still to upload\. Conversations uploads them by itself later\./.test(l1.stdout) && lids.every((id) => stL.sessions[id]?.pending && !remoteFile("notes", id)), l1.stdout + l1.stderr);
+  run(L, ["push-pending", "--json"]);
+  check("earlier chats: ...and the next sync uploads them", lids.every((id) => !!remoteFile("notes", id) && !stateOf63(L).sessions[id]?.pending));
+
+  // Another PC's upload of the same chat lands just before this batch's push: the batch is
+  // merged again on top of it and goes up, with both PCs' lines.
+  const P = pc("pcP63");
+  const PP = project("pcP63-work/notes", "https://github.com/Acme/Notes");
+  const pa = "63636363-0000-4000-8000-000000000099";
+  const pb = "63636363-0000-4000-8000-0000000000a0";
+  write(P, PP, pa, line("P's own line", PP, pa), 12);
+  write(P, PP, pb, line("P's other chat", PP, pb), 11);
+  run(P, ["setup", "--remote", REMOTE, "--machine", "PC-P"]);
+  const other = path.join(T, "other63");
+  gitq(["-c", "core.longpaths=true", "clone", "-q", REMOTE, other], T);
+  fs.mkdirSync(path.join(other, "notes", pa), { recursive: true });
+  fs.writeFileSync(path.join(other, "notes", pa, "transcript.jsonl"), line("the other PC's line", PP, pa));
+  gitq(["add", "."], other);
+  gitq(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "the other PC's upload"], other);
+  const mark = path.join(T, "other63.pushed");
+  const prePush = path.join(P.sync, "repo", ".git", "hooks", "pre-push");
+  const fwdT = (p) => p.replace(/\\/g, "/");
+  fs.writeFileSync(prePush, `#!/bin/sh\n[ -f "${fwdT(mark)}" ] && exit 0\n: > "${fwdT(mark)}"\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX\ngit -C "${fwdT(other)}" push -q origin HEAD:main\nexit 0\n`, { mode: 0o755 });
+  const p1 = json(run(P, ["upload-existing", "--json"]));
+  fs.unlinkSync(prePush);
+  const remPa = remoteFile("notes", pa)?.toString() ?? "";
+  check("earlier chats: a batch that meets another PC's upload is merged again and goes up", fs.existsSync(mark) && p1?.ok && p1.uploaded === 2 && !p1.waiting && remPa.includes("P's own line") && remPa.includes("the other PC's line") && !!remoteFile("notes", pb) && ![pa, pb].some((id) => stateOf63(P).sessions[id]?.pending), JSON.stringify(p1));
+
+  // GitHub out of reach from the start; a chat whose folder is gone keeps its folder's name
+  // when the next sync uploads it.
+  const M = pc("pcM63");
+  const goneM = path.join(T, "pcM63-work", "old-site");
+  const mid = "63636363-0000-4000-8000-000000000093";
+  write(M, goneM, mid, line("M chat from a folder that's gone", goneM, mid), 15);
+  run(M, ["setup", "--remote", REMOTE, "--machine", "PC-M"]);
+  const repoM = path.join(M.sync, "repo");
+  gitq(["remote", "set-url", "origin", path.join(T, "nowhere.git")], repoM);
+  const m1 = run(M, ["upload-existing"]);
+  gitq(["remote", "set-url", "origin", REMOTE], repoM);
+  check("earlier chats: GitHub out of reach from the start, said once and in the singular", m1.status === 0 && /Couldn't reach GitHub, so 1 chat is still to upload\. Conversations uploads it by itself later\./.test(m1.stdout) && !!stateOf63(M).sessions[mid]?.pending, m1.stdout + m1.stderr);
+  run(M, ["push-pending", "--json"]);
+  check("earlier chats: a gone folder's chat uploaded later keeps that folder's name", !!remoteFile("old-site", mid) && !remoteFile("_home", mid) && !stateOf63(M).sessions[mid]?.pending);
+
+  // The installer set-up runs does it by itself the first time, and never on a later run (an update's).
+  const J = pc("pcJ63");
+  const PJ = project("pcJ63-work/notes", "https://github.com/Acme/Notes");
+  const jids = ["63636363-0000-4000-8000-000000000094", "63636363-0000-4000-8000-000000000095"];
+  jids.forEach((id, k) => write(J, PJ, id, line(`J chat ${k}`, PJ, id), 60 - k));
+  const ij = spawnSync(process.execPath, [INSTALL, "--remote", REMOTE, "--machine", "PC-J"], { encoding: "utf8", env: envFor(J) });
+  check("earlier chats: a first install uploads them by itself, and says so before it's done", ij.status === 0 && /Done: 2 chats uploaded to GitHub\./.test(ij.stdout) && ij.stdout.indexOf("Done: 2 chats") < ij.stdout.indexOf("Restart Claude Code") && jids.every((id) => !!remoteFile("notes", id)) && !configOf63(J).uploadExistingDue, ij.stdout + ij.stderr);
+  const later = "63636363-0000-4000-8000-000000000096";
+  write(J, PJ, later, line("J chat after the install", PJ, later), 1);
+  const ij2 = spawnSync(process.execPath, [INSTALL], { encoding: "utf8", env: envFor(J) });
+  check("earlier chats: a later install uploads nothing in bulk", ij2.status === 0 && !/earlier chats:/.test(ij2.stdout) && !remoteFile("notes", later), ij2.stdout + ij2.stderr);
+
+  // A set-up that stopped before the upload began: the next sync does it.
+  const N = pc("pcN63");
+  const PN = project("pcN63-work/notes", "https://github.com/Acme/Notes");
+  const nid = "63636363-0000-4000-8000-000000000097";
+  write(N, PN, nid, line("N chat, set-up stopped early", PN, nid), 40);
+  fs.mkdirSync(N.claude, { recursive: true });
+  fs.writeFileSync(path.join(N.claude, "settings.json"), "{ not json"); // the installer stops at its hooks step
+  const in1 = spawnSync(process.execPath, [INSTALL, "--remote", REMOTE, "--machine", "PC-N"], { encoding: "utf8", env: envFor(N) });
+  const dueN = configOf63(N).uploadExistingDue === true;
+  run(N, ["push-pending", "--json"]);
+  check("earlier chats: a set-up that stopped before the upload still has them uploaded by the next sync", in1.status !== 0 && dueN && !!remoteFile("notes", nid) && !configOf63(N).uploadExistingDue, in1.stdout + in1.stderr);
+  // --no-upload-existing leaves them until each is carried on.
+  const O = pc("pcO63");
+  const PO = project("pcO63-work/notes", "https://github.com/Acme/Notes");
+  const oid = "63636363-0000-4000-8000-000000000098";
+  write(O, PO, oid, line("O chat, left for later", PO, oid), 40);
+  const io = spawnSync(process.execPath, [INSTALL, "--remote", REMOTE, "--machine", "PC-O", "--no-upload-existing"], { encoding: "utf8", env: envFor(O) });
+  check("earlier chats: --no-upload-existing leaves them until each is carried on", io.status === 0 && !/earlier chats:/.test(io.stdout) && !remoteFile("notes", oid) && !configOf63(O).uploadExistingDue, io.stdout + io.stderr);
+}
+
 for (const x of results) console.log(`${x.ok ? "PASS" : "FAIL"}  ${x.name}${x.ok || !x.detail ? "" : `\n      ${String(x.detail).trim().slice(0, 500).replace(/\n/g, "\n      ")}`}`);
 console.log(`\n${results.filter((x) => x.ok).length}/${results.length} passed`);
