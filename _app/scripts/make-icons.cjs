@@ -1,6 +1,7 @@
-// Renders the app and tray icons (scripts/icon-art.mjs: the chat with a prompt on a graphite
-// tile) at every Windows size and packs them into .ico files. 32 px and under use the small
-// drawing (no glow or shadow, a bigger chat, the prompt only), which stays legible.
+// Renders the Windows app and tray icons (scripts/icon-art.mjs: the chat with its prompt alone,
+// no tile, as Windows 11's own app icons are free shapes) at every Windows size and packs them
+// into .ico files. At 32 px and under (and in the tray icons at every size) the prompt and cursor
+// are drawn a little bolder and further apart.
 // Run with Electron:  npx electron scripts/make-icons.cjs
 const { app, BrowserWindow } = require("electron");
 const fs = require("node:fs");
@@ -53,7 +54,7 @@ app.whenReady().then(async () => {
     console.log(`${name}: ${sizes.join(", ")}`);
     return pngs;
   };
-  const big = await make("icon.ico", [16, 20, 24, 32, 40, 48, 64, 128, 256], (size) => art.iconSvg({ size, grid: "full", small: size <= 32 }));
+  const big = await make("icon.ico", [16, 20, 24, 32, 40, 48, 64, 128, 256], (size) => art.markSvg({ size, small: size <= 32 }));
   fs.writeFileSync(path.join(out, "icon.png"), big[big.length - 1].data);
   await make("tray.ico", [16, 20, 24, 32, 40, 48], (size) => art.trayIconSvg(size, false));
   await make("tray-badge.ico", [16, 20, 24, 32, 40, 48], (size) => art.trayIconSvg(size, true));

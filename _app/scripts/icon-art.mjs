@@ -1,6 +1,8 @@
 // The app icon, drawn once (designed in Figma: "Conversations · Showcase", page "App icon",
-// concept C · Prompt): a blue chat with a prompt in it, on a graphite tile. Everything that shows
-// the icon is made from these: the Windows and Mac icons and the tray icons
+// concept C · Prompt): a blue chat with a prompt in it. On the Mac it sits on a graphite tile,
+// because macOS 26 puts any app icon that isn't a full tile on a plain grey one. On Windows, whose
+// app icons are free shapes, and on the website, it is the chat alone (markSvg). Everything that
+// shows the icon is made from these: the Windows and Mac icons and the tray icons
 // (scripts/make-icons.cjs, scripts/make-mac-icons.mjs), the window's own badge
 // (src/renderer/components/AppMark.tsx) and the website.
 //
@@ -47,10 +49,15 @@ export function squirclePath(x, y, size, radius, smoothing = 0.6) {
 // The chat, the prompt and the cursor, as drawn on Apple's grid (824 tile, 100 in).
 const CHAT = "M 372 320 H 652 A 120 120 0 0 1 772 440 V 580 A 120 120 0 0 1 652 700 H 440 C 400 744 336 780 266 792 C 290 762 300 732 300 692 C 270 670 252 630 252 580 V 440 A 120 120 0 0 1 372 320 Z";
 const PROMPT = "M 392 452 L 472 512 L 392 572";
-// Alone (the small drawing and the menu bar), the prompt sits in the middle of the chat.
+// Alone (the tile's small drawing and the menu bar), the prompt sits in the middle of the chat.
 const PROMPT_ALONE = "M 466 452 L 546 512 L 466 572";
 const CURSOR = "M 522 572 H 632";
-export const COLORS = { tileTop: "#3A3A3E", tileBottom: "#141416", chatTop: "#3B8BFF", chatBottom: "#4B52EC", glow: "#3B6BFF" };
+// The chat alone, small: the stroke is bolder, so the prompt and the cursor move apart, or at 16 to
+// 24 px they run together.
+const PROMPT_SMALL = "M 384 452 L 464 512 L 384 572";
+const CURSOR_SMALL = "M 542 572 H 648";
+// (The tile is a mid graphite, not near-black, so the icon doesn't sink into a dark Dock.)
+export const COLORS = { tileTop: "#5B5B62", tileBottom: "#2A2A2F", chatTop: "#3B8BFF", chatBottom: "#4B52EC", glow: "#3B6BFF" };
 
 /**
  * The icon as SVG markup.
@@ -93,21 +100,25 @@ export function iconSvg({ size = 1024, grid = "full", inset = 0.06, small = fals
 }
 
 /**
- * The mark alone: the chat with the prompt, no tile, filling the square. For a browser tab, where
- * the tab bar may be dark or light and a dark tile would vanish on a dark one.
+ * The mark alone: the chat with the prompt, no tile, filling the square. The Windows icons, and the
+ * website, where a tab bar may be dark or light and a dark tile would vanish on a dark one.
+ *   small: for 32 px and under (and the tray), the prompt and cursor a little bolder and further apart.
+ *   gap: a clear circle cut out of the chat (x, y, r), for the tray's dot to sit in.
  */
-export function markSvg({ size = 1024, ids = "mk" } = {}) {
+export function markSvg({ size = 1024, ids = "mk", small = false, gap = null } = {}) {
   // The chat's own box is x 252..772, y 320..792; fitted with a small margin and centred.
   const s = 1.8;
   const tx = (1024 - 520 * s) / 2 - 252 * s;
   const ty = (1024 - 472 * s) / 2 - 320 * s;
+  const sw = small ? 72 : 62;
+  const mask = gap ? `<mask id="${ids}-gap" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect width="1024" height="1024" fill="#fff"/><circle cx="${gap.x}" cy="${gap.y}" r="${gap.r}" fill="#000"/></mask>` : "";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 1024 1024">
-  <defs><linearGradient id="${ids}-chat" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${COLORS.chatTop}"/><stop offset="1" stop-color="${COLORS.chatBottom}"/></linearGradient></defs>
-  <g transform="translate(${tx.toFixed(1)} ${ty.toFixed(1)}) scale(${s})">
+  <defs><linearGradient id="${ids}-chat" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${COLORS.chatTop}"/><stop offset="1" stop-color="${COLORS.chatBottom}"/></linearGradient>${mask}</defs>
+  <g${gap ? ` mask="url(#${ids}-gap)"` : ""}><g transform="translate(${tx.toFixed(1)} ${ty.toFixed(1)}) scale(${s})">
     <path d="${CHAT}" fill="url(#${ids}-chat)"/>
-    <path d="${PROMPT}" fill="none" stroke="#fff" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="${CURSOR}" fill="none" stroke="#fff" stroke-width="62" stroke-linecap="round"/>
-  </g>
+    <path d="${small ? PROMPT_SMALL : PROMPT}" fill="none" stroke="#fff" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${small ? CURSOR_SMALL : CURSOR}" fill="none" stroke="#fff" stroke-width="${sw}" stroke-linecap="round"/>
+  </g></g>
 </svg>`;
 }
 
@@ -134,9 +145,14 @@ export function trayTemplateSvg(px, badge = false) {
 </svg>`;
 }
 
-/** The Windows tray icon: the small icon, with an orange dot when Claude is waiting for you. */
+/**
+ * The Windows tray icon: the chat alone, with an orange dot at its top right when Claude is
+ * waiting for you. The dot sits in a gap cut out of the chat, so it stands apart from the blue on
+ * a light or a dark taskbar.
+ */
 export function trayIconSvg(size, badge = false) {
-  const base = iconSvg({ size, grid: "full", inset: 0.04, small: true, ids: badge ? "tb" : "t" });
+  const dot = { x: 838, y: 186 };
+  const base = markSvg({ size, small: true, ids: badge ? "tb" : "t", gap: badge ? { ...dot, r: 232 } : null });
   if (!badge) return base;
-  return base.replace("</svg>", `<circle cx="${1024 - 190}" cy="190" r="168" fill="#ff9500" stroke="#fff" stroke-width="56"/></svg>`);
+  return base.replace("</svg>", `<circle cx="${dot.x}" cy="${dot.y}" r="176" fill="#ff9500"/></svg>`);
 }

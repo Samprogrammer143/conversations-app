@@ -54,8 +54,8 @@ body.solid .sidebar,
   width: 20px;
   height: 20px;
   border-radius: 5px;
-  /* A workspace's letter, on the app icon's graphite with its blue (scripts/icon-art.mjs). */
-  background: linear-gradient(180deg, #3a3a3e, #141416);
+  /* A workspace's letter, on the Mac icon's graphite tile with the chat's blue (scripts/icon-art.mjs, COLORS). */
+  background: linear-gradient(180deg, #5b5b62, #2a2a2f);
   color: #5b9bff;
   box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.14);
   flex: none;
