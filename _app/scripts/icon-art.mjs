@@ -64,9 +64,10 @@ export function iconSvg({ size = 1024, grid = "full", inset = 0.06, small = fals
   const tileX = (1024 - tileSize) / 2;
   const radius = tileSize * (185 / 824);
   const tile = squirclePath(tileX, tileX, tileSize, radius);
-  // The art inside is drawn for the 824 grid; it scales with the tile, about the centre.
-  const k = (tileSize / 824) * (small ? 1.3 : 1);
-  const art = `translate(512 ${small ? 480 : 512}) scale(${k.toFixed(4)}) translate(-512 -512)`;
+  // The art inside is drawn for the 824 grid; it scales with the tile, about the centre. Small, the
+  // chat is a little bigger, but its tail stays clear of the tile's rounded corner.
+  const k = (tileSize / 824) * (small ? 1.12 : 1);
+  const art = `translate(512 ${small ? 492 : 512}) scale(${k.toFixed(4)}) translate(-512 -512)`;
   const sw = small ? 76 : 48;
   const shadow = grid === "mac" && !small;
   const defs = `
