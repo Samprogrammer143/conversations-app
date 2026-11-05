@@ -454,7 +454,7 @@ export function AddWorkspaceSheet() {
     <div className="scrim">
       <div className="sheet ws-sheet" role="dialog" aria-modal="true" aria-labelledby="ws-title">
         {step !== "working" && <IconButton icon="x" label="Close" className="close" onClick={close} />}
-        <div className="welcome-icon" aria-hidden>
+        <div className="welcome-icon on-blue" aria-hidden>
           <Icon name="layers" size={30} />
         </div>
         {step !== "signin" ? (

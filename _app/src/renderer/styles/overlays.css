@@ -437,10 +437,20 @@
   color: #fff;
 }
 .welcome-icon {
+  display: grid;
+  place-items: center;
   width: 72px;
   height: 72px;
   margin: 0 auto 20px;
   filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.28));
+}
+/* A sheet's own symbol (the workspace sheet's layers), in white on a blue tile like the app's chat. */
+.welcome-icon.on-blue {
+  border-radius: 18px;
+  background: linear-gradient(180deg, #3394ff, #4f54eb);
+  color: #fff;
+  filter: none;
+  box-shadow: 0 8px 24px rgba(79, 84, 235, 0.3);
 }
 .sheet h1,
 .welcome-window h1 {

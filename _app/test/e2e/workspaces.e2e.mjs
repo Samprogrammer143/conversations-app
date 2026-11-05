@@ -119,6 +119,14 @@ try {
   check("a setup that fails shows why, and leaves no workspace behind", !!failErr && afterFail.workspaces.length === 1, `${failErr} | ${JSON.stringify(afterFail.workspaces.map((w) => w.id))}`);
 
   await win.fill('.ws-form input[placeholder^="https://"]', bare);
+  // The sheet's symbol sits in the middle of its blue tile (0.5.29 left it in the top-left corner).
+  const off = await win.evaluate(() => {
+    const box = document.querySelector(".ws-sheet .welcome-icon")?.getBoundingClientRect();
+    const sym = document.querySelector(".ws-sheet .welcome-icon svg")?.getBoundingClientRect();
+    if (!box || !sym) return null;
+    return { x: sym.left + sym.width / 2 - (box.left + box.width / 2), y: sym.top + sym.height / 2 - (box.top + box.height / 2), tile: getComputedStyle(document.querySelector(".ws-sheet .welcome-icon")).backgroundImage };
+  });
+  check("the sheet's symbol is centred on its blue tile", !!off && Math.abs(off.x) <= 1 && Math.abs(off.y) <= 1 && off.tile.includes("gradient"), JSON.stringify(off));
   await win.screenshot({ path: path.join(out, "ws-add-sheet.png") });
   await win.click('.ws-sheet button:has-text("Set up")');
   const signInStep = await waitFor(win, () => document.querySelector("#ws-title")?.textContent?.startsWith("Sign in to") ? document.querySelector("#ws-title").textContent : null, null, 90_000);
