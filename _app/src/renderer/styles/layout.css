@@ -54,9 +54,20 @@ body.solid .sidebar,
   width: 20px;
   height: 20px;
   border-radius: 5px;
-  background: linear-gradient(180deg, #3394ff, #4f54eb);
-  color: #fff;
+  /* A workspace's letter, on the app icon's graphite with its blue (scripts/icon-art.mjs). */
+  background: linear-gradient(180deg, #3a3a3e, #141416);
+  color: #5b9bff;
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.14);
   flex: none;
+}
+/* The app's own icon, drawn (components/AppMark.tsx). */
+.app-mark {
+  display: block;
+  flex: none;
+  line-height: 0;
+}
+.app-mark svg {
+  display: block;
 }
 
 .sb-content {

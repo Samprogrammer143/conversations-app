@@ -6293,7 +6293,11 @@ var files = {
   page: process.env.CONVERSATIONS_DEV_URL || path30.join(DIST, "renderer", "index.html")
 };
 var RESOURCES = app4.isPackaged ? process.resourcesPath : path30.resolve(DIST, "..", "resources");
-files.icon = path30.join(RESOURCES, "icon.ico");
+var iconFile = (name) => {
+  const own = path30.join(DIST, "icons", name);
+  return !DIST.includes("app.asar") && fs28.existsSync(own) ? own : path30.join(RESOURCES, name);
+};
+files.icon = iconFile("icon.ico");
 var APP_VERSION = (() => {
   try {
     return JSON.parse(fs28.readFileSync(path30.join(DIST, "app.json"), "utf8")).version || app4.getVersion();
@@ -6518,7 +6522,7 @@ function makeMain(show) {
   return w;
 }
 function appIcon(name) {
-  const p = path30.join(RESOURCES, name);
+  const p = iconFile(name);
   return fs28.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
 }
 function toggleFlyout() {
@@ -7357,7 +7361,14 @@ void app4.whenReady().then(async () => {
   if (app4.isPackaged && !askedFor(process.argv)) setStartAtLogin(settings.get().startAtLogin && !needsWelcome());
   if (isMac2) {
     Menu2.setApplicationMenu(macAppMenu({ settings: () => openSettings(), reportProblem: () => void shell2.openExternal(reportProblemUrl(APP_VERSION, "Mac")), quit: () => userQuit(), quitLabel: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations" }));
-    if (!app4.isPackaged) app4.dock?.setIcon(path30.join(RESOURCES, "icon-mac.png"));
+    const dockIcon = appIcon("icon-mac.png");
+    if (!dockIcon.isEmpty()) {
+      try {
+        app4.dock?.setIcon(dockIcon);
+      } catch (e) {
+        log("app", `could not set the Dock icon: ${e.message}`);
+      }
+    }
   }
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));
   electronSession.defaultSession.setPermissionCheckHandler(() => false);

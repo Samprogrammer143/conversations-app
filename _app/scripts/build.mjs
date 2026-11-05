@@ -84,6 +84,13 @@ for (const f of ["main/main.mjs", "main/index-worker.mjs"]) {
 // The licences of what the bundles include travel with them.
 writeNotices(root, path.join(dist, "THIRD-PARTY-NOTICES.txt"));
 
+// So do the icons the running app shows (window, tray, Dock): an update changes them on every
+// PC, not only on a new install. (Made by scripts/make-icons.cjs and make-mac-icons.mjs.)
+const icons = path.join(dist, "icons");
+fs.rmSync(icons, { recursive: true, force: true });
+fs.mkdirSync(icons, { recursive: true });
+for (const f of ["icon.ico", "icon.png", "icon-mac.png", "tray.ico", "tray-badge.ico", "trayTemplate.png", "trayTemplate@2x.png", "trayBadgeTemplate.png", "trayBadgeTemplate@2x.png"]) fs.copyFileSync(path.join(root, "resources", f), path.join(icons, f));
+
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 // The shell compares this with the copy it was installed with (see src/shell/choose.ts).
 fs.writeFileSync(path.join(dist, "app.json"), `${JSON.stringify({ version: pkg.version, minShell: "1.0.0", builtAt: new Date().toISOString() }, null, 2)}\n`);

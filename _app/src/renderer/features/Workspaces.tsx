@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceInfo } from "../../shared/types";
+import { AppMark } from "../components/AppMark";
 import { Icon } from "../components/Icon";
 import { Button, IconButton, Spinner } from "../components/controls";
 import { api } from "../lib/api";
@@ -282,9 +283,13 @@ export function WorkspaceSwitcher() {
           setOpen(!open);
         }}
       >
-        <span className="app-icon ws-badge" aria-hidden>
-          {all.length > 1 && current ? initial(current.name) : <Icon name="message-square" size={13} strokeWidth={2} />}
-        </span>
+        {all.length > 1 && current ? (
+          <span className="app-icon ws-badge" aria-hidden>
+            {initial(current.name)}
+          </span>
+        ) : (
+          <AppMark size={20} />
+        )}
         <span className="ws-name ellipsis">{current?.name ?? "Conversations"}</span>
         <Icon name="chevrons-up-down" size={13} className="ws-chev" />
       </button>

@@ -65,7 +65,14 @@ const files: WindowFiles = {
   page: process.env.CONVERSATIONS_DEV_URL || path.join(DIST, "renderer", "index.html"),
 };
 const RESOURCES = app.isPackaged ? process.resourcesPath : path.resolve(DIST, "..", "resources");
-files.icon = path.join(RESOURCES, "icon.ico");
+// The icons come with the app's code (dist/icons, from the build), so an update changes them on
+// every PC; the installer's own copies are for the code it came with (inside app.asar: the same
+// files, read straight from disk) and for a build without them.
+const iconFile = (name: string) => {
+  const own = path.join(DIST, "icons", name);
+  return !DIST.includes("app.asar") && fs.existsSync(own) ? own : path.join(RESOURCES, name);
+};
+files.icon = iconFile("icon.ico");
 // The app code's own version (it can be newer than the installer, via the repository).
 const APP_VERSION: string = (() => {
   try {
@@ -369,7 +376,7 @@ function makeMain(show: boolean): BrowserWindow {
 }
 
 function appIcon(name: string) {
-  const p = path.join(RESOURCES, name);
+  const p = iconFile(name);
   return fs.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
 }
 
@@ -1373,8 +1380,16 @@ void app.whenReady().then(async () => {
   if (app.isPackaged && !askedFor(process.argv)) setStartAtLogin(settings.get().startAtLogin && !needsWelcome());
   if (isMac) {
     Menu.setApplicationMenu(macAppMenu({ settings: () => openSettings(), reportProblem: () => void shell.openExternal(reportProblemUrl(APP_VERSION, "Mac")), quit: () => userQuit(), quitLabel: workspaceLabel() ? `Quit ${workspaceLabel()}` : "Quit Conversations" }));
-    // (The installed app's Dock icon comes from its bundle; this is for development.)
-    if (!app.isPackaged) app.dock?.setIcon(path.join(RESOURCES, "icon-mac.png"));
+    // The Dock shows the icon that came with the app's code while it runs (the bundle's own,
+    // from its install, is what Finder shows when it isn't running). Never in the way of starting.
+    const dockIcon = appIcon("icon-mac.png");
+    if (!dockIcon.isEmpty()) {
+      try {
+        app.dock?.setIcon(dockIcon);
+      } catch (e) {
+        log("app", `could not set the Dock icon: ${(e as Error).message}`);
+      }
+    }
   }
   // The window never needs the camera, microphone, notifications API and so on.
   electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false));

@@ -14,6 +14,7 @@ const ASSETS = [
   ["Inter (font)", "src/renderer/fonts/Inter-LICENSE.txt"],
   ["Geist Mono (font)", "src/renderer/fonts/GeistMono-LICENSE.txt"],
   ["Lucide (icons)", "src/renderer/icons/LUCIDE-LICENSE.txt"],
+  ["figma-squircle (the app icon's corners)", "scripts/FIGMA-SQUIRCLE-LICENSE.txt"],
 ];
 
 export function writeNotices(root, outFile) {

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { AppInfo, SearchHit } from "../../shared/types";
+import { AppMark } from "../components/AppMark";
 import { Icon } from "../components/Icon";
 import { Button, IconButton, Kbd, Spinner, Tile } from "../components/controls";
 import { api } from "../lib/api";
@@ -635,7 +636,7 @@ function WelcomeContent({ info, pcs, total, onDone, onClose }: { info: AppInfo; 
     <>
         {onClose && <IconButton icon="x" label={accepted ? "Close" : "Close: Conversations won't start until you accept"} className="close" onClick={accepted ? done : onClose} />}
         <div className="welcome-icon">
-          <Icon name="message-square" size={36} strokeWidth={1.5} />
+          <AppMark size={72} />
         </div>
         <h1 id="welcome-title">Welcome to Conversations</h1>
         <p className="lede">Every Claude Code chat from all your {computerWord()}s, in one place and kept in sync.</p>

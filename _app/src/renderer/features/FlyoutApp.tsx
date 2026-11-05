@@ -1,6 +1,7 @@
 // The tray flyout (S7): Windows 11 shape, Acrylic, and only what needs you.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ConversationRow, PermissionRequest, SyncStatus } from "../../shared/types";
+import { AppMark } from "../components/AppMark";
 import { Icon } from "../components/Icon";
 import { IconButton, Tile } from "../components/controls";
 import { api } from "../lib/api";
@@ -69,9 +70,7 @@ export function FlyoutApp() {
   return (
     <div className="flyout" ref={ref}>
       <div className="fly-head">
-        <span className="app-icon" aria-hidden>
-          <Icon name="message-square" size={15} strokeWidth={2} />
-        </span>
+        <AppMark size={24} />
         <div className="fly-title">
           <div className="t1">Conversations</div>
           <div className="t2">

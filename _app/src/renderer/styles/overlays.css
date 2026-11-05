@@ -437,15 +437,10 @@
   color: #fff;
 }
 .welcome-icon {
-  display: grid;
-  place-items: center;
   width: 72px;
   height: 72px;
   margin: 0 auto 20px;
-  border-radius: 18px;
-  background: linear-gradient(180deg, #3394ff, #4f54eb);
-  color: #fff;
-  box-shadow: 0 8px 24px rgba(79, 84, 235, 0.3);
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.28));
 }
 .sheet h1,
 .welcome-window h1 {

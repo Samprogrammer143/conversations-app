@@ -188,11 +188,6 @@ body[data-window="flyout"] {
   padding: 4px;
   overflow: hidden;
 }
-.flyout .app-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-}
 .fly-empty {
   display: flex;
   align-items: center;

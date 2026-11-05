@@ -1,33 +1,16 @@
-// Renders the app and tray icons (the Figma app icon: a blue gradient tile with
-// the message-square glyph) at every Windows size and packs them into .ico files.
+// Renders the app and tray icons (scripts/icon-art.mjs: the chat with a prompt on a graphite
+// tile) at every Windows size and packs them into .ico files. 32 px and under use the small
+// drawing (no glow or shadow, a bigger chat, the prompt only), which stays legible.
 // Run with Electron:  npx electron scripts/make-icons.cjs
 const { app, BrowserWindow } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const out = path.resolve(__dirname, "..", "resources");
-const GLYPH = '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>';
 
-function svg(size, { badge = false, tray = false } = {}) {
-  // Small sizes get a heavier stroke and less inset so the glyph stays legible.
-  const r = Math.round(size * 0.225);
-  const inset = tray ? size * 0.04 : size * 0.06;
-  const tile = size - inset * 2;
-  const g = tile * (size <= 20 ? 0.66 : 0.58);
-  const sw = size <= 20 ? 2.4 : size <= 32 ? 2.1 : 1.8;
-  const gx = inset + (tile - g) / 2;
-  const gy = inset + (tile - g) / 2 + tile * 0.02;
-  const dot = size * 0.34;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3394ff"/><stop offset="1" stop-color="#4f54eb"/></linearGradient></defs>
-  <rect x="${inset}" y="${inset}" width="${tile}" height="${tile}" rx="${r}" fill="url(#g)"/>
-  <svg x="${gx}" y="${gy}" width="${g}" height="${g}" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${GLYPH}</svg>
-  ${badge ? `<circle cx="${size - dot / 2 - 0.5}" cy="${dot / 2 + 0.5}" r="${dot / 2}" fill="#ff9500" stroke="#fff" stroke-width="${Math.max(1, size / 16)}"/>` : ""}
-</svg>`;
-}
-
-async function render(win, size, opts) {
-  const html = `<html><body style="margin:0;background:transparent">${svg(size, opts)}</body></html>`;
+async function render(win, size, svg) {
+  const html = `<html><body style="margin:0;background:transparent">${svg}</body></html>`;
   await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   await new Promise((r) => setTimeout(r, 60));
   const img = await win.webContents.capturePage({ x: 0, y: 0, width: size, height: size });
@@ -59,19 +42,20 @@ function ico(pngs) {
 
 app.disableHardwareAcceleration();
 app.whenReady().then(async () => {
+  const art = await import(pathToFileURL(path.join(__dirname, "icon-art.mjs")).href);
   fs.mkdirSync(out, { recursive: true });
   const win = new BrowserWindow({ width: 256, height: 256, show: false, frame: false, transparent: true, webPreferences: { offscreen: true } });
   win.webContents.setZoomFactor(1);
-  const make = async (name, sizes, opts) => {
+  const make = async (name, sizes, draw) => {
     const pngs = [];
-    for (const size of sizes) pngs.push({ size, data: await render(win, size, opts) });
+    for (const size of sizes) pngs.push({ size, data: await render(win, size, draw(size)) });
     fs.writeFileSync(path.join(out, name), ico(pngs));
     console.log(`${name}: ${sizes.join(", ")}`);
     return pngs;
   };
-  const big = await make("icon.ico", [16, 20, 24, 32, 40, 48, 64, 128, 256], {});
+  const big = await make("icon.ico", [16, 20, 24, 32, 40, 48, 64, 128, 256], (size) => art.iconSvg({ size, grid: "full", small: size <= 32 }));
   fs.writeFileSync(path.join(out, "icon.png"), big[big.length - 1].data);
-  await make("tray.ico", [16, 20, 24, 32, 40, 48], { tray: true });
-  await make("tray-badge.ico", [16, 20, 24, 32, 40, 48], { tray: true, badge: true });
+  await make("tray.ico", [16, 20, 24, 32, 40, 48], (size) => art.trayIconSvg(size, false));
+  await make("tray-badge.ico", [16, 20, 24, 32, 40, 48], (size) => art.trayIconSvg(size, true));
   app.quit();
 });
