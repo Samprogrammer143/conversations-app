@@ -162,7 +162,6 @@ function tx(db2, fn) {
 // src/main/index/indexer.ts
 import fs2 from "node:fs";
 import path2 from "node:path";
-import zlib from "node:zlib";
 
 // src/shared/summary.ts
 var plural = (n, one, many) => n === 1 ? one : many.replace("#", String(n));
@@ -1017,6 +1016,7 @@ function parseTranscript(buf, ctx) {
 // src/main/sync/repo-read.ts
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 var NOT_PROJECTS = /* @__PURE__ */ new Set(["_sync", "_app", "_devices", "_state", "_tools"]);
 var isProjectFolder = (name) => !name.startsWith(".") && !name.startsWith("C--") && !name.startsWith("-") && !NOT_PROJECTS.has(name);
 var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1194,6 +1194,34 @@ function projectIdForCwd(cwd, home) {
   const remote = normaliseRemote(g?.remote);
   return { projectId: remote ?? `folder:${key}`, folderKey: key, top };
 }
+var PARTS_FILE = "transcript.parts.json";
+var PART_FILE = /^transcript\.\d{3}\.jsonl$/;
+function lastPartFile(manifestPath) {
+  try {
+    const parts = JSON.parse(fs.readFileSync(manifestPath, "utf8")).parts ?? [];
+    const name = String(parts[parts.length - 1]?.file ?? "");
+    return PART_FILE.test(name) ? path.join(path.dirname(manifestPath), name) : null;
+  } catch {
+    return null;
+  }
+}
+var REPO_TRANSCRIPT_NAMES = [PARTS_FILE, "transcript.jsonl.gz", "transcript.jsonl"];
+function readRepoTranscript(file) {
+  if (path.basename(file) === PARTS_FILE) {
+    const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+    const parts = Array.isArray(manifest.parts) ? manifest.parts : [];
+    return Buffer.concat(
+      parts.map((p) => {
+        const name = String(p?.file ?? "");
+        if (!PART_FILE.test(name)) throw new Error(`a part has a name it can't have: ${name}`);
+        return fs.readFileSync(path.join(path.dirname(file), name));
+      })
+    );
+  }
+  const buf = fs.readFileSync(file);
+  return file.endsWith(".gz") ? zlib.gunzipSync(buf) : buf;
+}
+var isPackedTranscript = (file) => file.endsWith(".gz") || path.basename(file) === PARTS_FILE;
 
 // src/main/index/indexer.ts
 var PROFILE_RE = /^([a-z]:\\users\\[^\\]+)/i;
@@ -1299,7 +1327,7 @@ var Indexer = class {
   repoSources(remote) {
     const out = [];
     for (const s of remote) {
-      for (const name of ["transcript.jsonl", "transcript.jsonl.gz"]) {
+      for (const name of REPO_TRANSCRIPT_NAMES) {
         const p = path2.join(s.dir, name);
         try {
           const st = fs2.statSync(p);
@@ -1367,11 +1395,11 @@ var Indexer = class {
     let primary = local ?? repo;
     if (local && repo) {
       const lt = this.lastTimestamp(local.path, false);
-      const rt = this.lastTimestamp(repo.path, repo.path.endsWith(".gz"));
+      const newest = path2.basename(repo.path) === PARTS_FILE ? lastPartFile(repo.path) : null;
+      const rt = newest ? this.lastTimestamp(newest, false) : this.lastTimestamp(repo.path, isPackedTranscript(repo.path));
       if (rt > lt) primary = repo;
     }
-    let buf = fs2.readFileSync(primary.path);
-    if (primary.path.endsWith(".gz")) buf = zlib.gunzipSync(buf);
+    const buf = primary.kind === "repo" ? readRepoTranscript(primary.path) : fs2.readFileSync(primary.path);
     const parsed = parseTranscript(buf, { machineForCwd: this.machineForCwd, sourcePath: primary.path });
     const appOwned = !!this.db.prepare("SELECT 1 FROM app_sessions WHERE conversation_id = ? UNION ALL SELECT 1 FROM edits WHERE conversation_id = ? AND app = 1").get(id, id);
     if (parsed.info.prompts === 0 && !appOwned || parsed.info.headless && !appOwned) {

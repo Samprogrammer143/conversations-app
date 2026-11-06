@@ -309,6 +309,15 @@ export function SyncPopover() {
           </div>
         )
       )}
+      {(sync.tooBigIds?.length ?? 0) > 0 && (
+        <div className="sync-note">
+          <Icon name="triangle-alert" className="warn" />
+          <div className="text">
+            <div className="t1">{sync.tooBigIds!.length === 1 ? "1 chat can't sync" : `${sync.tooBigIds!.length} chats can't sync`}</div>
+            <div className="t2">One entry in {sync.tooBigIds!.length === 1 ? "it" : "each"} is too big for GitHub, even on its own. {sync.tooBigIds!.length === 1 ? "It stays" : "They stay"} on this PC; other chats keep syncing.</div>
+          </div>
+        </div>
+      )}
       {sync.cloudSyncedClaudeDir && (
         <div className="sync-note">
           <Icon name="triangle-alert" className="warn" />

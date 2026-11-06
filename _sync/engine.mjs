@@ -5,7 +5,9 @@
 // private git repository on GitHub, kept in a working copy on each PC.
 //
 // Repo layout (version 2, still written; version 3 only adds files):
-//   <key>/<session id>/transcript.jsonl   the conversation (.jsonl.gz above 90 MB)
+//   <key>/<session id>/transcript.jsonl   the conversation; above 90 MB, in parts:
+//                     /transcript.parts.json  the parts, in order (each well under GitHub's limit)
+//                     /transcript.001.jsonl ...  (older engines wrote one transcript.jsonl.gz)
 //                     /files/...          subagent transcripts and saved tool outputs
 //                     /meta.json          title, PCs, sizes, git remote
 //   _devices/<pc>.json                    one file per PC: versions, last push and pull
@@ -293,6 +295,15 @@ export function ensureRuntime() {
 
 export const GZIP_OVER_BYTES = Number(process.env.CLAUDE_SYNC_GZIP_OVER_BYTES) || 90 * 1024 * 1024; // GitHub rejects files over 100 MB
 export const SKIP_FILE_OVER_BYTES = Number(process.env.CLAUDE_SYNC_MAX_FILE_BYTES) || 95 * 1024 * 1024;
+/**
+ * A big transcript is kept in parts of up to this much: only the newest changes as it grows.
+ * As plain text, so git stores each change to it as a small difference, not a new copy; and
+ * under the 50 MB GitHub warns about. (CLAUDE_SYNC_GZIP_OVER_BYTES is where parts begin.)
+ */
+export const PART_BYTES = Number(process.env.CLAUDE_SYNC_PART_BYTES) || 16 * 1024 * 1024; // small: each change is a small download on the other PCs too
+const PARTS_FILE = "transcript.parts.json";
+const PART_FILE = /^transcript\.(\d{3})\.jsonl$/;
+const partName = (i) => `transcript.${String(i + 1).padStart(3, "0")}.jsonl`;
 export const PUSH_DEBOUNCE_MS = Number(process.env.CLAUDE_SYNC_DEBOUNCE_MS) || 2 * 60 * 1000;
 // Session start never downloads in the hook itself: a detached worker does,
 // and the hook waits this long for it before letting Claude start. A slow or
@@ -1595,26 +1606,107 @@ export function refreshRepo() {
   return { ok: true, branch };
 }
 
+/**
+ * A big transcript's parts, joined; null when it isn't kept in parts. Its list of parts
+ * unreadable, the part files there are joined in order, so lines only GitHub has are never
+ * taken for gone.
+ */
+function readRemoteParts(dir) {
+  const manifest = readJson(path.join(dir, PARTS_FILE), null);
+  let names;
+  if (Array.isArray(manifest?.parts)) {
+    names = manifest.parts.map((p) => String(p?.file ?? ""));
+    const bad = names.find((n) => !PART_FILE.test(n));
+    if (bad !== undefined) throw new Error(`a part of ${path.basename(dir)} has a name it can't have: ${bad}`);
+  }
+  // A part it lists that isn't there: the parts that are, in order, as for a list that can't be read.
+  if (names && names.some((n) => !fs.existsSync(path.join(dir, n)))) {
+    log(`a part ${path.basename(dir)}'s list names isn't there; joining the parts that are`);
+    names = null;
+  }
+  if (!names) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {}
+    names = entries.filter((n) => PART_FILE.test(n)).sort();
+    if (!names.length) return null;
+    if (!manifest) log(`the parts list of ${path.basename(dir)} can't be read; joining its ${names.length} parts in order`);
+  }
+  const bufs = names.map((n) => fs.readFileSync(path.join(dir, n)));
+  if (names.length === manifest?.parts?.length) manifest.parts.forEach((p, i) => {
+    if (p?.sha256 && sha(bufs[i]) !== p.sha256) log(`part ${names[i]} of ${path.basename(dir)} isn't what its list says; using it as it is`);
+  });
+  return Buffer.concat(bufs);
+}
+
+/**
+ * The conversation as GitHub has it: one file, or its parts. Kept in parts with an older
+ * engine's single file beside them (written by a PC not yet updated), it is both together.
+ */
 export function readRemoteTranscript(dir) {
   const plain = path.join(dir, "transcript.jsonl");
   const gz = path.join(dir, "transcript.jsonl.gz");
-  if (fs.existsSync(plain)) return fs.readFileSync(plain);
-  if (fs.existsSync(gz)) return zlib.gunzipSync(fs.readFileSync(gz));
-  return null;
+  const single = fs.existsSync(plain) ? fs.readFileSync(plain) : fs.existsSync(gz) ? zlib.gunzipSync(fs.readFileSync(gz)) : null;
+  const parts = readRemoteParts(dir);
+  if (!parts) return single;
+  if (!single) return parts;
+  const extra = missingLines(single, parts);
+  return extra.length ? withLinesAppended(parts, extra) : parts;
 }
 
-/** How a transcript is stored in the repo: as it is, or compressed above GZIP_OVER_BYTES. */
-export function encodeRemoteTranscript(buf) {
-  return buf.length > GZIP_OVER_BYTES ? { gz: true, data: zlib.gzipSync(buf, { level: 9 }) } : { gz: false, data: buf };
+/** Whole lines, in runs of at most max bytes (a single longer line is a run of its own). */
+export function chunkAtLines(buf, max) {
+  const out = [];
+  let start = 0;
+  while (start < buf.length) {
+    let end = Math.min(start + max, buf.length);
+    if (end < buf.length) {
+      const nl = buf.lastIndexOf(10, end - 1);
+      end = nl >= start ? nl + 1 : buf.indexOf(10, end) + 1 || buf.length;
+    }
+    out.push(buf.subarray(start, end));
+    start = end;
+  }
+  return out;
 }
 
-export function writeRemoteTranscript(dir, buf, stored = encodeRemoteTranscript(buf)) {
+/**
+ * How a transcript goes into the repo: as one file up to GZIP_OVER_BYTES, in parts above it.
+ * A part GitHub already has (the same lines) is left as it is, so a growing conversation only
+ * uploads its newest part. tooBig: a file that would still be over GitHub's limit (one line
+ * that big), with its size.
+ */
+export function planRemoteTranscript(dir, buf) {
+  if (buf.length <= GZIP_OVER_BYTES) {
+    return { write: [["transcript.jsonl", buf]], keep: ["transcript.jsonl"], tooBig: buf.length > SKIP_FILE_OVER_BYTES ? buf.length : null, whole: true };
+  }
+  const before = readJson(path.join(dir, PARTS_FILE), null);
+  const had = Array.isArray(before?.parts) ? before.parts : [];
+  const write = [];
+  const parts = [];
+  let tooBig = null;
+  chunkAtLines(buf, PART_BYTES).forEach((chunk, i) => {
+    const file = partName(i);
+    const hash = sha(chunk);
+    parts.push({ file, bytes: chunk.length, sha256: hash });
+    if (had[i]?.file === file && had[i]?.sha256 === hash && sizeOf(path.join(dir, file)) === chunk.length) return;
+    if (chunk.length > SKIP_FILE_OVER_BYTES) tooBig = Math.max(tooBig ?? 0, chunk.length);
+    write.push([file, chunk]);
+  });
+  const manifest = { version: 1, bytes: buf.length, sha256: sha(buf), parts };
+  write.push([PARTS_FILE, Buffer.from(JSON.stringify(manifest, null, 2) + "\n")]);
+  return { write, keep: [PARTS_FILE, ...parts.map((p) => p.file)], tooBig };
+}
+
+/** Writes what the plan says, and takes away the transcript files it no longer has. */
+export function writeRemoteTranscript(dir, buf, plan = planRemoteTranscript(dir, buf)) {
   fs.mkdirSync(dir, { recursive: true });
-  const plain = path.join(dir, "transcript.jsonl");
-  const gz = path.join(dir, "transcript.jsonl.gz");
-  fs.writeFileSync(stored.gz ? gz : plain, stored.data);
-  const other = stored.gz ? plain : gz;
-  if (fs.existsSync(other)) fs.unlinkSync(other);
+  for (const [name, data] of plan.write) fs.writeFileSync(path.join(dir, name), data);
+  const keep = new Set(plan.keep);
+  for (const name of fs.readdirSync(dir)) {
+    if (/^transcript(\.jsonl(\.gz)?|\.parts\.json|\.\d{3}\.jsonl)$/.test(name) && !keep.has(name)) fs.unlinkSync(path.join(dir, name));
+  }
 }
 
 export function listFiles(root) {
@@ -2217,7 +2309,9 @@ export function pushSession(args, { hold = false } = {}) {
     if (known?.skip) {
       // A skip is final, except a delete that was undone, and a scripted run that has
       // since been carried on in Claude Code itself or claimed by the app.
+      // ("too-big" was an older engine's: it couldn't upload a big conversation in parts.)
       const lifted =
+        known.skip === "too-big" ||
         (known.skip === "deleted" && !isDeleted(mergedState(), id)) ||
         (known.skip === "headless" && (includeHeadless() || !inspectTranscript(raw).headless));
       if (!lifted) return;
@@ -2307,14 +2401,16 @@ export function pushSession(args, { hold = false } = {}) {
       }
 
       // GitHub refuses any file over 100 MB, and one refused commit would hold back
-      // every later upload from this PC. Such a transcript is never committed.
-      const stored = transcriptChanged ? encodeRemoteTranscript(merged) : null;
-      if (stored && stored.data.length > SKIP_FILE_OVER_BYTES) {
+      // every later upload from this PC. A big conversation goes up in parts; only one
+      // with a single entry that big can't, and it is never committed.
+      const stored = transcriptChanged ? planRemoteTranscript(dir, merged) : null;
+      if (stored?.tooBig) {
         git(["checkout", "--", "."], { quiet: true });
         git(["clean", "-fdq"], { quiet: true });
-        patchSession(id, { skip: "too-big" });
-        log(`not uploading ${id}: ${humanBytes(stored.data.length)} even compressed, over GitHub's limit`);
-        return { ok: false, auto, id, key, tooBig: true, msg: `"${info.title}" is too large to upload (${humanBytes(stored.data.length)} even compressed; GitHub accepts files up to 100 MB). It stays on this PC only. Other conversations keep syncing.` };
+        patchSession(id, { skip: "too-big-entry" });
+        const what = stored.whole ? `is too large to upload (${humanBytes(stored.tooBig)})` : `has one entry too large to upload (${humanBytes(stored.tooBig)} on its own)`;
+        log(`not uploading ${id}: ${stored.whole ? "the transcript" : "one entry"} is ${humanBytes(stored.tooBig)}, over GitHub's limit`);
+        return { ok: false, auto, id, key, tooBig: true, msg: `"${info.title}" ${what}; GitHub accepts files up to 100 MB. It stays on this PC only. Other conversations keep syncing.` };
       }
 
       if (stored) writeRemoteTranscript(dir, merged, stored);
@@ -2362,7 +2458,7 @@ export function pushSession(args, { hold = false } = {}) {
         if (remoteOnly) delete s.sessions[id].remoteSha;
         // (Held for a batch, it is only committed: it waits until the batch is pushed.)
         if (!hold) delete s.sessions[id].pending;
-        if (s.sessions[id].skip === "too-big") delete s.sessions[id].skip;
+        if (s.sessions[id].skip === "too-big" || s.sessions[id].skip === "too-big-entry") delete s.sessions[id].skip;
         s.pushCount = (s.pushCount || 0) + 1;
       });
       if (auto && !hold && st.pushCount % GC_EVERY_PUSHES === 0) git(["gc", "--quiet"], { quiet: true, timeout: 30 * 60_000 });
@@ -2649,6 +2745,27 @@ function queueExistingChats() {
 /** Set-up asked for this PC's chats to go up, and that never began (it stopped first). */
 function queueExistingIfDue() {
   if (loadConfig()?.uploadExistingDue) queueExistingChats();
+  requeueTooBig();
+}
+
+/**
+ * Conversations an older engine left on this PC as too big for GitHub: they go up in parts now,
+ * without waiting for their next message.
+ */
+function requeueTooBig() {
+  const candidates = Object.entries(loadState().sessions || {}).filter(([id, v]) => v?.skip === "too-big" && !v.pending && isUuid(id)).map(([id]) => id);
+  if (!candidates.length) return;
+  // Only those still here: one whose transcript has gone loses the mark, or it would be queued at every sync.
+  const known = knownOwnedNames();
+  const ids = candidates.filter((id) => ownedLocalTranscripts(id, known).length);
+  const gone = candidates.filter((id) => !ids.includes(id));
+  if (gone.length)
+    updateState((s) => {
+      for (const id of gone) if (s.sessions[id]?.skip === "too-big") delete s.sessions[id].skip;
+    });
+  if (!ids.length) return;
+  for (const id of ids) markPending(id, { reason: "parts" });
+  log(`${ids.length} conversation(s) too big for one file go up in parts now: ${ids.join(", ")}`);
 }
 
 /**
@@ -2779,7 +2896,13 @@ export function autoPull(cwd, currentId) {
       const copies = ownedLocalTranscripts(s.sessionId, known);
       // Nothing new on GitHub since this PC last synced it, and one copy in the right place.
       if (knownS?.remoteSha === s.sha256 && copies.length === 1 && samePath(path.dirname(copies[0]), targetDir)) continue;
-      const r = pullOne(s, targetDir, allow, { open, known });
+      let r;
+      try {
+        r = pullOne(s, targetDir, allow, { open, known });
+      } catch (e) {
+        log(`auto-pull: couldn't bring ${s.sessionId} down: ${e.message}`);
+        continue;
+      }
       if (r.status === "live") log(`auto-pull: left ${s.sessionId} alone, it is open on this PC`);
       if (r.status === "downloaded" || r.status === "updated") results.push({ ...r, title: s.title, from: s.lastPushedFrom, updatedAt: s.updatedAt });
     }
@@ -2958,7 +3081,13 @@ export function pullAll({ intoLocal = true, lockWaitMs = 60_000, skip = [] } = {
         summary.noFolder++;
         continue;
       }
-      const r = pullOne(s, targetDir, allow, { open, known });
+      let r;
+      try {
+        r = pullOne(s, targetDir, allow, { open, known });
+      } catch (e) {
+        log(`pull-all: couldn't bring ${s.sessionId} down: ${e.message}`);
+        continue;
+      }
       if (r.status === "live") summary.skippedLive.push(s.sessionId);
       else if (r.status === "downloaded") summary.downloaded.push({ id: s.sessionId, title: s.title, from: s.lastPushedFrom });
       else if (r.status === "updated") summary.updated.push({ id: s.sessionId, title: s.title, from: s.lastPushedFrom, added: r.added });

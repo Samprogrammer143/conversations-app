@@ -1079,6 +1079,7 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
   const footer = useRef<HTMLDivElement>(null);
   const [pad, setPad] = useState(140);
   const [status, statusLoaded] = useChatStatus(detail?.row.id ?? null);
+  const tooBigHere = useStore((s) => !!detail && !!s.sync?.tooBigIds?.includes(detail.row.id));
   const scrollEdge = scroll.scrolled;
   const markAgentsSeen = useStore((s) => s.markAgentsSeen);
   const seenAgents = useStore((s) => s.seenAgents);
@@ -1146,6 +1147,8 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
   const parts = detail.subtitle.split("  ·  ");
   if (running && !parts[0].startsWith("Live")) parts[0] = `Live on this ${pcWord()}`;
   const lead = parts[0];
+  // A chat this PC can't upload says so where you look at it, not only in the sync menu.
+  if (tooBigHere) parts.push("Too big to sync from this PC");
   const rest = parts.slice(1).join(SEP);
   const agents = agentList;
   const agentsOpen = agentPanel?.id === row.id && agents.length > 0;

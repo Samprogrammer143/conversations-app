@@ -56,7 +56,7 @@ interface EngineStatus {
   lastOkAt: string | null;
   lastError: { at: string; message: string } | null;
   failingSince: string | null;
-  sessions: Record<string, { pushedAt?: string; pulledAt?: string; key?: string }>;
+  sessions: Record<string, { pushedAt?: string; pulledAt?: string; key?: string; skip?: string }>;
   /** How long Claude Code's hooks wait after a reply before uploading (engine v3). */
   uploadQuietSeconds?: number;
   /** The cloud folder (OneDrive and the like) that ~/.claude is synced by, if any. */
@@ -382,6 +382,9 @@ export class SyncScheduler extends EventEmitter {
     return {
       phase: paused ? "paused" : this.phase,
       noNetwork,
+      tooBigIds: Object.entries(e?.sessions ?? {})
+        .filter(([, v]) => v?.skip === "too-big-entry")
+        .map(([id]) => id),
       machine: e?.machine ?? thisMachine(),
       headline,
       detail,

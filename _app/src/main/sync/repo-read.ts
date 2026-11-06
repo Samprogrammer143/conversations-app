@@ -5,6 +5,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 
 export interface RemoteSession {
   sessionId: string;
@@ -268,3 +269,43 @@ export function projectIdForCwd(cwd: string, home: string): { projectId: string;
 
 /** Claude Code's folder name for a working folder under ~/.claude/projects. */
 export const encodeCwd = (cwd: string) => path.resolve(cwd).replace(/[^A-Za-z0-9]/g, "-");
+
+/** Where a big conversation lists its parts (the engine keeps one over 90 MB in parts, each under GitHub's limit). */
+export const PARTS_FILE = "transcript.parts.json";
+
+/** A part of a big conversation (plain text). */
+export const PART_FILE = /^transcript\.\d{3}\.jsonl$/;
+
+/** The newest part of a conversation kept in parts, or null. */
+export function lastPartFile(manifestPath: string): string | null {
+  try {
+    const parts = (JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { parts?: { file?: unknown }[] }).parts ?? [];
+    const name = String(parts[parts.length - 1]?.file ?? "");
+    return PART_FILE.test(name) ? path.join(path.dirname(manifestPath), name) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A conversation's transcript in the repo, in the order to look for it: in parts, compressed, as it is. */
+export const REPO_TRANSCRIPT_NAMES = [PARTS_FILE, "transcript.jsonl.gz", "transcript.jsonl"];
+
+/** Reads a repo transcript, whichever way it is kept (a parts file reads all its parts, joined). */
+export function readRepoTranscript(file: string): Buffer {
+  if (path.basename(file) === PARTS_FILE) {
+    const manifest = JSON.parse(fs.readFileSync(file, "utf8")) as { parts?: { file?: unknown }[] };
+    const parts = Array.isArray(manifest.parts) ? manifest.parts : [];
+    return Buffer.concat(
+      parts.map((p) => {
+        const name = String(p?.file ?? "");
+        if (!PART_FILE.test(name)) throw new Error(`a part has a name it can't have: ${name}`);
+        return fs.readFileSync(path.join(path.dirname(file), name));
+      }),
+    );
+  }
+  const buf = fs.readFileSync(file);
+  return file.endsWith(".gz") ? zlib.gunzipSync(buf) : buf;
+}
+
+/** Not one plain file (compressed, or in parts): reading it means putting all of it together. */
+export const isPackedTranscript = (file: string) => file.endsWith(".gz") || path.basename(file) === PARTS_FILE;

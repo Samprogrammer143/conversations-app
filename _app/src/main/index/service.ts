@@ -12,6 +12,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { openDb } from "./db";
 import { appDataDir, projectsDir, repoDir, thisMachine } from "../paths";
 import { log } from "../log";
+import { PARTS_FILE, PART_FILE, isPackedTranscript } from "../sync/repo-read";
 
 export class IndexService extends EventEmitter {
   db!: DatabaseSync;
@@ -171,7 +172,7 @@ export class IndexService extends EventEmitter {
     // repo/<key>/<id>/transcript.jsonl(.gz) or meta.json
     add(repoDir(), (rel) => {
       const parts = rel.split(path.sep);
-      if (parts.length === 3 && /^(transcript\.jsonl(\.gz)?|meta\.json)$/.test(parts[2])) return parts[1];
+      if (parts.length === 3 && /^(transcript\.jsonl(\.gz)?|transcript\.parts\.json|meta\.json)$/.test(parts[2])) return parts[1];
       return null;
     });
   }
@@ -277,8 +278,15 @@ export class IndexService extends EventEmitter {
     const st = fs.statSync(file);
     const sig = `${st.size}:${st.mtimeMs}`;
     if (this.gzCache?.file === file && this.gzCache.sig === sig) return this.gzCache.buf;
-    // Off the main thread: a 90 MB transcript takes a moment to unpack.
-    const buf = await new Promise<Buffer>((resolve, reject) => zlib.gunzip(fs.readFileSync(file), (err, out) => (err ? reject(err) : resolve(out))));
+    // Off the main thread: a 90 MB transcript takes a moment to unpack. (One kept in parts: its parts, joined.)
+    const gunzip = (f: string) => new Promise<Buffer>((resolve, reject) => zlib.gunzip(fs.readFileSync(f), (err, out) => (err ? reject(err) : resolve(out))));
+    let buf: Buffer;
+    if (path.basename(file) === PARTS_FILE) {
+      const manifest = JSON.parse(fs.readFileSync(file, "utf8")) as { parts?: { file?: unknown }[] };
+      const names = (Array.isArray(manifest.parts) ? manifest.parts : []).map((p) => String(p?.file ?? ""));
+      if (names.some((n) => !PART_FILE.test(n))) throw new Error("a part has a name it can't have");
+      buf = Buffer.concat(await Promise.all(names.map((n) => fs.promises.readFile(path.join(path.dirname(file), n)))));
+    } else buf = await gunzip(file);
     this.gzCache = { file, sig, buf };
     return buf;
   }
@@ -292,7 +300,7 @@ export class IndexService extends EventEmitter {
     if (!allowed || !Number.isFinite(offset) || !Number.isFinite(block)) return null;
     try {
       let line: string;
-      if (file.endsWith(".gz")) {
+      if (isPackedTranscript(file)) {
         const buf = await this.unpacked(file);
         const end = buf.indexOf(10, offset);
         line = buf.toString("utf8", offset, end === -1 ? undefined : end);

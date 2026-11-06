@@ -228,14 +228,14 @@ r = hook(A, "session-end", { session_id: ID2, transcript_path: TA2, cwd: PA });
 check("session-end hook returns within its 1.5 s budget", r.status === 0 && Date.now() - e0 < 1500, `${Date.now() - e0} ms`);
 check("final state uploaded after the session ended", !!waitFor(() => remoteFile("website", ID2)?.includes("last words")));
 
-// ---- 11. very large transcripts are compressed and come back intact
+// ---- 11. very large transcripts go up in parts and come back intact
 const ID5 = "55555555-6666-7777-8888-999999999999";
 const TA5 = tpath(A, PA, ID5);
 fs.writeFileSync(TA5, line("big one " + "x".repeat(5000), PA, ID5));
 r = run(A, ["push", "--session", ID5, "--cwd", PA], { CLAUDE_SYNC_GZIP_OVER_BYTES: "1000" });
-check("large transcript stored compressed", r.status === 0 && !!remoteFile("website", ID5, "transcript.jsonl.gz"), r.stdout + r.stderr);
+check("large transcript stored in parts", r.status === 0 && !!remoteFile("website", ID5, "transcript.parts.json") && !!remoteFile("website", ID5, "transcript.001.jsonl") && !remoteFile("website", ID5, "transcript.jsonl"), r.stdout + r.stderr);
 r = run(B, ["pull", ID5, "--cwd", PB]);
-check("compressed transcript pulls back intact", r.status === 0 && fs.readFileSync(path.join(B.claude, "projects", enc(PB), `${ID5}.jsonl`)).equals(fs.readFileSync(TA5)), r.stdout + r.stderr);
+check("a transcript in parts pulls back intact", r.status === 0 && fs.readFileSync(path.join(B.claude, "projects", enc(PB), `${ID5}.jsonl`)).equals(fs.readFileSync(TA5)), r.stdout + r.stderr);
 
 // ---- 12-16. listing, renamed folders, link line, current session, unconfigured PC
 r = run(B, ["pull", "list", "--cwd", PB]);
@@ -693,6 +693,73 @@ fs.appendFileSync(TA, line("A after the big one", PA));
 const r43b = run(A, ["push", "--session", ID, "--cwd", PA]);
 check("M11: a transcript too big even compressed is refused with a clear message and no commit", r43.status !== 0 && /too large to upload/.test(r43.stdout + r43.stderr) && commits43b === commits43 && !remoteFile("website", BIG, "transcript.jsonl.gz"), r43.stdout + r43.stderr);
 check("M11: other conversations keep uploading", r43b.status === 0 && !!remoteFile("website", ID)?.toString().includes("A after the big one"), r43b.stdout + r43b.stderr);
+
+// ---- 43b. a conversation too big for one file: in parts, only the newest changes, and older engines' files merge in
+{
+  const P = "b2b2b2b2-0000-4000-8000-000000000001";
+  const TP = tpath(A, PA, P);
+  const big = { CLAUDE_SYNC_GZIP_OVER_BYTES: "1000", CLAUDE_SYNC_PART_BYTES: "2000" };
+  fs.writeFileSync(TP, Array.from({ length: 12 }, (_, i) => line(`part chat ${i} ` + "x".repeat(500), PA, P)).join(""));
+  let rp = run(A, ["push", "--session", P, "--cwd", PA], big);
+  const man = JSON.parse(remoteFile("website", P, "transcript.parts.json")?.toString() ?? "null");
+  check("43b: kept in several parts, each a run of whole lines", rp.status === 0 && man?.parts?.length >= 3 && man.parts.every((p) => p.bytes <= 2000), rp.stdout + rp.stderr + JSON.stringify(man));
+  const blob = (n) => remoteGit(["rev-parse", `HEAD:website/${P}/transcript.${n}.jsonl`]).trim();
+  const first = blob("001");
+  const second = blob("002");
+  const lastName = man.parts[man.parts.length - 1].file.slice(11, 14);
+  const lastBefore = blob(lastName);
+  const commits = commitsFor(P);
+  fs.appendFileSync(TP, line("part chat grew", PA, P));
+  rp = run(A, ["push", "--session", P, "--cwd", PA], big);
+  check("43b: growing, only the newest part is written again", rp.status === 0 && blob("001") === first && blob("002") === second && blob(lastName) !== lastBefore && commitsFor(P) === commits + 1, rp.stdout + rp.stderr);
+  // An older engine's single file beside the parts (a PC not yet updated): merged in, then gone.
+  const old = path.join(T, "oldpc");
+  fs.rmSync(old, { recursive: true, force: true });
+  gitq(["-c", "core.longpaths=true", "clone", "-q", REMOTE, old], T);
+  fs.writeFileSync(path.join(old, "website", P, "transcript.jsonl"), line("from a PC on the old sync", PA, P));
+  gitq(["add", "-A"], old);
+  gitq(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "old engine"], old);
+  gitq(["push", "-q", "origin", "main"], old);
+  fs.appendFileSync(TP, line("part chat after the old PC", PA, P));
+  rp = run(A, ["push", "--session", P, "--cwd", PA], big);
+  check("43b: an older engine's file beside the parts is merged in and taken away", rp.status === 0 && !remoteFile("website", P, "transcript.jsonl"), rp.stdout + rp.stderr);
+  const BP = path.join(B.claude, "projects", enc(PB), `${P}.jsonl`);
+  rp = run(B, ["pull", P, "--cwd", PB]);
+  const got = fs.existsSync(BP) ? fs.readFileSync(BP, "utf8") : "";
+  check("43b: another PC gets all of it, the old PC's line too", rp.status === 0 && got.includes("part chat 0 ") && got.includes("part chat after the old PC") && got.includes("from a PC on the old sync"), rp.stdout + rp.stderr);
+  // One an older engine left as too big for GitHub goes up in parts with the next sync, with no new message.
+  const Q = "b2b2b2b2-0000-4000-8000-000000000002";
+  fs.writeFileSync(tpath(A, PA, Q), Array.from({ length: 6 }, (_, i) => line(`left behind ${i} ` + "y".repeat(500), PA, Q)).join(""));
+  const stPathA = path.join(A.sync, "state.json");
+  const stA2 = JSON.parse(fs.readFileSync(stPathA, "utf8"));
+  stA2.sessions[Q] = { skip: "too-big" };
+  fs.writeFileSync(stPathA, JSON.stringify(stA2));
+  rp = run(A, ["push-pending", "--json"], big);
+  const stA3 = JSON.parse(fs.readFileSync(stPathA, "utf8"));
+  // Its list of parts damaged on GitHub: the parts there are joined, so nothing only GitHub had is lost.
+  const dmg = path.join(T, "dmgpc");
+  fs.rmSync(dmg, { recursive: true, force: true });
+  gitq(["-c", "core.longpaths=true", "clone", "-q", REMOTE, dmg], T);
+  fs.appendFileSync(path.join(dmg, "website", P, man.parts[man.parts.length - 1].file.replace(/\d{3}/, String(man.parts.length).padStart(3, "0"))), line("only GitHub has this", PA, P));
+  fs.writeFileSync(path.join(dmg, "website", P, "transcript.parts.json"), "{ not json");
+  gitq(["add", "-A"], dmg);
+  gitq(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "damaged"], dmg);
+  gitq(["push", "-q", "origin", "main"], dmg);
+  fs.appendFileSync(TP, line("after the damage", PA, P));
+  rp = run(A, ["push", "--session", P, "--cwd", PA], big);
+  rp = run(B, ["pull", P, "--cwd", PB]);
+  const got2 = fs.existsSync(BP) ? fs.readFileSync(BP, "utf8") : "";
+  check("43b: a damaged list of parts loses nothing GitHub had", rp.status === 0 && got2.includes("only GitHub has this") && got2.includes("after the damage") && !!JSON.parse(remoteFile("website", P, "transcript.parts.json")?.toString() ?? "null")?.parts, rp.stdout + rp.stderr);
+  // Left as too big, then gone from this PC: not queued again at every sync.
+  const G = "b2b2b2b2-0000-4000-8000-000000000003";
+  const stG = JSON.parse(fs.readFileSync(path.join(A.sync, "state.json"), "utf8"));
+  stG.sessions[G] = { skip: "too-big" };
+  fs.writeFileSync(path.join(A.sync, "state.json"), JSON.stringify(stG));
+  run(A, ["push-pending", "--json"], big);
+  const stG2 = JSON.parse(fs.readFileSync(path.join(A.sync, "state.json"), "utf8"));
+  check("43b: a too-big chat no longer on this PC loses the mark instead of being queued forever", !stG2.sessions[G]?.skip && !stG2.sessions[G]?.pending, JSON.stringify(stG2.sessions[G]));
+  check("43b: a chat an older engine left as too big goes up in parts by itself", rp.status === 0 && !!remoteFile("website", Q, "transcript.parts.json") && !stA3.sessions[Q]?.skip && !stA3.sessions[Q]?.pending, rp.stdout + rp.stderr);
+}
 
 // ---- 44. Lows
 const dev0 = Number(remoteGit(["rev-list", "--count", "HEAD"]).trim());
@@ -1505,7 +1572,7 @@ console.log(JSON.stringify({ ...r, asked }));`;
   run(K, ["setup", "--remote", REMOTE, "--machine", "PC-K"]);
   const k1 = run(K, ["upload-existing"], { CLAUDE_SYNC_MAX_FILE_BYTES: "4000", CLAUDE_SYNC_GZIP_OVER_BYTES: "100000000" });
   const stK = stateOf63(K);
-  check("earlier chats: one too big for GitHub stays here, the rest of its batch goes up", k1.status === 0 && /Done: 2 chats uploaded to GitHub\./.test(k1.stdout) && /1 chat is too large for GitHub/.test(k1.stdout) && !!remoteFile("notes", kids[0]) && !!remoteFile("notes", kids[2]) && !remoteFile("notes", kids[1]) && stK.sessions[kids[1]]?.skip === "too-big" && !kids.some((id) => stK.sessions[id]?.pending), k1.stdout + k1.stderr);
+  check("earlier chats: one too big for GitHub stays here, the rest of its batch goes up", k1.status === 0 && /Done: 2 chats uploaded to GitHub\./.test(k1.stdout) && /1 chat is too large for GitHub/.test(k1.stdout) && !!remoteFile("notes", kids[0]) && !!remoteFile("notes", kids[2]) && !remoteFile("notes", kids[1]) && stK.sessions[kids[1]]?.skip === "too-big-entry" && !kids.some((id) => stK.sessions[id]?.pending), k1.stdout + k1.stderr);
 
   // Another sync holding the lock: it ends calmly, and they go up later.
   const L = pc("pcL63");

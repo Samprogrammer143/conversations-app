@@ -225,6 +225,8 @@ export interface SyncStatus {
   phase: SyncPhase;
   /** This PC has no network at all, so Claude can't answer either. */
   noNetwork: boolean;
+  /** Chats this PC can't upload: one entry in them is too big for GitHub even on its own. */
+  tooBigIds?: string[];
   machine: string;
   /** "2 of 3 PCs up to date" */
   headline: string;

@@ -722,9 +722,9 @@ var AlertWatcher = class {
 import { app as app4, BrowserWindow as BrowserWindow2, clipboard, dialog as dialog3, ipcMain, Menu as Menu2, nativeImage, nativeTheme as nativeTheme2, powerMonitor, session as electronSession, shell as shell2, Tray } from "electron";
 
 // src/main/index/service.ts
-import fs7 from "node:fs";
+import fs8 from "node:fs";
 import os7 from "node:os";
-import path8 from "node:path";
+import path9 from "node:path";
 import zlib from "node:zlib";
 import { EventEmitter } from "node:events";
 import { Worker } from "node:worker_threads";
@@ -864,6 +864,33 @@ function safeAll(db, sql) {
   }
 }
 
+// src/main/sync/repo-read.ts
+import fs7 from "node:fs";
+import path8 from "node:path";
+function readJson(p) {
+  try {
+    return JSON.parse(fs7.readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readDevices(repoDir2) {
+  const dir = path8.join(repoDir2, "_devices");
+  const out = [];
+  try {
+    for (const f of fs7.readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      const d = readJson(path8.join(dir, f));
+      if (d?.name) out.push({ ...d, slug: f.replace(/\.json$/, "") });
+    }
+  } catch {
+  }
+  return out;
+}
+var PARTS_FILE = "transcript.parts.json";
+var PART_FILE = /^transcript\.\d{3}\.jsonl$/;
+var isPackedTranscript = (file4) => file4.endsWith(".gz") || path8.basename(file4) === PARTS_FILE;
+
 // src/main/index/service.ts
 var IndexService = class _IndexService extends EventEmitter {
   db;
@@ -882,7 +909,7 @@ var IndexService = class _IndexService extends EventEmitter {
   queued = false;
   ready = false;
   firstRun = false;
-  dbPath = path8.join(appDataDir(), "index.db");
+  dbPath = path9.join(appDataDir(), "index.db");
   workerFile = "";
   restarts = 0;
   stopped = false;
@@ -912,7 +939,7 @@ var IndexService = class _IndexService extends EventEmitter {
   removeDbFiles() {
     for (const suffix of ["", "-wal", "-shm", "-journal"]) {
       try {
-        fs7.rmSync(`${this.dbPath}${suffix}`, { force: true });
+        fs8.rmSync(`${this.dbPath}${suffix}`, { force: true });
       } catch {
       }
     }
@@ -985,12 +1012,12 @@ var IndexService = class _IndexService extends EventEmitter {
   }
   watch() {
     const add = (dir, toId) => {
-      if (!fs7.existsSync(dir)) return;
+      if (!fs8.existsSync(dir)) return;
       try {
-        const w = fs7.watch(dir, { recursive: true }, (_ev, file4) => {
+        const w = fs8.watch(dir, { recursive: true }, (_ev, file4) => {
           if (!file4) return this.scan("watch");
           const rel = String(file4);
-          if (rel.startsWith(".git") || rel.includes(`${path8.sep}.git${path8.sep}`)) return;
+          if (rel.startsWith(".git") || rel.includes(`${path9.sep}.git${path9.sep}`)) return;
           const id = toId(rel);
           if (id) {
             this.dirty.add(id);
@@ -1006,13 +1033,13 @@ var IndexService = class _IndexService extends EventEmitter {
       }
     };
     add(projectsDir(), (rel) => {
-      const parts = rel.split(path8.sep);
+      const parts = rel.split(path9.sep);
       if (parts.length === 2 && parts[1].endsWith(".jsonl")) return parts[1].slice(0, -6);
       return null;
     });
     add(repoDir(), (rel) => {
-      const parts = rel.split(path8.sep);
-      if (parts.length === 3 && /^(transcript\.jsonl(\.gz)?|meta\.json)$/.test(parts[2])) return parts[1];
+      const parts = rel.split(path9.sep);
+      if (parts.length === 3 && /^(transcript\.jsonl(\.gz)?|transcript\.parts\.json|meta\.json)$/.test(parts[2])) return parts[1];
       return null;
     });
   }
@@ -1045,7 +1072,7 @@ var IndexService = class _IndexService extends EventEmitter {
       if (!file4) continue;
       let sig;
       try {
-        const st = fs7.statSync(file4);
+        const st = fs8.statSync(file4);
         sig = `${st.size}:${st.mtimeMs}`;
       } catch {
         this.hotPaths.delete(id);
@@ -1069,15 +1096,15 @@ var IndexService = class _IndexService extends EventEmitter {
     let found = null;
     try {
       const row = this.db.prepare("SELECT local_path FROM conversations WHERE id = ?").get(id);
-      if (row?.local_path && fs7.existsSync(row.local_path)) found = row.local_path;
+      if (row?.local_path && fs8.existsSync(row.local_path)) found = row.local_path;
     } catch {
     }
     if (!found) {
       try {
-        for (const d of fs7.readdirSync(projectsDir(), { withFileTypes: true })) {
+        for (const d of fs8.readdirSync(projectsDir(), { withFileTypes: true })) {
           if (!d.isDirectory()) continue;
-          const f = path8.join(projectsDir(), d.name, `${id}.jsonl`);
-          if (fs7.existsSync(f)) {
+          const f = path9.join(projectsDir(), d.name, `${id}.jsonl`);
+          if (fs8.existsSync(f)) {
             found = f;
             break;
           }
@@ -1109,10 +1136,17 @@ var IndexService = class _IndexService extends EventEmitter {
   /** The last compressed transcript an image came from, already unpacked. */
   gzCache = null;
   async unpacked(file4) {
-    const st = fs7.statSync(file4);
+    const st = fs8.statSync(file4);
     const sig = `${st.size}:${st.mtimeMs}`;
     if (this.gzCache?.file === file4 && this.gzCache.sig === sig) return this.gzCache.buf;
-    const buf = await new Promise((resolve, reject) => zlib.gunzip(fs7.readFileSync(file4), (err, out) => err ? reject(err) : resolve(out)));
+    const gunzip = (f) => new Promise((resolve, reject) => zlib.gunzip(fs8.readFileSync(f), (err, out) => err ? reject(err) : resolve(out)));
+    let buf;
+    if (path9.basename(file4) === PARTS_FILE) {
+      const manifest = JSON.parse(fs8.readFileSync(file4, "utf8"));
+      const names = (Array.isArray(manifest.parts) ? manifest.parts : []).map((p) => String(p?.file ?? ""));
+      if (names.some((n) => !PART_FILE.test(n))) throw new Error("a part has a name it can't have");
+      buf = Buffer.concat(await Promise.all(names.map((n) => fs8.promises.readFile(path9.join(path9.dirname(file4), n)))));
+    } else buf = await gunzip(file4);
     this.gzCache = { file: file4, sig, buf };
     return buf;
   }
@@ -1121,21 +1155,21 @@ var IndexService = class _IndexService extends EventEmitter {
     const file4 = decodeURIComponent(enc ?? "");
     const offset = Number(offStr);
     const block = Number(blockStr);
-    const allowed = [projectsDir(), repoDir()].some((root) => path8.resolve(file4).toLowerCase().startsWith(path8.resolve(root).toLowerCase() + path8.sep));
+    const allowed = [projectsDir(), repoDir()].some((root) => path9.resolve(file4).toLowerCase().startsWith(path9.resolve(root).toLowerCase() + path9.sep));
     if (!allowed || !Number.isFinite(offset) || !Number.isFinite(block)) return null;
     try {
       let line;
-      if (file4.endsWith(".gz")) {
+      if (isPackedTranscript(file4)) {
         const buf = await this.unpacked(file4);
         const end = buf.indexOf(10, offset);
         line = buf.toString("utf8", offset, end === -1 ? void 0 : end);
       } else {
-        const fd = fs7.openSync(file4, "r");
+        const fd = fs8.openSync(file4, "r");
         const chunks = [];
         let pos = offset;
         for (; ; ) {
           const b2 = Buffer.alloc(1024 * 1024);
-          const n = fs7.readSync(fd, b2, 0, b2.length, pos);
+          const n = fs8.readSync(fd, b2, 0, b2.length, pos);
           if (n <= 0) break;
           const nl = b2.subarray(0, n).indexOf(10);
           if (nl >= 0) {
@@ -1145,7 +1179,7 @@ var IndexService = class _IndexService extends EventEmitter {
           chunks.push(b2.subarray(0, n));
           pos += n;
         }
-        fs7.closeSync(fd);
+        fs8.closeSync(fd);
         line = Buffer.concat(chunks).toString("utf8");
       }
       const entry = JSON.parse(line);
@@ -1409,30 +1443,6 @@ function search(db, text, ctx2, { includeTools = false, limit = 20 } = {}) {
   }
   const pcs = new Set(rows.flatMap((r) => r.lastPc ? [r.lastPc] : []));
   return { query: text, hits: out, suggestion, searchedConversations: rows.length, pcCount: pcs.size, tookMs: Math.round(performance.now() - t0) };
-}
-
-// src/main/sync/repo-read.ts
-import fs8 from "node:fs";
-import path9 from "node:path";
-function readJson(p) {
-  try {
-    return JSON.parse(fs8.readFileSync(p, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readDevices(repoDir2) {
-  const dir = path9.join(repoDir2, "_devices");
-  const out = [];
-  try {
-    for (const f of fs8.readdirSync(dir)) {
-      if (!f.endsWith(".json")) continue;
-      const d = readJson(path9.join(dir, f));
-      if (d?.name) out.push({ ...d, slug: f.replace(/\.json$/, "") });
-    }
-  } catch {
-  }
-  return out;
 }
 
 // src/main/sync/scheduler.ts
@@ -2015,6 +2025,7 @@ var SyncScheduler = class extends EventEmitter3 {
     return {
       phase: paused ? "paused" : this.phase,
       noNetwork,
+      tooBigIds: Object.entries(e?.sessions ?? {}).filter(([, v]) => v?.skip === "too-big-entry").map(([id]) => id),
       machine: e?.machine ?? thisMachine(),
       headline,
       detail,

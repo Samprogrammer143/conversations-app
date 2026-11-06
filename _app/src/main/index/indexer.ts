@@ -4,11 +4,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import zlib from "node:zlib";
 import type { DatabaseSync } from "node:sqlite";
 import { parseTranscript } from "./parse";
 import { tx } from "./db";
-import { listRemoteSessions, normaliseRemote, projectIdForCwd, projectLabel, readEdits, type RemoteSession } from "../sync/repo-read";
+import { PARTS_FILE, REPO_TRANSCRIPT_NAMES, isPackedTranscript, lastPartFile, listRemoteSessions, normaliseRemote, projectIdForCwd, projectLabel, readEdits, readRepoTranscript, type RemoteSession } from "../sync/repo-read";
 
 export interface IndexerOptions {
   projectsDir: string;
@@ -139,7 +138,8 @@ export class Indexer {
   private repoSources(remote: RemoteSession[]): Source[] {
     const out: Source[] = [];
     for (const s of remote) {
-      for (const name of ["transcript.jsonl", "transcript.jsonl.gz"]) {
+      // (In parts first: a single file beside them is an older engine's, and the engine merges it in.)
+      for (const name of REPO_TRANSCRIPT_NAMES) {
         const p = path.join(s.dir, name);
         try {
           const st = fs.statSync(p);
@@ -210,11 +210,12 @@ export class Indexer {
     let primary = local ?? repo!;
     if (local && repo) {
       const lt = this.lastTimestamp(local.path, false);
-      const rt = this.lastTimestamp(repo.path, repo.path.endsWith(".gz"));
+      // In parts, the newest part is plain text: its last lines say how recent GitHub's copy is.
+      const newest = path.basename(repo.path) === PARTS_FILE ? lastPartFile(repo.path) : null;
+      const rt = newest ? this.lastTimestamp(newest, false) : this.lastTimestamp(repo.path, isPackedTranscript(repo.path));
       if (rt > lt) primary = repo;
     }
-    let buf = fs.readFileSync(primary.path);
-    if (primary.path.endsWith(".gz")) buf = zlib.gunzipSync(buf);
+    const buf = primary.kind === "repo" ? readRepoTranscript(primary.path) : fs.readFileSync(primary.path);
     const parsed = parseTranscript(buf, { machineForCwd: this.machineForCwd, sourcePath: primary.path });
     // Chats started or carried on in the app are shown although they ran through
     // the SDK; the app marks them on this PC and, through _state, on every PC.
