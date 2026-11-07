@@ -719,7 +719,7 @@ var AlertWatcher = class {
 };
 
 // src/main/main.ts
-import { app as app4, BrowserWindow as BrowserWindow2, clipboard, dialog as dialog3, ipcMain, Menu as Menu2, nativeImage, nativeTheme as nativeTheme2, powerMonitor, session as electronSession, shell as shell2, Tray } from "electron";
+import { app as app4, BrowserWindow as BrowserWindow2, clipboard, dialog as dialog3, ipcMain, Menu as Menu2, nativeImage, nativeTheme as nativeTheme2, powerMonitor, powerSaveBlocker, session as electronSession, shell as shell2, Tray } from "electron";
 
 // src/main/index/service.ts
 import fs8 from "node:fs";
@@ -6637,6 +6637,7 @@ function remoteRefusal(channel, args) {
   return null;
 }
 var REMOTE_EVENTS = /* @__PURE__ */ new Set(["index-changed", "sync-status", "chat-status", "chat-returned", "chat-pending", "usage", "alert", "settings-changed"]);
+var settingsPath = () => path30.join(appDataDir(), "phone-link-settings.json");
 function readJson2(p) {
   try {
     return JSON.parse(fs28.readFileSync(p, "utf8"));
@@ -6708,6 +6709,7 @@ var PhoneLink = class {
   /** One pairing (the check on GitHub and "Allow this phone?") at a time. */
   dialogOpen = false;
   trust = loadTrust();
+  settings = { keepAwake: false, ...readJson2(settingsPath()) ?? {} };
   /** Phones allowed in the repository (by any PC); `phones` holds only those this PC trusts too. */
   allowedAnywhere = /* @__PURE__ */ new Map();
   /** When GitHub was last asked for requests (at most every 15 s), and phones it had none for. */
@@ -6766,7 +6768,17 @@ var PhoneLink = class {
     }
     this.emit();
   }
+  /** Whether to keep this PC awake for phones (applied by main.ts while plugged in). */
+  keepAwake() {
+    return this.settings.keepAwake;
+  }
+  setKeepAwake(on) {
+    this.settings = { ...this.settings, keepAwake: on };
+    fs28.writeFileSync(settingsPath(), JSON.stringify(this.settings, null, 2));
+    this.o.onKeepAwake?.(on);
+  }
   async start() {
+    this.o.onKeepAwake?.(this.settings.keepAwake);
     try {
       this.me = await identity();
       const pc = thisPc();
@@ -6852,6 +6864,26 @@ var PhoneLink = class {
     } else if (m.k === "bye") {
       this.listening.delete(from);
       this.sessions.delete(from);
+    } else if (m.k === "pc" && typeof m.id === "string" && this.sessions.has(from) && m.s === this.sessions.get(from)) {
+      const op = m.op;
+      const reply = (r) => link.send(from, { k: "ret", id: m.id, ...r });
+      if (op === "status") return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake, onBattery: this.o.onBattery?.() ?? false } });
+      if (op === "keep-awake") {
+        this.setKeepAwake(m.on === true);
+        return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake } });
+      }
+      if (op === "forget-me") {
+        const p = this.phones.get(from);
+        this.trust = { trusted: this.trust.trusted.filter((x) => x !== from), removed: this.trust.removed };
+        saveTrust(this.trust);
+        this.listening.delete(from);
+        this.sessions.delete(from);
+        await reply({ ok: true });
+        if (p) await writeDevices([{ path: `phones/${from}.json`, value: null }], `Devices: ${p.name} took itself off`);
+        this.refresh();
+        return;
+      }
+      return void reply({ ok: false, err: "unknown" });
     } else if (m.k === "call" && typeof m.id === "string" && typeof m.ch === "string") {
       const reply = (r) => link.send(from, { k: "ret", id: m.id, ...r });
       if (!this.sessions.has(from) || m.s !== this.sessions.get(from)) return void reply({ ok: false, err: "stale-session" });
@@ -7392,6 +7424,18 @@ function handle(channel, fn) {
   ipcMain.handle(channel, (_e, ...args) => fn(...args));
 }
 var phoneLink = null;
+var awakeBlocker = null;
+function applyKeepAwake() {
+  const want = !!phoneLink?.keepAwake() && !powerMonitor.onBatteryPower;
+  if (want && awakeBlocker === null) {
+    awakeBlocker = powerSaveBlocker.start("prevent-app-suspension");
+    log("phone", "keeping this PC awake for the phone");
+  } else if (!want && awakeBlocker !== null) {
+    powerSaveBlocker.stop(awakeBlocker);
+    awakeBlocker = null;
+    log("phone", "no longer keeping this PC awake");
+  }
+}
 async function askAllowPhone(req) {
   const win = mainWin && !mainWin.isDestroyed() ? mainWin : null;
   if (win) {
@@ -8072,8 +8116,12 @@ void app4.whenReady().then(async () => {
   phoneLink = new PhoneLink({
     handlers,
     askAllow: askAllowPhone,
-    relayUrl: () => process.env.CONVERSATIONS_RELAY_URL || DEFAULT_RELAY_URL || null
+    relayUrl: () => process.env.CONVERSATIONS_RELAY_URL || DEFAULT_RELAY_URL || null,
+    onKeepAwake: () => applyKeepAwake(),
+    onBattery: () => powerMonitor.onBatteryPower
   });
+  powerMonitor.on("on-ac", applyKeepAwake);
+  powerMonitor.on("on-battery", applyKeepAwake);
   setTimeout(() => void phoneLink?.start(), Number(process.env.CONVERSATIONS_PHONE_LINK_DELAY_MS) || 2e4).unref();
   scheduler.on("status", () => phoneLink?.refresh());
   setTimeout(() => knownModels(claudeInstall().path), 2e4).unref();
