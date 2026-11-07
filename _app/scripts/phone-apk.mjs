@@ -40,6 +40,14 @@ run("npx", ["vite", "build", "-c", "vite.phone.config.ts"]);
 run("npx", ["cap", "sync", "android"]);
 
 const android = path.join(root, "android");
+// The app's own version: 0.5.36 is versionName "0.5.36", versionCode 536 (each release a higher one, so Android updates in place).
+{
+  const v = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
+  const [a, b, c] = v.split(".").map(Number);
+  const gradle = path.join(android, "app", "build.gradle");
+  const text = fs.readFileSync(gradle, "utf8").replace(/versionCode \d+/, `versionCode ${a * 100000 + b * 1000 + c}`).replace(/versionName "[^"]*"/, `versionName "${v}"`);
+  fs.writeFileSync(gradle, text);
+}
 fs.writeFileSync(path.join(android, "local.properties"), `sdk.dir=${sdk.replace(/\\/g, "\\\\")}\n`);
 const env = { ...process.env, JAVA_HOME: short(jdk), ANDROID_HOME: sdk };
 run(win ? path.join(short(android), "gradlew.bat") : "./gradlew", [release ? "assembleRelease" : "assembleDebug", "--no-daemon", "-q"], { cwd: android, env });

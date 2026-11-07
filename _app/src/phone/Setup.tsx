@@ -2,6 +2,10 @@
 // workspaces, and wait on the code until a PC says Allow.
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../renderer/components/Icon";
+import { iconSvg } from "../../scripts/icon-art.mjs";
+
+/** The app's own icon, as on the PC and the phone's home screen. */
+const APP_ICON = iconSvg({ size: 88, grid: "full", inset: 0.04, ids: "setup" });
 import { findAllWorkspaces, savedToken, signOut, startDeviceFlow, waitForToken, whoAmI, type DeviceCode } from "./github";
 import type { PhoneState, WorkspaceLink } from "./session";
 
@@ -105,9 +109,7 @@ export function Setup({ workspace, state, onWorkspace }: { workspace: WorkspaceL
     return (
       <div className="phone-setup sign-in">
         <div className="hero">
-          <div className="app-tile">
-            <Icon name="message-square" size={34} />
-          </div>
+          <div className="app-icon" aria-hidden dangerouslySetInnerHTML={{ __html: APP_ICON }} />
           <h1>Conversations</h1>
           <p>Your Claude Code chats from every PC, on your phone.</p>
         </div>

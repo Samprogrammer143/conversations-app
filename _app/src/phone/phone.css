@@ -53,6 +53,10 @@ body[data-platform="android"] {
   gap: 16px;
   text-align: center;
 }
+.phone-setup .app-icon {
+  width: 88px;
+  height: 88px;
+}
 .phone-setup .app-tile {
   width: 72px;
   height: 72px;
