@@ -1,0 +1,273 @@
+/* The window's own pieces on the phone (Figma: Mobile (for review) › M3, M4, M7). */
+
+body[data-platform="android"] .drag {
+  -webkit-app-region: no-drag;
+}
+body[data-platform="android"] .list-col {
+  box-shadow: none;
+}
+
+.phone-list-header {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
+.phone-appbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 4px 20px;
+}
+.phone-appbar .ws-switch {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--label-primary);
+  font: 700 26px/1.2 var(--font-ui);
+  text-align: left;
+}
+.phone-appbar .ws-switch .icon {
+  color: var(--icon-secondary);
+}
+.pc-strip {
+  display: flex;
+  gap: 8px;
+  padding: 4px 20px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pc-chip {
+  flex: none;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 10px;
+  border-radius: 16px;
+  background: var(--fill-quaternary);
+  color: var(--label-secondary);
+  font: 600 12px/1 var(--font-ui);
+}
+.pc-chip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--fill-secondary);
+}
+.pc-chip.on {
+  background: var(--status-success-tint);
+  color: var(--label-primary);
+}
+.pc-chip.on .dot {
+  background: var(--status-success-dot);
+}
+.pc-chip.warn {
+  background: var(--status-warning-tint);
+  color: var(--status-warning);
+}
+.phone-banner {
+  margin: 0 16px 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bg-sunken);
+  display: flex;
+  gap: 12px;
+  color: var(--icon-secondary);
+}
+.phone-banner div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.phone-banner b {
+  color: var(--label-primary);
+  font-weight: 600;
+}
+.phone-fab {
+  position: fixed;
+  right: 20px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 20;
+  height: 56px;
+  padding: 0 20px 0 18px;
+  border: 0;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-accent);
+  color: var(--label-on-accent);
+  font: 600 15px/1 var(--font-ui);
+  box-shadow: var(--elevation-popover);
+}
+
+/* Filters (M3). */
+body[data-platform="android"] .filters {
+  height: auto;
+  padding: 12px 20px 4px;
+}
+
+/* Rows (M3): reading-size titles, two lines of preview, full-width tap targets. */
+body[data-platform="android"] .rows {
+  padding-bottom: 96px;
+}
+body[data-platform="android"] .row {
+  padding: 10px 20px 10px 8px;
+  border-radius: 0;
+}
+body[data-platform="android"] .row::after {
+  left: 20px;
+  right: 20px;
+}
+body[data-platform="android"] .row-gutter {
+  width: 12px;
+  height: 20px;
+}
+body[data-platform="android"] .row-title {
+  font: 600 15px/20px var(--font-ui);
+}
+body[data-platform="android"] .row-preview {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+body[data-platform="android"] .row[aria-selected="true"],
+body[data-platform="android"] .rows:focus-within .row[aria-selected="true"] {
+  background: none;
+}
+body[data-platform="android"] .row:active {
+  background: var(--fill-quaternary);
+}
+body[data-platform="android"] .list-header {
+  padding-left: 20px;
+}
+
+/* The chat (M4): back, title, more; nothing that only works at the PC. */
+body[data-platform="android"] .detail-toolbar {
+  height: auto;
+  min-height: 64px;
+  padding: 4px 8px 8px 4px;
+  box-shadow: inset 0 -1px 0 var(--separator-default);
+}
+body[data-platform="android"] .detail-toolbar .t1 {
+  font: 600 17px/22px var(--font-ui);
+}
+body[data-platform="android"] .detail-toolbar [aria-label^="Open in CLI"] {
+  display: none;
+}
+body[data-platform="android"] .composer-wrap {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+body[data-platform="android"] .composer {
+  border-radius: 24px;
+}
+body[data-platform="android"] .composer textarea {
+  font-size: 15px;
+  line-height: 22px;
+}
+body[data-platform="android"] .composer-controls {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+body[data-platform="android"] .composer-controls .chip {
+  height: 32px;
+  border-radius: 16px;
+}
+.chip.sends-to.off {
+  background: var(--status-warning-tint);
+  color: var(--status-warning);
+}
+
+/* Sheets from the bottom (M6, M7). */
+.phone-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--bg-scrim);
+  display: flex;
+  align-items: flex-end;
+}
+.phone-sheet {
+  width: 100%;
+  padding: 10px 0 calc(34px + env(safe-area-inset-bottom));
+  border-radius: 28px 28px 0 0;
+  background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+}
+.phone-sheet .handle {
+  align-self: center;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill-secondary);
+}
+.phone-sheet h2 {
+  margin: 18px 24px 4px;
+  font: 600 22px/28px var(--font-ui);
+  color: var(--label-primary);
+}
+.phone-sheet p {
+  margin: 0 24px 10px;
+  font: 13px/18px var(--font-ui);
+  color: var(--label-secondary);
+}
+.sheet-row {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 24px;
+  border: 0;
+  background: none;
+  color: var(--icon-primary);
+  text-align: left;
+}
+.sheet-row.selected {
+  background: var(--bg-accent-tint);
+}
+.sheet-row.selected > .icon:last-child {
+  color: var(--icon-accent);
+}
+.sheet-row:disabled {
+  color: var(--icon-tertiary);
+}
+.sheet-row .text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sheet-row .name {
+  font: 600 15px/20px var(--font-ui);
+  color: var(--label-primary);
+}
+.sheet-row:disabled .name {
+  color: var(--label-tertiary);
+}
+.sheet-row .detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 12px/16px var(--font-ui);
+  color: var(--label-secondary);
+}
+.sheet-row .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--fill-secondary);
+}
+.sheet-row .dot.on {
+  background: var(--status-success-dot);
+}

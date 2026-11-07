@@ -1,0 +1,105 @@
+// window.conversations, built from three primitives: a request (invoke), a one-way message
+// (send) and event listening (on). The window gets them from Electron's IPC (preload.ts);
+// the phone from its link to a PC over the relay (phone/remote-api.ts).
+import type { ConversationsApi } from "./api";
+
+export interface ApiTransport {
+  invoke(channel: string, ...args: unknown[]): Promise<any>;
+  send(channel: string, ...args: unknown[]): void;
+  on(event: string, cb: (payload: unknown) => void): () => void;
+  windowKind: string;
+  platform: string;
+}
+
+export function makeApi({ invoke, send, on, windowKind, platform }: ApiTransport): ConversationsApi {
+  return {
+    app: {
+      info: () => invoke("app:info"),
+      openExternal: (url) => invoke("app:openExternal", url),
+      openPath: (p) => invoke("app:openPath", p),
+      pickFiles: () => invoke("app:pickFiles"),
+      pickFolder: () => invoke("app:pickFolder"),
+      updateReady: () => invoke("app:updateReady"),
+      restart: () => invoke("app:restart"),
+      showSettings: (section) => invoke("app:showSettings", section),
+      showMain: (conversationId) => invoke("app:showMain", conversationId),
+      toggleFlyout: () => invoke("app:toggleFlyout"),
+      copyText: (text) => invoke("app:copyText", text),
+      checkClaude: () => invoke("app:checkClaude"),
+      finishWelcome: (acceptedTerms) => invoke("app:finishWelcome", acceptedTerms),
+      windowKind: () => windowKind,
+      platform: () => platform,
+    },
+    window: {
+      minimize: () => send("window:minimize"),
+      toggleMaximize: () => send("window:toggleMaximize"),
+      close: () => send("window:close"),
+      setTitleBarColors: (colors) => send("window:titleBarColors", colors),
+      setFlyoutHeight: (height) => send("window:flyoutHeight", height),
+    },
+    list: {
+      sidebar: () => invoke("list:sidebar"),
+      conversations: (q) => invoke("list:conversations", q),
+      detail: (id) => invoke("list:detail", id),
+      items: (id, beforeSeq, limit) => invoke("list:items", id, beforeSeq, limit),
+      markSeen: (id) => invoke("list:markSeen", id),
+      search: (text, opts) => invoke("list:search", text, opts),
+      image: (key) => invoke("list:image", key),
+    },
+    edit: {
+      apply: (id, field, value) => invoke("edit:apply", id, field, value),
+    },
+    sync: {
+      status: () => invoke("sync:status"),
+      now: () => invoke("sync:now"),
+      signIn: () => invoke("sync:signIn"),
+      setPaused: (paused) => invoke("sync:setPaused", paused),
+      openLog: () => invoke("sync:openLog"),
+      setUploadQuiet: (seconds) => invoke("sync:setUploadQuiet", seconds),
+    },
+    cli: {
+      open: (id) => invoke("cli:open", id),
+      newChat: (projectId) => invoke("cli:newChat", projectId),
+    },
+    chat: {
+      send: (id, text, opts) => invoke("chat:send", id, text, opts),
+      stop: (id) => invoke("chat:stop", id),
+      stopShell: (key) => invoke("chat:stopShell", key),
+      mcp: (id, projectId, folder, opts) => invoke("chat:mcp", id, projectId, folder, opts ?? {}),
+      mcpAction: (id, name, action, opts) => invoke("chat:mcpAction", id, name, action, opts ?? {}),
+      respond: (requestId, decision) => invoke("chat:respond", requestId, decision),
+      answer: (requestId, answers) => invoke("chat:answer", requestId, answers),
+      setModel: (id, model) => invoke("chat:setModel", id, model),
+      setEffort: (id, level) => invoke("chat:setEffort", id, level),
+      commands: (id, projectId, folder) => invoke("chat:commands", id, projectId, folder ?? null),
+      setPermissionMode: (id, mode) => invoke("chat:setPermissionMode", id, mode),
+      status: (id) => invoke("chat:status", id),
+      agent: (id, agentId) => invoke("chat:agent", id, agentId),
+      stopAgent: (id, agentId) => invoke("chat:stopAgent", id, agentId),
+      models: () => invoke("chat:models"),
+      pending: () => invoke("chat:pending"),
+      usage: () => invoke("chat:usage"),
+    },
+    settings: {
+      get: () => invoke("settings:get"),
+      set: (patch) => invoke("settings:set", patch),
+    },
+    workspace: {
+      list: () => invoke("workspace:list"),
+      switch: (id, force) => invoke("workspace:switch", id, force === true),
+      openWindow: (id) => invoke("workspace:openWindow", id),
+      add: (input) => invoke("workspace:add", input),
+      signIn: (id) => invoke("workspace:signIn", id),
+      rename: (id, name) => invoke("workspace:rename", id, name),
+      signInCode: (id, code) => invoke("workspace:signInCode", id, code),
+      signInCancel: (id) => invoke("workspace:signInCancel", id),
+      disconnect: (id, force) => invoke("workspace:disconnect", id, force === true),
+      reconnect: (id) => invoke("workspace:reconnect", id),
+    },
+    composer: {
+      load: () => invoke("composer:load"),
+      save: (patch) => invoke("composer:save", patch),
+    },
+    on: on as ConversationsApi["on"],
+    };
+}

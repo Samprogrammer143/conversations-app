@@ -1994,6 +1994,55 @@ export function announceDevice() {
   });
 }
 
+// Phones and the relay (the app's phone link): _devices/relay.json (the relay's address and
+// the workspace's room), _devices/keys/<pc>.json (each PC's public key) and
+// _devices/phones/<id>.json (each phone a PC has allowed). Only these names can be written.
+const DEVICES_FILE = /^(relay\.json|keys\/[a-z0-9-]{1,80}\.json|(phones|requests)\/[A-Za-z0-9_-]{6,64}\.json)$/;
+
+/** Writes (value) or removes (null) files under _devices, then commits and pushes them. */
+export function writeDevicesFiles(changes, message) {
+  if (!Array.isArray(changes) || !changes.length) return { ok: false, err: "nothing to write" };
+  for (const c of changes) if (!c || typeof c.path !== "string" || !DEVICES_FILE.test(c.path)) return { ok: false, err: `can't write _devices/${c?.path}` };
+  ensureRepo();
+  return withLock(() => {
+    const rf = refreshRepo();
+    if (!rf.ok) return { ok: false, offline: !rf.code, code: rf.code, err: rf.err };
+    const rels = [];
+    for (const c of changes) {
+      const p = path.join(REPO_DIR, "_devices", ...c.path.split("/"));
+      if (c.value === null || c.value === undefined) fs.rmSync(p, { force: true });
+      else {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        writeJson(p, c.value);
+      }
+      rels.push(path.relative(REPO_DIR, p));
+    }
+    return commitAndPush(typeof message === "string" && message ? message.slice(0, 200) : "Devices: phone link", rels);
+  });
+}
+
+/** Reads a file under _devices as GitHub has it now: fetched first (a phone's request, just written). */
+export function readDevicesFileFresh(rel) {
+  ensureRepo();
+  return withLock(() => {
+    const rf = refreshRepo();
+    if (!rf.ok) return { ok: false, offline: !rf.code, code: rf.code, err: rf.err };
+    return { ok: true, value: readDevicesFile(rel) };
+  });
+}
+
+/** Reads a file under _devices (null when it isn't there). */
+export function readDevicesFile(rel) {
+  if (typeof rel !== "string" || !DEVICES_FILE.test(rel) && !/^(keys|phones)$/.test(rel)) return null;
+  const p = path.join(REPO_DIR, "_devices", ...rel.split("/"));
+  try {
+    if (fs.statSync(p).isDirectory()) return fs.readdirSync(p).filter((f) => f.endsWith(".json")).map((f) => ({ file: f, value: readJson(path.join(p, f), null) })).filter((x) => x.value);
+  } catch {
+    return null;
+  }
+  return readJson(p, null);
+}
+
 // ----------------------------------------------------- per-PC edit logs
 //
 // Pins, renames, archive and delete are appended to _state/<pc>.jsonl. Each PC

@@ -50,6 +50,9 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   ENGINE_VERSION,
+  writeDevicesFiles,
+  readDevicesFile,
+  readDevicesFileFresh,
   pushRules,
   rulesStatus,
   SYNC_DIR,
@@ -575,6 +578,14 @@ try {
     printJson({ ok: clone.ok && (refresh?.ok ?? true) && runtime?.ok !== false, dir: APP_DIR, clone, refresh, runtime });
   } else if (cmd === "share-workspace") printJson(shareWorkspace({ id: argText(args.id), name: argText(args.name), remote: argText(args.remote) }));
   else if (cmd === "version") console.log(ENGINE_VERSION);
+  // The phone link: --changes is base64 JSON [{path, value|null}] (see writeDevicesFiles).
+  else if (cmd === "devices-write") {
+    let changes = null;
+    try {
+      changes = JSON.parse(Buffer.from(argText(args.changes) ?? "", "base64").toString("utf8"));
+    } catch {}
+    printJson(changes ? writeDevicesFiles(changes, argText(args.message)) : { ok: false, err: "--changes isn't base64 JSON" });
+  } else if (cmd === "devices-read") printJson(args.fresh ? readDevicesFileFresh(argText(args.path)) : { ok: true, value: readDevicesFile(argText(args.path)) });
   else fail("Usage: sync.mjs setup|push|pull|status|where|hook <event>|list|pull-all|check|signin|edit|folders|push-pending|upload-existing|announce|config|app|version");
 } catch (e) {
   log(`error in ${cmd}: ${e.stack || e}`);

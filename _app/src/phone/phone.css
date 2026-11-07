@@ -1,0 +1,268 @@
+/* The phone (Figma: Mobile (for review)). The desktop's tokens and styles, made for touch:
+   rows and buttons at least 48 tall, reading-size text, pickers as sheets from the bottom. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body[data-platform="android"] {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  background: var(--bg-content);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  box-sizing: border-box;
+}
+
+.phone-loading {
+  height: 100%;
+  background: var(--bg-content);
+}
+
+.spin {
+  animation: phone-spin 1s linear infinite;
+}
+@keyframes phone-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- setup (M1, M2) */
+
+.phone-setup {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  color: var(--label-primary);
+  font-family: var(--font-ui);
+}
+
+.phone-setup.sign-in {
+  padding: 0 28px 28px;
+}
+.phone-setup .hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  text-align: center;
+}
+.phone-setup .app-tile {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: var(--bg-accent);
+  color: var(--icon-on-accent);
+  display: grid;
+  place-items: center;
+}
+.phone-setup h1 {
+  font-size: 26px;
+  font-weight: 700;
+  margin: 0;
+}
+.phone-setup .hero p {
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--label-secondary);
+  margin: 0;
+}
+.phone-setup .actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+}
+.phone-setup .foot {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--label-tertiary);
+  text-align: center;
+  margin: 0;
+}
+.phone-setup .error {
+  color: var(--status-danger);
+}
+.phone-setup .step {
+  font-size: 15px;
+  text-align: center;
+  color: var(--label-secondary);
+  margin: 0;
+}
+
+.big-button {
+  height: 52px;
+  border-radius: 14px;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font: 600 15px/1 var(--font-ui);
+  background: var(--bg-accent);
+  color: var(--label-on-accent);
+}
+.big-button.dark {
+  background: var(--label-primary);
+  color: var(--bg-content);
+}
+.big-button:active {
+  opacity: 0.85;
+}
+.text-button {
+  height: 48px;
+  border: 0;
+  background: none;
+  font: 600 15px/1 var(--font-ui);
+  color: var(--label-link);
+}
+.device-code {
+  height: 64px;
+  border-radius: 12px;
+  border: 0;
+  background: var(--bg-sunken);
+  color: var(--label-primary);
+  font: 500 28px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.phone-setup.allow {
+  padding: 20px 20px 28px;
+  gap: 24px;
+}
+.phone-setup .signed-in {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--label-secondary);
+}
+.phone-setup .signed-in .gh-mark {
+  width: 18px;
+  height: 18px;
+  color: var(--icon-primary);
+}
+.phone-setup section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.phone-setup h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+.phone-setup .body {
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--label-secondary);
+  margin: 0;
+}
+.phone-setup .card {
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--separator-default);
+  overflow: hidden;
+}
+.phone-setup .ws-row,
+.phone-setup .pc-row {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--label-primary);
+  font: 15px/20px var(--font-ui);
+}
+.phone-setup .ws-row + .ws-row,
+.phone-setup .pc-row + .pc-row {
+  box-shadow: inset 0 1px 0 var(--separator-default);
+}
+.phone-setup .ws-row .tile {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--fill-secondary);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 13px;
+}
+.phone-setup .ws-row.current .tile {
+  background: var(--bg-accent);
+  color: var(--label-on-accent);
+}
+.phone-setup .ws-row .text,
+.phone-setup .pc-row .name {
+  flex: 1;
+  min-width: 0;
+}
+.phone-setup .ws-row .text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.phone-setup .ws-row .name {
+  font-weight: 600;
+}
+.phone-setup .ws-row .detail {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--label-secondary);
+}
+.phone-setup .ws-row .ready {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--status-success);
+}
+.phone-setup .pc-row .icon {
+  color: var(--icon-secondary);
+}
+.phone-setup .pc-row.muted {
+  color: var(--label-tertiary);
+}
+.phone-setup .pc-row .status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--label-secondary);
+}
+.phone-setup .pc-row .status.on {
+  color: var(--label-link);
+}
+.phone-setup .pc-row .status .icon {
+  color: var(--icon-accent);
+}
+.phone-setup .pc-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--fill-secondary);
+}
+.phone-setup .code {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+.phone-setup .code span {
+  width: 56px;
+  height: 64px;
+  border-radius: 12px;
+  background: var(--bg-sunken);
+  display: grid;
+  place-items: center;
+  font: 500 30px/1 var(--font-mono);
+}

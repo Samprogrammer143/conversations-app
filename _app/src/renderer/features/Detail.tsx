@@ -13,6 +13,7 @@ import { pcWord } from "../lib/platform";
 import { Transcript } from "./Transcript";
 import { McpPanel } from "./McpPanel";
 import { signInWorkspace } from "./Workspaces";
+import { slots } from "../lib/slots";
 
 const MODES: { value: string; label: string; icon: string; hint: string }[] = [
   { value: "default", label: "Ask first", icon: "shield-check", hint: "Asks before each tool runs" },
@@ -466,6 +467,9 @@ function ContextRing({ percent }: { percent: number }) {
   );
 }
 
+/** The phone's "Sends to" chip (empty on the desktop). */
+const SendsTo = slots.composerTarget;
+
 function Composer({
   id,
   projectId,
@@ -885,6 +889,7 @@ function Composer({
       />
       <div className="composer-controls">
         <IconButton icon="plus" label="Attach an image or file" onClick={() => void pick()} />
+        {SendsTo && !shellMode && <SendsTo />}
         {shellMode ? (
           <span className="shell-hint" role="note">
             <Icon name="terminal" size={14} />

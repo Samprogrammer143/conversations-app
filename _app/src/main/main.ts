@@ -48,6 +48,7 @@ import { showPointer } from "./pointer";
 import { useLoginShellPath } from "../shared/login-path";
 import { reportProblemUrl } from "../shared/links";
 import { PC } from "./words";
+import { DEFAULT_RELAY_URL, PhoneLink } from "./remote/phone-link";
 
 // A Mac app started from the Finder has only the system's folders on PATH (the installed
 // app's shell has done this already; development and tests start here). In the background.
@@ -276,6 +277,7 @@ function liveConversationIds(): string[] {
 
 function broadcast(event: string, payload: unknown) {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(`event:${event}`, payload);
+  phoneLink?.broadcast(event, payload);
 }
 
 // The usage meters: fresh numbers on start, on focus, after a reply, and every five
@@ -652,8 +654,37 @@ async function applyEdit(id: string, field: EditField, value: boolean | string |
   return { ok: true, queued, err: r.json?.err };
 }
 
+/** Every window request's handler, by channel: the phone link answers phones with the same ones. */
+const handlers = new Map<string, (...args: unknown[]) => unknown>();
+
 function handle(channel: string, fn: (...args: any[]) => unknown) {
+  handlers.set(channel, fn);
   ipcMain.handle(channel, (_e: IpcMainInvokeEvent, ...args: unknown[]) => fn(...args));
+}
+
+// The phone link (remote/phone-link.ts): off until there is a relay to use.
+let phoneLink: PhoneLink | null = null;
+
+/** "Allow this phone?" on this PC. */
+async function askAllowPhone(req: { name: string; code: string; allowedOn: string | null }): Promise<boolean> {
+  const win = mainWin && !mainWin.isDestroyed() ? mainWin : null;
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+  const opts: Electron.MessageBoxOptions = {
+    type: "question",
+    title: "Allow this phone?",
+    message: `Allow this phone?`,
+    detail: `${req.allowedOn ? `You allowed "${req.name}" on ${req.allowedOn}. Each ${PC} asks once. ` : ""}"${req.name}" wants to read your chats in this workspace and run them on this ${PC} and your other ${PC}s, including answering Claude's questions and approvals.\n\nCode on the phone: ${req.code.split("").join(" ")}\n\nOnly allow your own phone, and only if it shows the same code.`,
+    buttons: ["Allow", "Don't allow"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const r = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+  return r.response === 0;
 }
 
 const BAD_ID = "That conversation id isn't valid";
@@ -1430,6 +1461,15 @@ void app.whenReady().then(async () => {
   });
   scheduler.on("status", (st) => broadcast("sync-status", st));
   void scheduler.start();
+  // The phone link starts once sync has had a moment to bring the repository up to date.
+  phoneLink = new PhoneLink({
+    handlers,
+    askAllow: askAllowPhone,
+    relayUrl: () => process.env.CONVERSATIONS_RELAY_URL || DEFAULT_RELAY_URL || null,
+  });
+  setTimeout(() => void phoneLink?.start(), Number(process.env.CONVERSATIONS_PHONE_LINK_DELAY_MS) || 20_000).unref();
+  // A download may have brought a newly allowed (or removed) phone.
+  scheduler.on("status", () => phoneLink?.refresh());
   // The model menu's list, fetched quietly once the app has settled.
   setTimeout(() => knownModels(claudeInstall().path), 20_000).unref();
   setTimeout(checkForUpdate, 15_000).unref();

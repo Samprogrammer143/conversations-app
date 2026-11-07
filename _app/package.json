@@ -1,7 +1,7 @@
 {
   "name": "conversations",
   "productName": "Conversations",
-  "version": "0.5.34",
+  "version": "0.5.35",
   "private": true,
   "description": "Every Claude Code conversation from all your PCs, in one place and kept in sync.",
   "author": "Samprogrammer143",
@@ -17,10 +17,17 @@
     "e2e": "playwright test",
     "dist": "node scripts/build.mjs && electron-builder --win nsis --publish never",
     "dist:public": "node scripts/dist-public.mjs",
-    "dist:mac": "node scripts/dist-public.mjs --mac"
+    "dist:mac": "node scripts/dist-public.mjs --mac",
+    "phone:build": "vite build -c vite.phone.config.ts && cap sync android",
+    "phone:apk": "node scripts/phone-apk.mjs"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.296",
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "@playwright/test": "^1.64.0",
+    "@tanstack/react-virtual": "^3.14.14",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
@@ -29,15 +36,13 @@
     "electron": "^44.7.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
-    "typescript": "^7.0.2",
-    "vite": "^8.3.4",
-    "vitest": "^5.0.3",
-    "@anthropic-ai/claude-agent-sdk": "^0.3.296",
-    "@tanstack/react-virtual": "^3.14.14",
     "highlight.js": "^11.12.0",
     "markdown-it": "^15.0.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3",
     "zustand": "^5.0.15"
   },
   "build": {

@@ -670,9 +670,9 @@ function writeLauncher(w) {
 }
 
 // src/main/main.ts
-import fs28 from "node:fs";
+import fs29 from "node:fs";
 import { execFile as execFile3, spawn as spawn11 } from "node:child_process";
-import path30 from "node:path";
+import path31 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/main/alert.ts
@@ -1151,8 +1151,8 @@ var IndexService = class _IndexService extends EventEmitter {
     return buf;
   }
   async image(key) {
-    const [enc, offStr, blockStr] = key.split("|");
-    const file4 = decodeURIComponent(enc ?? "");
+    const [enc2, offStr, blockStr] = key.split("|");
+    const file4 = decodeURIComponent(enc2 ?? "");
     const offset = Number(offStr);
     const block = Number(blockStr);
     const allowed = [projectsDir(), repoDir()].some((root) => path9.resolve(file4).toLowerCase().startsWith(path9.resolve(root).toLowerCase() + path9.sep));
@@ -2467,8 +2467,8 @@ async function handOver(id, where, deps) {
     deps.focus(procs[0].pid);
     return { ok: false, message: OPEN_ON_THIS_PC };
   };
-  const open = await deps.terminals(id);
-  if (open?.length) return refuse(open);
+  const open2 = await deps.terminals(id);
+  if (open2?.length) return refuse(open2);
   await deps.stopAppSession(id);
   for (const t0 = now(); ; ) {
     const procs = await deps.processes(id);
@@ -2512,9 +2512,9 @@ function encodeCwd(cwd) {
   return path15.resolve(cwd).replace(/[^A-Za-z0-9]/g, "-");
 }
 function cwdMatchesFolder(cwd, folderName) {
-  const enc = encodeCwd(cwd).toLowerCase();
+  const enc2 = encodeCwd(cwd).toLowerCase();
   const name = folderName.toLowerCase();
-  return enc === name || enc.length > 200 && name.startsWith(enc.slice(0, 200));
+  return enc2 === name || enc2.length > 200 && name.startsWith(enc2.slice(0, 200));
 }
 var isDir = (p) => {
   try {
@@ -2671,17 +2671,17 @@ async function openTerminalSessions(opts = {}) {
   if (!entries) return null;
   const domain = opts.domain ?? thisPidDomain();
   const probe = opts.probe ?? probeProcess;
-  const open = /* @__PURE__ */ new Set();
+  const open2 = /* @__PURE__ */ new Set();
   for (const e of entries) {
     if (opts.only && e.sessionId !== opts.only) continue;
-    if (open.has(e.sessionId) || !isTerminalEntry(e, domain)) continue;
-    if (isClaude(await probe(e.pid))) open.add(e.sessionId);
+    if (open2.has(e.sessionId) || !isTerminalEntry(e, domain)) continue;
+    if (isClaude(await probe(e.pid))) open2.add(e.sessionId);
   }
-  return open;
+  return open2;
 }
 async function isOpenInTerminal(id, opts = {}) {
-  const open = await openTerminalSessions({ ...opts, only: id });
-  return open === null ? null : open.has(id);
+  const open2 = await openTerminalSessions({ ...opts, only: id });
+  return open2 === null ? null : open2.has(id);
 }
 async function sessionProcesses(id, opts = {}) {
   const entries = readRegistry2(opts.dir);
@@ -5297,8 +5297,8 @@ var ChatManager = class extends EventEmitter5 {
   }
   /** The chat's Claude Code, running: the one open now, one starting, or one started now with nothing to send. */
   async ensureLive(id, cwd, opts, claudePath) {
-    const open = this.sessions.get(id);
-    if (open?.alive) return { s: open };
+    const open2 = this.sessions.get(id);
+    if (open2?.alive) return { s: open2 };
     const start = this.starting.get(id);
     if (start) await start.done;
     else {
@@ -6293,30 +6293,658 @@ function reportProblemUrl(version, system) {
   return `${ISSUES_URL}/new?${new URLSearchParams({ template: "problem.md", title: `Problem in Conversations ${version} on ${system}` }).toString()}`;
 }
 
+// src/main/remote/phone-link.ts
+import fs28 from "node:fs";
+import path30 from "node:path";
+
+// src/shared/relay-crypto.ts
+var subtle = () => globalThis.crypto.subtle;
+var enc = new TextEncoder();
+var dec = new TextDecoder();
+function b64u(bytes) {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function unb64u(text) {
+  const s = atob(text.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((text.length + 3) % 4));
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+var ALG = { name: "ECDH", namedCurve: "P-256" };
+async function newIdentity() {
+  const pair = await subtle().generateKey(ALG, true, ["deriveBits"]);
+  const raw = new Uint8Array(await subtle().exportKey("raw", pair.publicKey));
+  return { v: 1, privateJwk: await subtle().exportKey("jwk", pair.privateKey), publicKey: b64u(raw) };
+}
+async function loadIdentity(s) {
+  const privateKey = await subtle().importKey("jwk", s.privateJwk, ALG, false, ["deriveBits"]);
+  return { id: await idOf(s.publicKey), publicKey: s.publicKey, privateKey };
+}
+async function idOf(publicKey) {
+  const h = new Uint8Array(await subtle().digest("SHA-256", unb64u(publicKey)));
+  return b64u(h).slice(0, 22);
+}
+async function pairingCode(phonePublicKey, room) {
+  const h = new Uint8Array(await subtle().digest("SHA-256", enc.encode(`conversations pairing|${room}|${phonePublicKey}`)));
+  const n = (h[0] << 24 | h[1] << 16 | h[2] << 8 | h[3]) >>> 0;
+  return String(n % 1e4).padStart(4, "0");
+}
+async function sharedKey(me, theirPublicKey, room) {
+  const theirs = await subtle().importKey("raw", unb64u(theirPublicKey), ALG, false, []);
+  const bits = await subtle().deriveBits({ name: "ECDH", public: theirs }, me.privateKey, 256);
+  const base = await subtle().importKey("raw", bits, "HKDF", false, ["deriveKey"]);
+  const ids = [me.id, await idOf(theirPublicKey)].sort().join("|");
+  return subtle().deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: enc.encode(`conversations relay|${room}`), info: enc.encode(`v1|${ids}`) },
+    base,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+var MAX_SKEW_MS = 5 * 6e4;
+async function seal(key, body) {
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const plain2 = enc.encode(JSON.stringify({ ts: Date.now(), n: b64u(globalThis.crypto.getRandomValues(new Uint8Array(9))), body }));
+  const ct = new Uint8Array(await subtle().encrypt({ name: "AES-GCM", iv }, key, plain2));
+  return `${b64u(iv)}.${b64u(ct)}`;
+}
+async function open(key, text, seen) {
+  const [iv, ct] = text.split(".");
+  if (!iv || !ct) throw new Error("not a sealed message");
+  const plain2 = await subtle().decrypt({ name: "AES-GCM", iv: unb64u(iv) }, key, unb64u(ct));
+  const msg = JSON.parse(dec.decode(plain2));
+  if (typeof msg.ts !== "number" || Math.abs(Date.now() - msg.ts) > MAX_SKEW_MS) throw new Error("message too old");
+  if (seen && !seen.fresh(msg.n, msg.ts)) throw new Error("message seen before");
+  return msg.body;
+}
+var ReplayGuard = class {
+  constructor(max = 2e4) {
+    this.max = max;
+  }
+  max;
+  seen = /* @__PURE__ */ new Map();
+  fresh(n, ts) {
+    if (typeof n !== "string" || this.seen.has(n)) return false;
+    if (this.seen.size >= this.max) {
+      const cut = Date.now() - MAX_SKEW_MS;
+      for (const [k, t] of this.seen) if (t < cut) this.seen.delete(k);
+      if (this.seen.size >= this.max) return false;
+    }
+    this.seen.set(n, ts);
+    return true;
+  }
+};
+
+// src/shared/relay-link.ts
+var PART = 7e5;
+var MAX_PENDING_PER_PEER = 2;
+var MAX_PENDING_BYTES = 24e6;
+var MAX_KEYS2 = 64;
+var PING_MS = 25e3;
+var RelayLink = class {
+  constructor(o) {
+    this.o = o;
+  }
+  o;
+  ws = null;
+  peers = /* @__PURE__ */ new Map();
+  keys = /* @__PURE__ */ new Map();
+  parts = /* @__PURE__ */ new Map();
+  /** Seen nonces per known sender, so a flood from one can't push another's out; strangers share a small one. */
+  guards = /* @__PURE__ */ new Map();
+  strangers = new ReplayGuard(2e3);
+  stopped = false;
+  retry = 0;
+  pinger = null;
+  retryTimer = null;
+  state = "closed";
+  start() {
+    this.stopped = false;
+    this.connect();
+  }
+  stop() {
+    this.stopped = true;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.cleanup();
+    try {
+      this.ws?.close(1e3, "bye");
+    } catch {
+    }
+    this.ws = null;
+    this.setState("closed");
+  }
+  /** Who else is in the room now. */
+  present() {
+    return [...this.peers.values()];
+  }
+  /** Forgets a device's key (it was removed, or its key changed). */
+  forget(device) {
+    this.guards.delete(device);
+    for (const k of this.keys.keys()) if (k.startsWith(`${device}|`)) this.keys.delete(k);
+  }
+  setState(s) {
+    if (this.state === s) return;
+    this.state = s;
+    this.o.onState?.(s);
+  }
+  cleanup() {
+    if (this.pinger) clearInterval(this.pinger);
+    this.pinger = null;
+  }
+  connect() {
+    if (this.stopped) return;
+    this.setState("connecting");
+    const q = new URLSearchParams({ device: this.o.me.id, kind: this.o.kind, name: this.o.name });
+    let ws;
+    try {
+      ws = new WebSocket(`${this.o.url.replace(/\/+$/, "")}/room/${this.o.room}/ws?${q}`);
+    } catch (e) {
+      this.o.log?.(`relay: can't connect (${e.message})`);
+      this.again();
+      return;
+    }
+    this.ws = ws;
+    ws.addEventListener("open", () => {
+      this.retry = 0;
+      this.setState("open");
+      this.cleanup();
+      this.pinger = setInterval(() => {
+        try {
+          ws.send("ping");
+        } catch {
+        }
+      }, PING_MS);
+    });
+    ws.addEventListener("message", (e) => void this.received(String(e.data)));
+    ws.addEventListener("close", (e) => {
+      if (this.ws !== ws) return;
+      this.cleanup();
+      this.ws = null;
+      if (this.peers.size) {
+        this.peers.clear();
+        this.o.onPeers?.([]);
+      }
+      if (e.code === 4e3) {
+        this.o.log?.("relay: replaced by a newer connection of this device; trying again in a minute");
+        this.setState("connecting");
+        this.retryTimer = setTimeout(() => this.connect(), 6e4);
+        return;
+      }
+      this.again();
+    });
+    ws.addEventListener("error", () => {
+    });
+  }
+  again() {
+    if (this.stopped) return;
+    this.setState("connecting");
+    const wait = Math.min(3e4, 1e3 * 2 ** Math.min(this.retry++, 5)) * (0.75 + Math.random() * 0.5);
+    this.retryTimer = setTimeout(() => this.connect(), wait);
+  }
+  guardFor(device) {
+    let g = this.guards.get(device);
+    if (!g) this.guards.set(device, g = new ReplayGuard());
+    return g;
+  }
+  key(device, publicKey) {
+    const id = `${device}|${publicKey}`;
+    let k = this.keys.get(id);
+    if (!k) {
+      k = sharedKey(this.o.me, publicKey, this.o.room);
+      if (this.keys.size >= MAX_KEYS2) this.keys.delete(this.keys.keys().next().value);
+      this.keys.set(id, k);
+    }
+    return k;
+  }
+  async received(raw) {
+    if (raw === "pong") return;
+    let m;
+    try {
+      m = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (m.t === "presence" && Array.isArray(m.devices)) {
+      this.peers = new Map(m.devices.map((d) => [d.device, d]));
+      this.o.onPeers?.(this.present());
+    } else if (m.t === "join" && m.device) {
+      this.peers.set(m.device, { device: m.device, kind: m.kind, name: m.name ?? "", since: m.since ?? Date.now() });
+      this.o.onPeers?.(this.present());
+    } else if (m.t === "leave" && m.device) {
+      this.peers.delete(m.device);
+      this.o.onPeers?.(this.present());
+    } else if (m.t === "msg" && m.from && typeof m.data === "string") {
+      await this.data(m.from, m.data);
+    }
+  }
+  async data(from, data) {
+    if (data.startsWith("c.")) {
+      if (!await this.o.keyFor(from)) return;
+      const [, mid, i, n, ...rest] = data.split(".");
+      const part = rest.join(".");
+      const total = Number(n);
+      const idx = Number(i);
+      if (!mid || !Number.isInteger(total) || total < 1 || total * PART > MAX_PENDING_BYTES || !Number.isInteger(idx) || idx < 0 || idx >= total || part.length > PART) return;
+      const slot = `${from}|${mid}`;
+      const now = Date.now();
+      for (const [k, v] of this.parts) if (now - v.at > 12e4) this.parts.delete(k);
+      let bytes = part.length;
+      for (const v of this.parts.values()) for (const g of v.got) bytes += g?.length ?? 0;
+      const mine = [...this.parts.keys()].filter((k) => k.startsWith(`${from}|`)).length;
+      if (bytes > MAX_PENDING_BYTES || !this.parts.has(slot) && mine >= MAX_PENDING_PER_PEER) return this.o.log?.(`relay: too much in parts from ${from}; dropped`);
+      const entry = this.parts.get(slot) ?? { n: total, got: new Array(total), count: 0, at: now };
+      if (entry.got[idx] === void 0) entry.count++;
+      entry.got[idx] = part;
+      this.parts.set(slot, entry);
+      if (entry.count < entry.n) return;
+      this.parts.delete(slot);
+      data = entry.got.join("");
+    }
+    try {
+      if (data.startsWith("s.")) {
+        const pub = await this.o.keyFor(from);
+        if (!pub) return this.o.log?.(`relay: a message from ${from}, who isn't known here`);
+        const body = this.fromSender(from, await open(await this.key(from, pub), data.slice(2), this.guardFor(from)));
+        this.o.onMessage(from, body, null);
+      } else if (data.startsWith("p.")) {
+        const dot = data.indexOf(".", 2);
+        const pub = data.slice(2, dot);
+        if (await idOf(pub) !== from) return this.o.log?.(`relay: ${from} introduced a key that isn't its own`);
+        const known = await this.o.keyFor(from);
+        if (!known && !this.o.acceptIntroductions) return;
+        if (known && known !== pub) return this.o.log?.(`relay: ${from} introduced a different key from the one known here`);
+        const body = this.fromSender(from, await open(await this.key(from, pub), data.slice(dot + 1), known ? this.guardFor(from) : this.strangers));
+        this.o.onMessage(from, body, known ? null : pub);
+      }
+    } catch (e) {
+      this.o.log?.(`relay: a message from ${from} didn't open (${e.message})`);
+    }
+  }
+  /** What the sender sealed, which names the sender: both ends share one key, so a message can't be bounced back to who sent it. */
+  fromSender(from, sealed) {
+    const m = sealed;
+    if (!m || m.f !== from) throw new Error("not from its sender");
+    return m.b;
+  }
+  /**
+   * Sends to one device. `theirKey`: its public key (else keyFor's). `introduce`: send this
+   * device's key along, for one that doesn't know it yet. False when it couldn't go.
+   */
+  async send(to, body, opts = {}) {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== 1) return false;
+    const pub = opts.theirKey ?? await this.o.keyFor(to);
+    if (!pub) return false;
+    const sealed = await seal(await this.key(to, pub), { f: this.o.me.id, b: body });
+    const data = opts.introduce ? `p.${this.o.me.publicKey}.${sealed}` : `s.${sealed}`;
+    try {
+      if (data.length <= PART) ws.send(JSON.stringify({ t: "send", to, data }));
+      else {
+        const mid = Math.random().toString(36).slice(2, 10);
+        const n = Math.ceil(data.length / PART);
+        for (let i = 0; i < n; i++) ws.send(JSON.stringify({ t: "send", to, data: `c.${mid}.${i}.${n}.${data.slice(i * PART, (i + 1) * PART)}` }));
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+};
+
+// src/main/remote/phone-link.ts
+var log2 = (m) => log("phone", m);
+var DEFAULT_RELAY_URL = "wss://conversations-relay.conversations-relay.workers.dev";
+var REMOTE_CHANNELS = /* @__PURE__ */ new Set([
+  "app:info",
+  "list:sidebar",
+  "list:conversations",
+  "list:detail",
+  "list:items",
+  "list:markSeen",
+  "list:search",
+  "list:image",
+  "edit:apply",
+  "sync:status",
+  "sync:now",
+  "chat:send",
+  "chat:stop",
+  "chat:respond",
+  "chat:answer",
+  "chat:setModel",
+  "chat:setEffort",
+  "chat:commands",
+  "chat:setPermissionMode",
+  "chat:status",
+  "chat:agent",
+  "chat:stopAgent",
+  "chat:models",
+  "chat:pending",
+  "chat:usage",
+  "settings:get",
+  "composer:load",
+  "workspace:list"
+]);
+function remoteRefusal(channel, args) {
+  if (channel === "chat:commands" && args[2]) return "Commands in another folder are listed on the PC";
+  if (channel === "chat:send") {
+    const opts = args[2] ?? {};
+    if (opts.shell) return "Shell commands only run from the PC";
+    if (opts.folder) return "A chat in a new folder starts on the PC";
+  }
+  return null;
+}
+var REMOTE_EVENTS = /* @__PURE__ */ new Set(["index-changed", "sync-status", "chat-status", "chat-returned", "chat-pending", "usage", "alert", "settings-changed"]);
+function readJson2(p) {
+  try {
+    return JSON.parse(fs28.readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function thisPc() {
+  const c = readJson2(path30.join(syncDir(), "config.json")) ?? {};
+  return { name: c.machine || (process.env.COMPUTERNAME ?? "This PC"), slug: c.slug ?? null };
+}
+var devicesDir = () => path30.join(repoDir(), "_devices");
+function readRelayConfig() {
+  const c = readJson2(path30.join(devicesDir(), "relay.json"));
+  return c && typeof c.url === "string" && typeof c.room === "string" ? c : null;
+}
+function readPhones() {
+  const dir = path30.join(devicesDir(), "phones");
+  const out = [];
+  try {
+    for (const f of fs28.readdirSync(dir)) {
+      const r = f.endsWith(".json") ? readJson2(path30.join(dir, f)) : null;
+      if (r && typeof r.id === "string" && typeof r.key === "string" && f === `${r.id}.json`) out.push(r);
+    }
+  } catch {
+  }
+  return out;
+}
+async function writeDevices(changes, message) {
+  const b64 = Buffer.from(JSON.stringify(changes), "utf8").toString("base64");
+  const r = await runEngineSerial(["devices-write", "--json", "--changes", b64, "--message", message]);
+  return r.json ?? { ok: false, err: r.stderr.split("\n")[0] || "the sync engine didn't answer" };
+}
+async function readRequestFresh(id) {
+  const r = await runEngineSerial(["devices-read", "--json", "--fresh", "--path", `requests/${id}.json`]);
+  return r.json?.ok ? r.json.value ?? null : null;
+}
+var trustPath = () => path30.join(appDataDir(), "phone-link-trust.json");
+function loadTrust() {
+  const t = readJson2(trustPath());
+  return { trusted: Array.isArray(t?.trusted) ? t.trusted : [], removed: Array.isArray(t?.removed) ? t.removed : [] };
+}
+function saveTrust(t) {
+  fs28.writeFileSync(trustPath(), JSON.stringify(t, null, 2));
+}
+function cleanName(name) {
+  const s = String(name ?? "").replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+  return s || "Phone";
+}
+async function identity() {
+  const p = path30.join(appDataDir(), "phone-link-key.json");
+  let s = readJson2(p);
+  if (!s || s.v !== 1) {
+    s = await newIdentity();
+    fs28.writeFileSync(p, JSON.stringify(s), { mode: 384 });
+  }
+  return loadIdentity(s);
+}
+var PhoneLink = class {
+  constructor(o) {
+    this.o = o;
+  }
+  o;
+  link = null;
+  me = null;
+  phones = /* @__PURE__ */ new Map();
+  listening = /* @__PURE__ */ new Set();
+  asking = /* @__PURE__ */ new Map();
+  /** One pairing (the check on GitHub and "Allow this phone?") at a time. */
+  dialogOpen = false;
+  trust = loadTrust();
+  /** Phones allowed in the repository (by any PC); `phones` holds only those this PC trusts too. */
+  allowedAnywhere = /* @__PURE__ */ new Map();
+  /** When GitHub was last asked for requests (at most every 15 s), and phones it had none for. */
+  lastRequestFetch = 0;
+  noRequestUntil = /* @__PURE__ */ new Map();
+  /** Each listening phone's session (from "welcome"): calls must carry it, so one recorded earlier can't be played again after a restart. */
+  sessions = /* @__PURE__ */ new Map();
+  peers = [];
+  status = { state: "off", reason: "starting", phones: [] };
+  config = null;
+  current() {
+    return this.status;
+  }
+  emit(state, reason) {
+    const online = new Set(this.peers.map((p) => p.device));
+    this.status = {
+      state: state ?? this.status.state,
+      reason: state === "off" ? reason : void 0,
+      phones: [...this.phones.values()].map((p) => ({ id: p.id, name: p.name, allowedAt: p.allowedAt, online: online.has(p.id) }))
+    };
+    this.o.onStatus?.(this.status);
+  }
+  /** The allowed phones from the repository, keeping only those this PC trusts as well. */
+  readTrusted() {
+    this.allowedAnywhere = new Map(readPhones().map((p) => [p.id, p]));
+    const mine = new Set(this.trust.trusted);
+    const gone = new Set(this.trust.removed);
+    return new Map([...this.allowedAnywhere].filter(([id]) => mine.has(id) && !gone.has(id)));
+  }
+  /** A phone's request on GitHub: fetched at most every 15 s; in between, the copy the last fetch brought. */
+  async request(id) {
+    if ((this.noRequestUntil.get(id) ?? 0) > Date.now()) return null;
+    let req;
+    if (Date.now() - this.lastRequestFetch < 15e3) req = readJson2(path30.join(devicesDir(), "requests", `${id}.json`));
+    else {
+      this.lastRequestFetch = Date.now();
+      req = await readRequestFresh(id);
+    }
+    if (!req) this.noRequestUntil.set(id, Date.now() + 2e4);
+    return req;
+  }
+  /** Re-reads the allowed phones (after a sync brought changes). */
+  refresh() {
+    const next = this.readTrusted();
+    for (const id of this.phones.keys()) if (!next.has(id)) {
+      this.listening.delete(id);
+      this.link?.forget(id);
+    }
+    this.phones = next;
+    const cfg = readRelayConfig();
+    if (this.link && cfg && (cfg.url !== this.config?.url || cfg.room !== this.config?.room)) {
+      log2("phone link: the relay's address or room changed; connecting again");
+      this.stop();
+      void this.start();
+      return;
+    }
+    this.emit();
+  }
+  async start() {
+    try {
+      this.me = await identity();
+      const pc = thisPc();
+      let cfg = readRelayConfig();
+      const writes = [];
+      if (!cfg) {
+        const url = this.o.relayUrl();
+        if (!url) return this.emit("off", "no relay address");
+        cfg = { url, room: b64u(globalThis.crypto.getRandomValues(new Uint8Array(18))) };
+        writes.push({ path: "relay.json", value: cfg });
+      }
+      if (pc.slug) {
+        const mine = readJson2(path30.join(devicesDir(), "keys", `${pc.slug}.json`));
+        if (mine?.key !== this.me.publicKey) writes.push({ path: `keys/${pc.slug}.json`, value: { name: pc.name, key: this.me.publicKey, device: this.me.id } });
+      }
+      if (writes.length) {
+        const w = await writeDevices(writes, `Devices: phone link for ${pc.name}`);
+        if (!w.ok) log2(`couldn't save ${writes.map((x) => x.path).join(", ")} (${w.err}); trying again at the next start`);
+        cfg = readRelayConfig() ?? cfg;
+      }
+      this.config = cfg;
+      this.phones = this.readTrusted();
+      this.link = new RelayLink({
+        url: cfg.url,
+        room: cfg.room,
+        me: this.me,
+        kind: "pc",
+        name: pc.name,
+        acceptIntroductions: true,
+        keyFor: (d) => this.phones.get(d)?.key ?? null,
+        onMessage: (from, body, introduced) => void this.message(from, body, introduced),
+        onPeers: (peers) => {
+          this.peers = peers;
+          for (const id of this.listening) if (!peers.some((p) => p.device === id)) this.listening.delete(id);
+          this.emit();
+        },
+        onState: (s) => this.emit(s),
+        log: (m) => log2(`${m}`)
+      });
+      this.link.start();
+      log2(`connecting to ${cfg.url} as ${this.me.id}`);
+    } catch (e) {
+      log2(`couldn't start (${e.message})`);
+      this.emit("off", e.message);
+    }
+  }
+  stop() {
+    this.link?.stop();
+    this.link = null;
+    this.listening.clear();
+    this.emit("off", "stopped");
+  }
+  /** Something the window hears: phones that are listening hear it too. */
+  broadcast(event, payload) {
+    if (!this.link || !REMOTE_EVENTS.has(event)) return;
+    for (const id of this.listening) void this.link.send(id, { k: "event", ev: event, payload });
+  }
+  /** Takes a phone off the allowed list, on every PC. */
+  async removePhone(id) {
+    const p = this.phones.get(id);
+    if (!p) return { ok: true };
+    this.trust = { trusted: this.trust.trusted.filter((x) => x !== id), removed: [.../* @__PURE__ */ new Set([...this.trust.removed, id])] };
+    saveTrust(this.trust);
+    const r = await writeDevices([{ path: `phones/${id}.json`, value: null }], `Devices: removed ${p.name}`);
+    this.refresh();
+    return r;
+  }
+  async message(from, body, introduced) {
+    const link = this.link;
+    if (!link || !body || typeof body !== "object") return;
+    const m = body;
+    if (introduced) {
+      if (m.k === "pair") await this.pair(from, introduced, cleanName(m.name));
+      return;
+    }
+    if (m.k === "pair") {
+      await link.send(from, { k: "pair-result", ok: true });
+    } else if (m.k === "hello") {
+      this.listening.add(from);
+      const session = b64u(globalThis.crypto.getRandomValues(new Uint8Array(12)));
+      this.sessions.set(from, session);
+      await link.send(from, { k: "welcome", pc: thisPc().name, session });
+    } else if (m.k === "bye") {
+      this.listening.delete(from);
+      this.sessions.delete(from);
+    } else if (m.k === "call" && typeof m.id === "string" && typeof m.ch === "string") {
+      const reply = (r) => link.send(from, { k: "ret", id: m.id, ...r });
+      if (!this.sessions.has(from) || m.s !== this.sessions.get(from)) return void reply({ ok: false, err: "stale-session" });
+      const fn = REMOTE_CHANNELS.has(m.ch) ? this.o.handlers.get(m.ch) : void 0;
+      if (!fn) return void reply({ ok: false, err: `"${m.ch}" can't be used from a phone` });
+      const args = Array.isArray(m.args) ? m.args : [];
+      const refused = remoteRefusal(m.ch, args);
+      if (refused) return void reply({ ok: false, err: refused });
+      try {
+        const value = await fn(...args);
+        await reply({ ok: true, value: value === void 0 ? null : value });
+      } catch (e) {
+        await reply({ ok: false, err: e.message || String(e) });
+      }
+    }
+  }
+  async pair(from, key, name) {
+    const cfg = this.config;
+    const link = this.link;
+    if (!cfg || !link) return;
+    if (this.trust.removed.includes(from)) return void link.send(from, { k: "pair-result", ok: false, err: "Removed on this PC" }, { theirKey: key });
+    let pending2 = this.asking.get(from);
+    if (!pending2) {
+      if (this.dialogOpen) return void link.send(from, { k: "pair-result", ok: false, pending: true, err: "busy" }, { theirKey: key });
+      this.dialogOpen = true;
+      pending2 = (async () => {
+        try {
+          const elsewhere = readPhones().find((p) => p.id === from);
+          const known = elsewhere?.key === key ? elsewhere : null;
+          if (!known) {
+            const req = await this.request(from);
+            if (!req || req.key !== key) {
+              log2(`a phone asked to be allowed with no matching request on GitHub; not asked`);
+              return "no-request";
+            }
+          }
+          const code = await pairingCode(key, cfg.room);
+          log2(`"${name}" asks to be allowed (code ${code})${known ? `, allowed already on ${known.allowedBy}` : ""}`);
+          if (!await this.o.askAllow({ name, code, allowedOn: known ? cleanName(known.allowedBy) : null })) return false;
+          const pc = thisPc();
+          const rec = known ?? { id: from, key, name, allowedBy: pc.name, allowedAt: (/* @__PURE__ */ new Date()).toISOString() };
+          if (!known) {
+            const w = await writeDevices([{ path: `phones/${from}.json`, value: rec }, { path: `requests/${from}.json`, value: null }], `Devices: ${pc.name} allowed ${name}`);
+            if (!w.ok) {
+              log2(`couldn't save the allowed phone (${w.err})`);
+              return false;
+            }
+          }
+          this.trust = { trusted: [.../* @__PURE__ */ new Set([...this.trust.trusted, from])], removed: this.trust.removed };
+          saveTrust(this.trust);
+          this.allowedAnywhere.set(from, rec);
+          this.phones.set(from, rec);
+          this.emit();
+          return true;
+        } finally {
+          this.dialogOpen = false;
+        }
+      })().finally(() => setTimeout(() => this.asking.delete(from), 2e3));
+      this.asking.set(from, pending2);
+    }
+    const ok = await pending2;
+    await link.send(
+      from,
+      ok === true ? { k: "pair-result", ok: true } : ok === "no-request" ? { k: "pair-result", ok: false, pending: true, err: "no-request" } : { k: "pair-result", ok: false, err: "Not allowed on the PC" },
+      { theirKey: key }
+    );
+  }
+};
+
 // src/main/main.ts
-void useLoginShellPath(path30.join(appDataDir(), "login-path.json"));
+void useLoginShellPath(path31.join(appDataDir(), "login-path.json"));
 process.on("uncaughtException", (e) => log("app", `uncaught exception: ${e?.stack || e}`));
 process.on("unhandledRejection", (e) => log("app", `unhandled rejection: ${e?.stack || e}`));
-var HERE = path30.dirname(fileURLToPath(import.meta.url));
-var DIST = path30.resolve(HERE, "..");
+var HERE = path31.dirname(fileURLToPath(import.meta.url));
+var DIST = path31.resolve(HERE, "..");
 var files = {
-  preload: path30.join(DIST, "preload", "preload.cjs"),
-  page: process.env.CONVERSATIONS_DEV_URL || path30.join(DIST, "renderer", "index.html")
+  preload: path31.join(DIST, "preload", "preload.cjs"),
+  page: process.env.CONVERSATIONS_DEV_URL || path31.join(DIST, "renderer", "index.html")
 };
-var RESOURCES = app4.isPackaged ? process.resourcesPath : path30.resolve(DIST, "..", "resources");
+var RESOURCES = app4.isPackaged ? process.resourcesPath : path31.resolve(DIST, "..", "resources");
 var iconFile = (name) => {
-  const own = path30.join(DIST, "icons", name);
-  return !DIST.includes("app.asar") && fs28.existsSync(own) ? own : path30.join(RESOURCES, name);
+  const own = path31.join(DIST, "icons", name);
+  return !DIST.includes("app.asar") && fs29.existsSync(own) ? own : path31.join(RESOURCES, name);
 };
 files.icon = iconFile("icon.ico");
 var APP_VERSION = (() => {
   try {
-    return JSON.parse(fs28.readFileSync(path30.join(DIST, "app.json"), "utf8")).version || app4.getVersion();
+    return JSON.parse(fs29.readFileSync(path31.join(DIST, "app.json"), "utf8")).version || app4.getVersion();
   } catch {
     return app4.getVersion();
   }
 })();
-if (process.env.CONVERSATIONS_DATA_DIR || isMac2) app4.setPath("userData", path30.join(appDataDir(), "electron"));
+if (process.env.CONVERSATIONS_DATA_DIR || isMac2) app4.setPath("userData", path31.join(appDataDir(), "electron"));
 if (!app4.requestSingleInstanceLock()) {
   app4.quit();
   process.exit(0);
@@ -6349,7 +6977,7 @@ function recordedCwdOnThisPc(id) {
   if (!index.ready) return null;
   const cwd = index.db.prepare("SELECT cwd FROM conversations WHERE id = ?").get(id)?.cwd ?? null;
   try {
-    return cwd && fs28.statSync(cwd).isDirectory() ? cwd : null;
+    return cwd && fs29.statSync(cwd).isDirectory() ? cwd : null;
   } catch {
     return null;
   }
@@ -6384,13 +7012,13 @@ var chat = new ChatManager({
   syncBeforeResume: prepareResume,
   terminalHas: (id) => isOpenInTerminal(id)
 });
-var ownedFile = () => path30.join(appDataDir(), "app-owned.json");
+var ownedFile = () => path31.join(appDataDir(), "app-owned.json");
 var ownedMarked = null;
 var ownedMarking = /* @__PURE__ */ new Set();
 async function markAppOwned(id) {
   if (!ownedMarked) {
     try {
-      const v = JSON.parse(fs28.readFileSync(ownedFile(), "utf8"));
+      const v = JSON.parse(fs29.readFileSync(ownedFile(), "utf8"));
       ownedMarked = new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
     } catch {
       ownedMarked = /* @__PURE__ */ new Set();
@@ -6404,8 +7032,8 @@ async function markAppOwned(id) {
     if (r.ok && !r.json?.nothing) {
       ownedMarked.add(id);
       const tmp = `${ownedFile()}.${process.pid}.tmp`;
-      fs28.writeFileSync(tmp, JSON.stringify([...ownedMarked]));
-      fs28.renameSync(tmp, ownedFile());
+      fs29.writeFileSync(tmp, JSON.stringify([...ownedMarked]));
+      fs29.renameSync(tmp, ownedFile());
     } else log("chat", `couldn't mark ${id.slice(0, 8)} as an app conversation: ${r.json?.nothing ? "the sync engine doesn't know the field yet" : r.stderr.split("\n")[0]}`);
   } catch (e) {
     log("chat", `marking ${id.slice(0, 8)} failed: ${e.message}`);
@@ -6440,7 +7068,7 @@ function inferredFolders() {
     for (const r of rows) {
       if (map[r.p]) continue;
       try {
-        if (fs28.statSync(r.cwd).isDirectory()) map[r.p] = r.cwd;
+        if (fs29.statSync(r.cwd).isDirectory()) map[r.p] = r.cwd;
       } catch {
       }
     }
@@ -6460,6 +7088,7 @@ function liveConversationIds() {
 }
 function broadcast(event, payload) {
   for (const w of BrowserWindow2.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(`event:${event}`, payload);
+  phoneLink?.broadcast(event, payload);
 }
 async function updateUsage(minGapMs = 6e4) {
   const before = lastUsage();
@@ -6534,7 +7163,7 @@ function makeMain(show) {
 }
 function appIcon(name) {
   const p = iconFile(name);
-  return fs28.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
+  return fs29.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
 }
 function toggleFlyout() {
   if (!tray) return;
@@ -6620,7 +7249,7 @@ async function retrySdk() {
 function checkForUpdate() {
   refreshAppRepo();
   void retrySdk();
-  const source = fs28.existsSync(path30.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
+  const source = fs29.existsSync(path31.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
   return new Promise(
     (done) => execFile3("git", ["-C", source, "show", "HEAD:_app/dist/app.json"], { windowsHide: true, timeout: 2e4 }, (err, stdout) => {
       done();
@@ -6679,7 +7308,7 @@ function quit() {
 var loginChoiceFile = () => sharedDataFile("start-at-login.json");
 function sharedStartAtLogin() {
   try {
-    const v = JSON.parse(fs28.readFileSync(loginChoiceFile(), "utf8"))?.on;
+    const v = JSON.parse(fs29.readFileSync(loginChoiceFile(), "utf8"))?.on;
     return typeof v === "boolean" ? v : null;
   } catch {
     return null;
@@ -6689,8 +7318,8 @@ function saveStartAtLogin(on) {
   try {
     const f = loginChoiceFile();
     const tmp = `${f}.${process.pid}.tmp`;
-    fs28.writeFileSync(tmp, JSON.stringify({ on }));
-    fs28.renameSync(tmp, f);
+    fs29.writeFileSync(tmp, JSON.stringify({ on }));
+    fs29.renameSync(tmp, f);
   } catch (e) {
     log("app", `could not keep the start-at-login choice: ${e.message}`);
   }
@@ -6757,13 +7386,40 @@ async function applyEdit(id, field, value) {
   index.scan("edit");
   return { ok: true, queued, err: r.json?.err };
 }
+var handlers = /* @__PURE__ */ new Map();
 function handle(channel, fn) {
+  handlers.set(channel, fn);
   ipcMain.handle(channel, (_e, ...args) => fn(...args));
+}
+var phoneLink = null;
+async function askAllowPhone(req) {
+  const win = mainWin && !mainWin.isDestroyed() ? mainWin : null;
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+  const opts = {
+    type: "question",
+    title: "Allow this phone?",
+    message: `Allow this phone?`,
+    detail: `${req.allowedOn ? `You allowed "${req.name}" on ${req.allowedOn}. Each ${PC} asks once. ` : ""}"${req.name}" wants to read your chats in this workspace and run them on this ${PC} and your other ${PC}s, including answering Claude's questions and approvals.
+
+Code on the phone: ${req.code.split("").join(" ")}
+
+Only allow your own phone, and only if it shows the same code.`,
+    buttons: ["Allow", "Don't allow"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true
+  };
+  const r = win ? await dialog3.showMessageBox(win, opts) : await dialog3.showMessageBox(opts);
+  return r.response === 0;
 }
 var BAD_ID = "That conversation id isn't valid";
 function isUsableFolder(p) {
   try {
-    return path30.isAbsolute(p) && fs28.statSync(p).isDirectory();
+    return path31.isAbsolute(p) && fs29.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -6790,7 +7446,7 @@ function registerIpc() {
   handle("app:openExternal", (url) => typeof url === "string" && /^https?:\/\//.test(url) ? shell2.openExternal(url) : void 0);
   handle("app:openPath", (p) => {
     try {
-      if (typeof p === "string" && path30.isAbsolute(p) && fs28.statSync(p).isDirectory()) return shell2.openPath(p);
+      if (typeof p === "string" && path31.isAbsolute(p) && fs29.statSync(p).isDirectory()) return shell2.openPath(p);
     } catch {
     }
     return "Only folders can be opened";
@@ -6885,7 +7541,7 @@ function registerIpc() {
     const forWindow = workspacesForWindow().workspaces;
     const next = all.find((w) => w.id !== id && !w.disconnected && forWindow.some((f) => f.id === w.id && f.setUp));
     if (!next) return { ok: false, err: "Add another workspace first: Conversations needs one to show" };
-    if (id === "main" && !fs28.existsSync(path30.join(appRepoDir(), ".git"))) return { ok: false, err: `This ${PC} still gets the app's updates through this workspace: it can be disconnected after its next update` };
+    if (id === "main" && !fs29.existsSync(path31.join(appRepoDir(), ".git"))) return { ok: false, err: `This ${PC} still gets the app's updates through this workspace: it can be disconnected after its next update` };
     if (id !== currentWorkspace().id) {
       if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first: right-click its tray icon, then Quit ${target.name}.` };
       setDisconnected(id, true);
@@ -6914,7 +7570,7 @@ function registerIpc() {
     log("app", `reconnected workspace ${id}`);
     broadcast("workspaces-changed", null);
     const w = listWorkspaces().workspaces.find((x) => x.id === id);
-    return { ok: true, synced: !!w && fs28.existsSync(path30.join(w.syncHome, "config.json")) };
+    return { ok: true, synced: !!w && fs29.existsSync(path31.join(w.syncHome, "config.json")) };
   });
   handle("workspace:rename", (id, name) => {
     if (!isWorkspaceId(id) || typeof name !== "string" || !name.trim()) return;
@@ -6939,14 +7595,14 @@ function registerIpc() {
     const images = [];
     const paths = [];
     for (const p of r.filePaths) {
-      const type = IMAGE_TYPES[path30.extname(p).toLowerCase()];
+      const type = IMAGE_TYPES[path31.extname(p).toLowerCase()];
       let size = 0;
       try {
-        size = fs28.statSync(p).size;
+        size = fs29.statSync(p).size;
       } catch {
         continue;
       }
-      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path30.basename(p), mediaType: type, data: fs28.readFileSync(p).toString("base64") });
+      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path31.basename(p), mediaType: type, data: fs29.readFileSync(p).toString("base64") });
       else paths.push(p);
     }
     return { images, paths };
@@ -7003,7 +7659,7 @@ function registerIpc() {
   handle("sync:now", () => scheduler.syncNow());
   handle("sync:signIn", () => isMac2 ? macGitHubSignIn() : scheduler.signIn());
   handle("sync:setPaused", (paused) => scheduler.setPaused(paused === true));
-  handle("sync:openLog", () => shell2.openPath(path30.join(syncDir(), "sync.log")));
+  handle("sync:openLog", () => shell2.openPath(path31.join(syncDir(), "sync.log")));
   handle("sync:setUploadQuiet", (seconds) => scheduler.setUploadQuiet(typeof seconds === "number" ? seconds : NaN));
   handle("cli:open", async (id) => {
     if (!isUuid(id)) return { ok: false, message: BAD_ID };
@@ -7045,11 +7701,11 @@ function registerIpc() {
       const d = conversationDetail(index.db, id, ctx(), folders2());
       if (!d) return { ok: false, err: `That conversation isn't on this ${PC} yet` };
       cwd = d.folder;
-      if (!cwd || !fs28.existsSync(cwd)) {
+      if (!cwd || !fs29.existsSync(cwd)) {
         const local = localTranscript(id);
         cwd = local ? folderForTranscript(local, []) : null;
       }
-      if (!cwd || !fs28.existsSync(cwd)) {
+      if (!cwd || !fs29.existsSync(cwd)) {
         cwd = await chooseFolder(mainWin, d.row.projectLabel);
         if (!cwd) return { ok: false, err: `Chat needs a folder to work in on this ${PC}` };
         pickedFolder = { id, folder: cwd, at: Date.now() };
@@ -7106,7 +7762,7 @@ function registerIpc() {
       const d = conversationDetail(index.db, id, ctx(), folders2());
       cwd = d?.folder ?? d?.row.cwd ?? null;
     } else if (isProjectId(projectId)) cwd = folders2()[projectId] ?? null;
-    if (!cwd || !fs28.existsSync(cwd)) cwd = app4.getPath("home");
+    if (!cwd || !fs29.existsSync(cwd)) cwd = app4.getPath("home");
     return { id, cwd };
   };
   handle("chat:commands", (rawId, projectId, folder) => {
@@ -7387,7 +8043,7 @@ void app4.whenReady().then(async () => {
   registerIpc();
   log("app", `starting ${APP_VERSION} on ${thisMachine()}; data in ${appDataDir()}`);
   try {
-    await index.start(path30.join(HERE, "index-worker.mjs"));
+    await index.start(path31.join(HERE, "index-worker.mjs"));
     index.watchLive(liveConversationIds);
   } catch (e) {
     log("index", `the index is not available: ${e.stack || e}`);
@@ -7413,14 +8069,21 @@ void app4.whenReady().then(async () => {
   });
   scheduler.on("status", (st) => broadcast("sync-status", st));
   void scheduler.start();
+  phoneLink = new PhoneLink({
+    handlers,
+    askAllow: askAllowPhone,
+    relayUrl: () => process.env.CONVERSATIONS_RELAY_URL || DEFAULT_RELAY_URL || null
+  });
+  setTimeout(() => void phoneLink?.start(), Number(process.env.CONVERSATIONS_PHONE_LINK_DELAY_MS) || 2e4).unref();
+  scheduler.on("status", () => phoneLink?.refresh());
   setTimeout(() => knownModels(claudeInstall().path), 2e4).unref();
   setTimeout(checkForUpdate, 15e3).unref();
   setInterval(checkForUpdate, 2 * 6e4).unref();
   const mainHere = listWorkspaces().workspaces[0];
-  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs28.existsSync(path30.join(mainHere.syncHome, "config.json"))) {
+  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs29.existsSync(path31.join(mainHere.syncHome, "config.json"))) {
     const keepMainCurrent = () => {
-      const open = openNow();
-      if (open.includes("main") || open.some((id) => id < currentWorkspace().id)) return;
+      const open2 = openNow();
+      if (open2.includes("main") || open2.some((id) => id < currentWorkspace().id)) return;
       const child = spawn11(process.execPath, [baseEngine(), "pull-all", "--json"], { env: { ...baseEnv(), ELECTRON_RUN_AS_NODE: "1" }, windowsHide: true, stdio: "ignore" });
       child.on("error", (e) => log("sync", `main workspace sync could not start: ${e.message}`));
     };
@@ -7457,14 +8120,14 @@ void app4.whenReady().then(async () => {
     broadcast("index-changed", [before, after]);
     if (shownId !== before) return;
     let tries = 0;
-    const open = () => {
+    const open2 = () => {
       const have = index.ready && !!index.db.prepare("SELECT 1 FROM conversations WHERE id = ?").get(after);
       if (have) {
         if (shownId === before) mainWin?.webContents.send("event:open-conversation", after);
-      } else if (tries++ < 30) setTimeout(open, 500);
+      } else if (tries++ < 30) setTimeout(open2, 500);
     };
     index.scan("rekey");
-    open();
+    open2();
   });
   chat.on("owned", (id, cwd) => {
     index.own(id, cwd);
@@ -7517,7 +8180,7 @@ void app4.whenReady().then(async () => {
   }
   secondInstances.finish();
   powerMonitor.on("resume", () => markingOpen && markOpen(currentWorkspace().id));
-  fs28.watchFile(registryPath(), { interval: 2e3 }, () => {
+  fs29.watchFile(registryPath(), { interval: 2e3 }, () => {
     broadcast("workspaces-changed", null);
     refreshLabels();
   });

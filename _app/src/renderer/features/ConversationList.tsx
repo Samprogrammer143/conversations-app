@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ConversationRow } from "../../shared/types";
+import { slots } from "../lib/slots";
 import { Icon } from "../components/Icon";
 import { Button, GlassCircle, IconButton, Segmented } from "../components/controls";
 import { useStore, visibleRows } from "../lib/store";
@@ -35,7 +36,11 @@ const Row = memo(function Row({ row, selected, last, renaming }: { row: Conversa
       tabIndex={selected ? 0 : -1}
       data-id={row.id}
       className={`row${row.updated ? " is-updated" : ""}${last ? " last" : ""}`}
-      onClick={() => void select(row.id)}
+      onClick={() => {
+        void select(row.id);
+        // On the phone a tap opens the chat (a tap doesn't move focus into the list, as a click does).
+        if (document.body.dataset.platform === "android") window.dispatchEvent(new Event("app:show-chat"));
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         void select(row.id);
@@ -160,28 +165,34 @@ export function ConversationList({ showSidebarToggle, onOpen }: { showSidebarTog
   };
 
   const title = scopeTitle(scope, sidebar);
+  const PhoneHeader = slots.listHeader;
+  const newChat = () => {
+    const projectId = scope.kind === "project" && scope.id !== "folder:*" ? scope.id : useStore.getState().detail?.row.projectId ?? null;
+    useStore.getState().startDraft(projectId);
+  };
   const counts = list?.counts ?? { all: 0, updated: 0, live: 0 };
 
   return (
     <section className="list-col" aria-label="Conversations">
-      <div className="list-toolbar drag">
-        {showSidebarToggle && <IconButton icon="panel-left" label={`Show sidebar (${keyLabel("Ctrl+B")})`} onClick={() => window.dispatchEvent(new Event("app:toggle-sidebar"))} />}
-        <div className="list-title">
-          <span className="t1 ellipsis">{title}</span>
-          <span className="t2 ellipsis">
-            {plural(counts.all, "conversation")}
-            {pcCount > 1 ? `${SEP}${pcCount} ${computerWord()}s` : ""}
-          </span>
+      {PhoneHeader ? (
+        <PhoneHeader title={title} onNewChat={newChat} />
+      ) : (
+        <div className="list-toolbar drag">
+          {showSidebarToggle && <IconButton icon="panel-left" label={`Show sidebar (${keyLabel("Ctrl+B")})`} onClick={() => window.dispatchEvent(new Event("app:toggle-sidebar"))} />}
+          <div className="list-title">
+            <span className="t1 ellipsis">{title}</span>
+            <span className="t2 ellipsis">
+              {plural(counts.all, "conversation")}
+              {pcCount > 1 ? `${SEP}${pcCount} ${computerWord()}s` : ""}
+            </span>
+          </div>
+          <GlassCircle
+            icon="square-pen"
+            label={`New chat (${keyLabel("Ctrl+N")})`}
+            onClick={newChat}
+          />
         </div>
-        <GlassCircle
-          icon="square-pen"
-          label={`New chat (${keyLabel("Ctrl+N")})`}
-          onClick={() => {
-            const projectId = scope.kind === "project" && scope.id !== "folder:*" ? scope.id : useStore.getState().detail?.row.projectId ?? null;
-            useStore.getState().startDraft(projectId);
-          }}
-        />
-      </div>
+      )}
       <div className="filters">
         <Segmented
           label="Filter"

@@ -10,3 +10,4 @@ dist-forwarder/
 dist/**/*.map
 runtime/node_modules/
 *.tmp
+dist-phone/
