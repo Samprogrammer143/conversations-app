@@ -12,7 +12,7 @@ import { execFile, spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AlertWatcher, type AlertWhy } from "./alert";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, session as electronSession, shell, Tray, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, powerSaveBlocker, session as electronSession, shell, Tray, type IpcMainInvokeEvent } from "electron";
 import type { EditField } from "../shared/api";
 import type { AppInfo, Attachment, ListQuery, Settings } from "../shared/types";
 import { IndexService } from "./index/service";
@@ -664,6 +664,21 @@ function handle(channel: string, fn: (...args: any[]) => unknown) {
 
 // The phone link (remote/phone-link.ts): off until there is a relay to use.
 let phoneLink: PhoneLink | null = null;
+
+// "Keep this PC awake for my phone": Windows doesn't sleep while it's on and the PC is plugged in
+// (a laptop on its battery still sleeps).
+let awakeBlocker: number | null = null;
+function applyKeepAwake() {
+  const want = !!phoneLink?.keepAwake() && !powerMonitor.onBatteryPower;
+  if (want && awakeBlocker === null) {
+    awakeBlocker = powerSaveBlocker.start("prevent-app-suspension");
+    log("phone", "keeping this PC awake for the phone");
+  } else if (!want && awakeBlocker !== null) {
+    powerSaveBlocker.stop(awakeBlocker);
+    awakeBlocker = null;
+    log("phone", "no longer keeping this PC awake");
+  }
+}
 
 /** "Allow this phone?" on this PC. */
 async function askAllowPhone(req: { name: string; code: string; allowedOn: string | null }): Promise<boolean> {
@@ -1466,7 +1481,11 @@ void app.whenReady().then(async () => {
     handlers,
     askAllow: askAllowPhone,
     relayUrl: () => process.env.CONVERSATIONS_RELAY_URL || DEFAULT_RELAY_URL || null,
+    onKeepAwake: () => applyKeepAwake(),
+    onBattery: () => powerMonitor.onBatteryPower,
   });
+  powerMonitor.on("on-ac", applyKeepAwake);
+  powerMonitor.on("on-battery", applyKeepAwake);
   setTimeout(() => void phoneLink?.start(), Number(process.env.CONVERSATIONS_PHONE_LINK_DELAY_MS) || 20_000).unref();
   // A download may have brought a newly allowed (or removed) phone.
   scheduler.on("status", () => phoneLink?.refresh());

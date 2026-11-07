@@ -2,14 +2,14 @@
 // workspaces, and wait on the code until a PC says Allow.
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../renderer/components/Icon";
-import { findWorkspaces, savedToken, signOut, startDeviceFlow, waitForToken, whoAmI, type DeviceCode } from "./github";
+import { findAllWorkspaces, savedToken, signOut, startDeviceFlow, waitForToken, whoAmI, type DeviceCode } from "./github";
 import type { PhoneState, WorkspaceLink } from "./session";
 
 type Found = WorkspaceLink & { repo: string };
 
 const LINK_KEY = "conversations.phone.workspace";
 
-const GITHUB_MARK = (
+export const GITHUB_MARK = (
   <svg className="gh-mark" width="20" height="20" viewBox="0 0 24 24" aria-hidden>
     <path
       fill="currentColor"
@@ -64,7 +64,7 @@ export function Setup({ workspace, state, onWorkspace }: { workspace: WorkspaceL
     (async () => {
       try {
         setLogin(await whoAmI(token));
-        const ws = await findWorkspaces(token);
+        const ws = await findAllWorkspaces();
         if (gone) return;
         setFound(ws);
         // Refreshed from GitHub every start: a new PC's key, or a moved relay.

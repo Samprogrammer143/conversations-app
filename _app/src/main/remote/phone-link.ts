@@ -101,7 +101,17 @@ interface Options {
   /** The relay's address when this workspace has none yet (a first PC): settings, else the built-in one. */
   relayUrl(): string | null;
   onStatus?(s: PhoneLinkStatus): void;
+  /** "Keep this PC awake for my phone" (Figma M12, D2): on or off, kept by the phone link. */
+  onKeepAwake?(on: boolean): void;
+  /** Whether this PC runs on its battery now (keeping awake only counts when plugged in). */
+  onBattery?(): boolean;
 }
+
+/** This PC's own phone-link settings (not the repository's: each PC decides for itself). */
+interface LinkSettings {
+  keepAwake: boolean;
+}
+const settingsPath = () => path.join(appDataDir(), "phone-link-settings.json");
 
 function readJson<T>(p: string): T | null {
   try {
@@ -195,6 +205,7 @@ export class PhoneLink {
   /** One pairing (the check on GitHub and "Allow this phone?") at a time. */
   private dialogOpen = false;
   private trust = loadTrust();
+  private settings: LinkSettings = { keepAwake: false, ...(readJson<LinkSettings>(settingsPath()) ?? {}) };
   /** Phones allowed in the repository (by any PC); `phones` holds only those this PC trusts too. */
   private allowedAnywhere = new Map<string, PhoneRecord>();
   /** When GitHub was last asked for requests (at most every 15 s), and phones it had none for. */
@@ -261,7 +272,19 @@ export class PhoneLink {
     this.emit();
   }
 
+  /** Whether to keep this PC awake for phones (applied by main.ts while plugged in). */
+  keepAwake(): boolean {
+    return this.settings.keepAwake;
+  }
+
+  private setKeepAwake(on: boolean) {
+    this.settings = { ...this.settings, keepAwake: on };
+    fs.writeFileSync(settingsPath(), JSON.stringify(this.settings, null, 2));
+    this.o.onKeepAwake?.(on);
+  }
+
   async start() {
+    this.o.onKeepAwake?.(this.settings.keepAwake);
     try {
       this.me = await identity();
       const pc = thisPc();
@@ -355,6 +378,28 @@ export class PhoneLink {
     } else if (m.k === "bye") {
       this.listening.delete(from);
       this.sessions.delete(from);
+    } else if (m.k === "pc" && typeof m.id === "string" && this.sessions.has(from) && (m as { s?: unknown }).s === this.sessions.get(from)) {
+      // The phone's settings for this PC (M12): keep awake, and taking the phone off.
+      const op = (m as { op?: unknown }).op;
+      const reply = (r: { ok: boolean; value?: unknown; err?: string }) => link.send(from, { k: "ret", id: m.id, ...r });
+      if (op === "status") return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake, onBattery: this.o.onBattery?.() ?? false } });
+      if (op === "keep-awake") {
+        this.setKeepAwake((m as { on?: unknown }).on === true);
+        return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake } });
+      }
+      if (op === "forget-me") {
+        // The phone took itself off: gone from the repository and from this PC's trusted list (it may ask again).
+        const p = this.phones.get(from);
+        this.trust = { trusted: this.trust.trusted.filter((x) => x !== from), removed: this.trust.removed };
+        saveTrust(this.trust);
+        this.listening.delete(from);
+        this.sessions.delete(from);
+        await reply({ ok: true });
+        if (p) await writeDevices([{ path: `phones/${from}.json`, value: null }], `Devices: ${p.name} took itself off`);
+        this.refresh();
+        return;
+      }
+      return void reply({ ok: false, err: "unknown" });
     } else if (m.k === "call" && typeof m.id === "string" && typeof m.ch === "string") {
       const reply = (r: { ok: boolean; value?: unknown; err?: string }) => link.send(from, { k: "ret", id: m.id, ...r });
       if (!this.sessions.has(from) || (m as { s?: unknown }).s !== this.sessions.get(from)) return void reply({ ok: false, err: "stale-session" });

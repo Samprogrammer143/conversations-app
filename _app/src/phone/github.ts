@@ -23,8 +23,47 @@ export function savedToken(): string | null {
   return localStorage.getItem(STORE);
 }
 
-export function signOut() {
-  localStorage.removeItem(STORE);
+/** Every GitHub account signed in here: the first, then others added for workspaces under another account (M11). */
+export function allTokens(): string[] {
+  let more: string[] = [];
+  try {
+    more = JSON.parse(localStorage.getItem(`${STORE}.more`) ?? "[]");
+  } catch {}
+  const first = savedToken();
+  return [...(first ? [first] : []), ...more.filter((t) => typeof t === "string" && t !== first)];
+}
+
+function keepToken(token: string) {
+  if (!savedToken()) return localStorage.setItem(STORE, token);
+  const more = allTokens().slice(1);
+  if (!more.includes(token) && token !== savedToken()) localStorage.setItem(`${STORE}.more`, JSON.stringify([...more, token]));
+}
+
+export function signOut(token?: string) {
+  if (!token || token === savedToken()) localStorage.removeItem(STORE);
+  if (token) localStorage.setItem(`${STORE}.more`, JSON.stringify(allTokens().filter((t) => t !== token && t !== savedToken())));
+}
+
+/** The workspaces found last time, on every account (for the switcher). */
+export function savedWorkspaces(): FoundWorkspace[] {
+  try {
+    return JSON.parse(localStorage.getItem("conversations.phone.workspaces") ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+export type FoundWorkspace = WorkspaceLink & { repo: string; token?: string; login?: string };
+
+/** Looks for workspaces on every signed-in account; remembers what it found. */
+export async function findAllWorkspaces(): Promise<FoundWorkspace[]> {
+  const out: FoundWorkspace[] = [];
+  for (const token of allTokens()) {
+    const login = await whoAmI(token).catch(() => "");
+    for (const w of await findWorkspaces(token)) if (!out.some((x) => x.room === w.room)) out.push({ ...w, token, login });
+  }
+  localStorage.setItem("conversations.phone.workspaces", JSON.stringify(out));
+  return out;
 }
 
 export async function startDeviceFlow(): Promise<DeviceCode> {
@@ -52,7 +91,7 @@ export async function waitForToken(code: DeviceCode, cancelled: () => boolean): 
     });
     const j = (await r.json()) as { access_token?: string; error?: string; interval?: number };
     if (j.access_token) {
-      localStorage.setItem(STORE, j.access_token);
+      keepToken(j.access_token);
       return j.access_token;
     }
     if (j.error === "slow_down") interval = (j.interval ?? interval / 1000 + 5) * 1000;

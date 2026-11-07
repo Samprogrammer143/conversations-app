@@ -138,6 +138,39 @@ try {
     check("a chat opens with its messages", items > 0, `${items} items`);
   }
 
+  // The list's own buttons (M3): search, settings (M12), the workspace switcher (M11).
+  await phone.locator(".detail-toolbar button[aria-label^='Back']").click().catch(() => {});
+  await phone.waitForTimeout(500);
+  await phone.click("button[aria-label=Search]");
+  await phone.fill(".phone-search input", "colour");
+  const hits = await until(() => phone.evaluate(() => document.querySelectorAll(".search-hit").length), 15_000);
+  await phone.screenshot({ path: path.join(out, "phone-search.png") });
+  check("search finds chats on the PC", hits > 0, `${hits} hits`);
+  await phone.click(".phone-search button[aria-label=Back]");
+
+  await phone.click("button[aria-label=Settings]");
+  const awakeRow = await until(() => phone.evaluate(() => document.querySelector(".phone-settings button[role=switch][aria-label^='Keep']:not([disabled])") ? true : null), 15_000);
+  await phone.screenshot({ path: path.join(out, "phone-settings.png") });
+  check("settings show the PC's keep-awake switch", !!awakeRow);
+  await phone.click(".phone-settings button[role=switch][aria-label^='Keep']");
+  const awake = await until(async () => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(sandboxEnv.CONVERSATIONS_DATA_DIR, "phone-link-settings.json"), "utf8")).keepAwake === true;
+    } catch {
+      return false;
+    }
+  }, 10_000);
+  check("…and switching it on keeps the PC awake", awake);
+  await phone.click(".phone-settings button[role=switch][aria-label^='Keep']");
+  await phone.waitForTimeout(1500);
+  await phone.click(".phone-settings button[aria-label=Back]");
+
+  await phone.click("button[aria-label=Workspaces]");
+  const wsRows = await until(() => phone.evaluate(() => document.querySelectorAll(".phone-sheet .sheet-row").length), 10_000);
+  await phone.screenshot({ path: path.join(out, "phone-workspaces.png") });
+  check("the workspace switcher lists the workspace and Sign in with another account", wsRows >= 2, `${wsRows} rows`);
+  await phone.mouse.click(200, 60);
+
   // Ask the PC something it mustn't do for a phone.
   const refused = await phone.evaluate(() => window.conversations.workspace.switch("main").then(() => "done", (e) => e.message));
   check("what only makes sense at the PC is refused", /can't be used from a phone/.test(refused), refused);

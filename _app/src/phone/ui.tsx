@@ -1,22 +1,39 @@
 // The phone's own pieces inside the window (Figma: Mobile (for review) › M3, M4, M7).
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { Icon } from "../renderer/components/Icon";
 import type { ListHeaderProps } from "../renderer/lib/slots";
 import { usePhone } from "./state";
 
+// Loaded when first opened: they use the window's store, which reads window.conversations as it loads.
+const WorkspaceSheet = lazy(() => import("./screens").then((m) => ({ default: m.WorkspaceSheet })));
+const PhoneSearch = lazy(() => import("./screens").then((m) => ({ default: m.PhoneSearch })));
+const PhoneSettings = lazy(() => import("./screens").then((m) => ({ default: m.PhoneSettings })));
+
 const pcIcon = (name: string) => (/laptop|macbook/i.test(name) ? "laptop" : "monitor");
 
-/** M3: the workspace, a chip per PC (on or off), and New chat. */
+/** M3: the workspace (M11), search, settings (M12), a chip per PC (on or off), and New chat. */
 export function PhoneListHeader({ onNewChat }: ListHeaderProps) {
   const { session, state } = usePhone();
+  const [open, setOpen] = useState<"workspaces" | "search" | "settings" | null>(null);
   return (
     <div className="phone-list-header">
       <div className="phone-appbar">
-        <button className="ws-switch" onClick={() => window.dispatchEvent(new Event("app:toggle-sidebar"))} aria-label="Workspaces and projects">
+        <button className="ws-switch" onClick={() => setOpen("workspaces")} aria-label="Workspaces" aria-haspopup="dialog">
           <span>{session?.ws.name ?? "Conversations"}</span>
           <Icon name="chevron-down" size={20} />
         </button>
+        <button className="icon-48" onClick={() => setOpen("search")} aria-label="Search">
+          <Icon name="search" size={22} />
+        </button>
+        <button className="icon-48" onClick={() => setOpen("settings")} aria-label="Settings">
+          <Icon name="settings" size={22} />
+        </button>
       </div>
+      <Suspense fallback={null}>
+        {open === "workspaces" && <WorkspaceSheet onClose={() => setOpen(null)} />}
+        {open === "search" && <PhoneSearch onClose={() => setOpen(null)} />}
+        {open === "settings" && <PhoneSettings onClose={() => setOpen(null)} />}
+      </Suspense>
       <div className="pc-strip" role="list" aria-label="Your PCs">
         {state?.pcs.map((p) => (
           <span key={p.device} role="listitem" className={`pc-chip${p.online ? " on" : ""}`} title={p.online ? `${p.name} is on` : `${p.name} is off`}>
@@ -75,7 +92,7 @@ export function SendsTo() {
                 <Icon name={pcIcon(p.name)} size={22} />
                 <span className="text">
                   <span className="name">{p.name}</span>
-                  <span className="detail">
+                  <span className="row-sub">
                     <span className={`dot${p.online ? " on" : ""}`} />
                     {p.online ? "On" : "Off"}
                   </span>

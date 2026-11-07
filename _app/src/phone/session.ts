@@ -19,8 +19,8 @@ export interface PhoneState {
   link: LinkState;
   pairing: Pairing;
   code: string;
-  /** PCs of the workspace, with whether each is on (in the room now). */
-  pcs: { device: string; name: string; online: boolean }[];
+  /** PCs of the workspace, with whether each is on (in the room now) and has let this phone in. */
+  pcs: { device: string; name: string; online: boolean; allowed: boolean }[];
   /** The PC requests go to. */
   current: string | null;
   error: string | null;
@@ -60,6 +60,8 @@ export class PhoneSession {
 
   /** Each PC's session (from its "welcome"), sent with every call to it. */
   private sessions = new Map<string, string>();
+  /** PCs that said this phone is allowed (each PC asks once). */
+  private allowedBy = new Set<string>();
   private asked = false;
   private retryAsk: ReturnType<typeof setTimeout> | null = null;
   private retries = 0;
@@ -77,7 +79,7 @@ export class PhoneSession {
     this.me = await phoneIdentity();
     const code = await pairingCode(this.me.publicKey, this.ws.room);
     const allowed = localStorage.getItem(`${STORE}allowed.${this.ws.room}`) === "1";
-    this.set({ code, pairing: allowed ? "allowed" : "unknown", pcs: this.ws.pcs.map((p) => ({ device: p.device, name: p.name, online: false })) });
+    this.set({ code, pairing: allowed ? "allowed" : "unknown", pcs: this.ws.pcs.map((p) => ({ device: p.device, name: p.name, online: false, allowed: false })) });
     this.link = new RelayLink({
       url: this.ws.url,
       room: this.ws.room,
@@ -89,9 +91,10 @@ export class PhoneSession {
       onPeers: (peers) => {
         const was = new Set(this.peers.map((p) => p.device));
         this.peers = peers;
-        for (const d of this.welcomed) if (!peers.some((p) => p.device === d)) {
+        for (const d of [...this.allowedBy]) if (!peers.some((p) => p.device === d)) {
           this.welcomed.delete(d);
           this.sessions.delete(d);
+          this.allowedBy.delete(d);
         }
         this.refreshPcs();
         // A PC that just came on: ask it (it answers at once when this phone is already allowed).
@@ -119,14 +122,17 @@ export class PhoneSession {
 
   private refreshPcs() {
     const on = new Set(this.peers.filter((p) => p.kind === "pc").map((p) => p.device));
-    const pcs = this.ws.pcs.map((p) => ({ device: p.device, name: p.name, online: on.has(p.device) }));
+    const pcs = this.ws.pcs.map((p) => ({ device: p.device, name: p.name, online: on.has(p.device), allowed: this.allowedBy.has(p.device) }));
+    // Requests go to a PC that's on and has let this phone in: the one picked last, else the first.
+    const usable = (d: string | null) => !!d && on.has(d) && this.allowedBy.has(d);
     let current = this.state.current;
-    if (!current || !on.has(current)) {
+    if (!usable(current)) {
       const last = localStorage.getItem(`${STORE}pc.${this.ws.room}`);
-      current = (last && on.has(last) ? last : pcs.find((p) => p.online)?.device) ?? null;
+      current = usable(last) ? last : (pcs.find((p) => p.online && p.allowed)?.device ?? null);
     }
     this.set({ pcs, current });
-    if (current && this.state.pairing === "allowed" && !this.welcomed.has(current)) void this.hello(current);
+    // Every PC that let it in hears from it (settings for each PC; events only count from the current one).
+    for (const d of this.allowedBy) if (on.has(d) && !this.welcomed.has(d)) void this.hello(d);
   }
 
   /** Asks a PC to allow this phone (or, when it already has, to say so). */
@@ -182,6 +188,7 @@ export class PhoneSession {
     if (m.k === "pair-result") {
       if (m.ok) {
         localStorage.setItem(`${STORE}allowed.${this.ws.room}`, "1");
+        this.allowedBy.add(from);
         this.set({ pairing: "allowed", error: null });
         this.refreshPcs();
       } else if ((m as { pending?: boolean }).pending) this.askAgainSoon();
@@ -228,6 +235,30 @@ export class PhoneSession {
         reject(new Error("Not connected"));
       });
     });
+  }
+
+  /** One PC's own phone settings (M12): "status", "keep-awake", "forget-me". */
+  pcCall(device: string, op: string, extra: Record<string, unknown> = {}): Promise<unknown> {
+    const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.calls.delete(id);
+        reject(new Error("The PC didn't answer"));
+      }, 10_000);
+      this.calls.set(id, { resolve, reject, timer });
+      void this.link?.send(device, { k: "pc", id, op, s: this.sessions.get(device), ...extra }).then((ok) => {
+        if (ok) return;
+        this.calls.delete(id);
+        clearTimeout(timer);
+        reject(new Error("Not connected"));
+      });
+    });
+  }
+
+  /** Takes this phone off every PC that's on, and forgets its keys here. The PCs that are off drop it from GitHub too. */
+  async forgetMe(): Promise<void> {
+    for (const d of this.allowedBy) await this.pcCall(d, "forget-me").catch(() => undefined);
+    for (const k of Object.keys(localStorage)) if (k.startsWith(STORE)) localStorage.removeItem(k);
   }
 
   on(event: string, cb: (p: unknown) => void): () => void {

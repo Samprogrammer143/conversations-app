@@ -10,10 +10,11 @@ import "../renderer/styles/detail.css";
 import "../renderer/styles/overlays.css";
 import "./phone.css";
 import "./phone-app.css";
+import "./phone-screens.css";
 import { makeApi } from "../shared/make-api";
 import { PhoneSession, type PhoneState, type WorkspaceLink } from "./session";
 import { Setup } from "./Setup";
-import { setSession } from "./state";
+import { control, setSession } from "./state";
 import { savedToken, writeRequest } from "./github";
 import { PhoneListHeader, SendsTo } from "./ui";
 import { slots } from "../renderer/lib/slots";
@@ -22,6 +23,12 @@ slots.listHeader = PhoneListHeader;
 slots.composerTarget = SendsTo;
 
 let session: PhoneSession | null = null;
+
+// Another workspace (M11): remembered, then the app starts again in it (a fresh window, list and index).
+control.switchTo = (w) => {
+  localStorage.setItem("conversations.phone.workspace", JSON.stringify(w));
+  location.reload();
+};
 
 /** Requests the phone answers itself: there's no PC folder, file picker or window here. */
 const LOCAL: Record<string, (...args: any[]) => unknown> = {
@@ -79,7 +86,8 @@ function Root() {
   useEffect(() => {
     if (!ws) return;
     const s = new PhoneSession(ws, async (req) => {
-      const token = savedToken();
+      // The account that found this workspace (another one may have been added for YCS).
+      const token = (ws as WorkspaceLink & { token?: string }).token ?? savedToken();
       const repo = (ws as WorkspaceLink & { repo?: string }).repo;
       // (A workspace handed over without GitHub, in development: its request is written by whoever handed it over.)
       if (token && repo && !repo.startsWith("sandbox/")) await writeRequest(token, repo, req);

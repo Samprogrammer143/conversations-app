@@ -1,7 +1,7 @@
 // The phone's session, for the phone's own pieces inside the window (the PC strip, the
-// "Sends to" chip): one at a time, set by main.tsx.
+// "Sends to" chip, the switcher and settings): one at a time, set by main.tsx.
 import { useSyncExternalStore } from "react";
-import type { PhoneSession, PhoneState } from "./session";
+import type { PhoneSession, PhoneState, WorkspaceLink } from "./session";
 
 let current: PhoneSession | null = null;
 const listeners = new Set<() => void>();
@@ -28,3 +28,9 @@ export function usePhone(): { session: PhoneSession | null; state: PhoneState | 
   );
   return { session: current, state };
 }
+
+/** Switching workspace (M11) and starting over after "Remove this phone" (M12): set by main.tsx. */
+export const control: { switchTo(w: WorkspaceLink): void; restart(): void } = {
+  switchTo: () => {},
+  restart: () => location.reload(),
+};

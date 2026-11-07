@@ -255,7 +255,7 @@ body[data-platform="android"] .composer-controls .chip {
 .sheet-row:disabled .name {
   color: var(--label-tertiary);
 }
-.sheet-row .detail {
+.sheet-row .row-sub {
   display: flex;
   align-items: center;
   gap: 6px;
