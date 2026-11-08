@@ -111,15 +111,23 @@ function useChatStatus(id: string | null): [ChatStatus | null, boolean] {
     setStatus(null);
     setLoaded(false);
     if (!id) return;
-    void api.chat.status(id).then((s) => {
-      setStatus(s);
-      setLoaded(true);
-    });
-    return api.on("chat-status", (s) => {
+    const read = () =>
+      void api.chat.status(id).then((s) => {
+        setStatus(s);
+        setLoaded(true);
+      });
+    read();
+    // The phone after a gap in its connection (live updates may have been missed): read again.
+    window.addEventListener("app:resync-chat", read);
+    const off = api.on("chat-status", (s) => {
       if (s.conversationId !== id) return;
       setStatus(s);
       setLoaded(true);
     });
+    return () => {
+      window.removeEventListener("app:resync-chat", read);
+      off();
+    };
   }, [id]);
   return [status, loaded];
 }

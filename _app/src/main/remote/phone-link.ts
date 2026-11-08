@@ -425,7 +425,10 @@ export class PhoneLink {
     if (this.trust.removed.includes(from)) return void link.send(from, { k: "pair-result", ok: false, err: "Removed on this PC" }, { theirKey: key });
     let pending = this.asking.get(from);
     if (!pending) {
-      if (this.dialogOpen) return void link.send(from, { k: "pair-result", ok: false, pending: true, err: "busy" }, { theirKey: key });
+      if (this.dialogOpen) {
+        log(`a phone asked to be allowed while another is being asked about; it asks again shortly`);
+        return void link.send(from, { k: "pair-result", ok: false, pending: true, err: "busy" }, { theirKey: key });
+      }
       this.dialogOpen = true;
       pending = (async () => {
         try {

@@ -241,6 +241,20 @@ try {
   await phone.screenshot({ path: path.join(out, "phone-menu.png") });
   await phone.keyboard.press("Escape");
 
+  // Back to the front after being away: the phone greets the PC again and the open chat reads its status afresh.
+  await phone.locator(".row").first().click();
+  await phone.waitForTimeout(1500);
+  const caughtUp = await phone.evaluate(
+    () =>
+      new Promise((resolve) => {
+        window.addEventListener("app:resync-chat", () => resolve(true), { once: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+        setTimeout(() => resolve(false), 8000);
+      }),
+  );
+  check("coming back to the front, the open chat catches up", caughtUp === true);
+  await phone.click(".detail-toolbar.with-back button").catch(() => {});
+
   // Closing the app and opening it again: back in, by itself.
   await phone.reload();
   const again = await until(() => phone.evaluate(() => document.querySelectorAll(".row").length || null), 45_000);

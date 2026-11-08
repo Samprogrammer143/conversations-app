@@ -113,6 +113,23 @@ export class PhoneSession {
     this.link?.nudge();
   }
 
+  /**
+   * Says hello to the current PC again: it may have dropped this phone from its listeners while the
+   * phone was in the background (and live updates with it). Its welcome makes the window catch up.
+   */
+  rehello() {
+    const pc = this.state.current;
+    if (!pc || !this.allowedBy.has(pc)) return;
+    this.welcomed.delete(pc);
+    void this.hello(pc);
+  }
+
+  private catchUp: (() => void)[] = [];
+  /** Called after the current PC welcomes this phone again (after a gap): the window reads what it missed. */
+  onCatchUp(cb: () => void) {
+    this.catchUp.push(cb);
+  }
+
   /** Whether requests can go now: a PC that's on, has let this phone in and said hello back. */
   ready(): boolean {
     const pc = this.state.current;
@@ -238,7 +255,10 @@ export class PhoneSession {
         if (from === this.state.current) {
           for (const w of this.readyWaiters.splice(0)) w();
           // Back after a drop (or the PC restarted): the window catches up on what it missed.
-          if (again) for (const cb of this.listeners.get("index-changed") ?? []) cb([]);
+          if (again) {
+            for (const cb of this.listeners.get("index-changed") ?? []) cb([]);
+            for (const cb of this.catchUp) cb();
+          }
         }
         this.set({});
       }

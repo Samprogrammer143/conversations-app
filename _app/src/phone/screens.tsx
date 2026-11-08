@@ -289,22 +289,20 @@ function AddAccountSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (
           <div className="add-card">
             <div className="title">
               <Icon name="triangle-alert" size={18} />
-              <span>{orgs.length ? `${orgs.join(", ")} ${orgs.length === 1 ? "hasn't" : "haven't"} allowed Conversations yet` : `No workspace on ${login || "that account"} yet`}</span>
+              <span>{orgs.length ? `${orgs.join(", ")} ${orgs.length === 1 ? "hasn't" : "haven't"} allowed Conversations yet` : `Nothing found on ${login || "that account"} yet`}</span>
             </div>
             <p>
               {orgs.length
                 ? "GitHub hides an organisation's repositories from an app until the organisation allows it. Its owner can do it in a minute on GitHub."
-                : "None of its chat repositories has the phone link. Open the workspace in Conversations on a PC for a minute, then look again."}
+                : "If the workspace belongs to an organisation (YCS is under yacht-cloud), GitHub hides it, and the organisation itself, until the organisation allows Conversations. On GitHub, press Grant (or Request) next to the organisation."}
             </p>
           </div>
           <div className="sheet-actions">
-            {orgs.length > 0 && (
-              <button className="big-button" onClick={() => window.open(ORG_ACCESS_URL, "_blank")}>
-                Allow it on GitHub
-              </button>
-            )}
+            <button className="big-button" onClick={() => window.open(ORG_ACCESS_URL, "_blank")}>
+              Allow it on GitHub
+            </button>
             <button className="text-button" onClick={() => token.current && void look(token.current, login)}>
-              {orgs.length ? "I've allowed it: look again" : "Look again"}
+              I've allowed it: look again
             </button>
           </div>
         </>

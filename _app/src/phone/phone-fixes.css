@@ -380,3 +380,8 @@ body[data-platform="android"] .content.stacked {
   max-height: 55vh;
   overflow-y: auto;
 }
+
+.sheet-list .sheet-row {
+  width: 100%;
+  box-sizing: border-box;
+}

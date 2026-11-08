@@ -124,7 +124,10 @@ void Android.addListener("backButton", () => {
 
 // Back in front, or the network came back: reconnect now (Android pauses a hidden app's network).
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") session?.nudge();
+  if (document.visibilityState !== "visible") return;
+  session?.nudge();
+  // Said hello again (the PC may have stopped sending while the phone was away), then caught up.
+  setTimeout(() => session?.rehello(), 600);
 });
 window.addEventListener("online", () => session?.nudge());
 
@@ -154,6 +157,8 @@ function Root() {
     });
     session = s;
     setSession(s);
+    // After a gap: the open chat's status and messages are read again (stuck "Thinking", a sent message still in the box).
+    s.onCatchUp(() => window.dispatchEvent(new Event("app:resync-chat")));
     for (const a of pendingListeners.splice(0)) a();
     const off = s.onState(setState);
     void s.start();
