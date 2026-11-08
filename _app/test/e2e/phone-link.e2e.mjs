@@ -51,7 +51,7 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((r) => server.listen(5298, "127.0.0.1", r));
 
-const app = await electron.launch({ args: [root], cwd: root, env: launchEnv({ CONVERSATIONS_RELAY_URL: relay, CONVERSATIONS_PHONE_LINK_DELAY_MS: "1500" }), colorScheme: "light", timeout: 60_000 });
+const app = await electron.launch({ args: [root], cwd: root, env: launchEnv({ CONVERSATIONS_RELAY_URL: relay, CONVERSATIONS_PHONE_LINK_DELAY_MS: "1500", CONVERSATIONS_FAKE_POWER: "1" }), colorScheme: "light", timeout: 60_000 });
 let browser;
 try {
   const win = await app.firstWindow();
@@ -163,6 +163,18 @@ try {
   check("…and switching it on keeps the PC awake", awake);
   await phone.click(".phone-settings button[role=switch][aria-label^='Keep']");
   await phone.waitForTimeout(1500);
+  // A PC's sheet (M12a): Shut down asks first (M12b), then the PC is asked (pretend shutdown in tests).
+  await phone.locator(".phone-settings .settings-row.tappable").first().click();
+  await until(() => phone.evaluate(() => !!document.querySelector(".phone-sheet .sheet-row.danger") || null), 10_000);
+  await phone.screenshot({ path: path.join(out, "phone-pc-sheet.png") });
+  await phone.locator(".phone-sheet .sheet-row.danger").click();
+  const confirmTitle = await until(() => phone.evaluate(() => document.querySelector(".phone-sheet h2")?.textContent?.startsWith("Shut down") ? document.querySelector(".phone-sheet h2").textContent : null), 5_000);
+  await phone.screenshot({ path: path.join(out, "phone-pc-confirm.png") });
+  check("Shut down asks first", !!confirmTitle, confirmTitle ?? "");
+  await phone.locator(".phone-sheet .big-button.danger").click();
+  const powered = await until(() => fs.readFileSync(path.join(sandboxEnv.CONVERSATIONS_DATA_DIR, "app.log"), "utf8").split(/\r?\n/).slice(-20).some((l) => l.includes("(test) would shut down")), 15_000);
+  check("…and then the PC is asked to shut down", !!powered);
+  await phone.waitForTimeout(2200);
   await phone.click(".phone-settings button[aria-label=Back]");
 
   await phone.click("button[aria-label=Workspaces]");

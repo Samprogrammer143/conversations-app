@@ -6906,7 +6906,15 @@ var PhoneLink = class {
     } else if (m.k === "pc" && typeof m.id === "string" && this.sessions.has(from) && m.s === this.sessions.get(from)) {
       const op = m.op;
       const reply = (r) => link.send(from, { k: "ret", id: m.id, ...r });
-      if (op === "status") return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake, onBattery: this.o.onBattery?.() ?? false } });
+      if (op === "status") return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake, onBattery: this.o.onBattery?.() ?? false, running: this.o.runningChats?.() ?? [] } });
+      if (op === "power") {
+        const action = m.action;
+        if (action !== "sleep" && action !== "shutdown" || !this.o.power) return void reply({ ok: false, err: "This PC can't do that" });
+        log2(`the phone asked this PC to ${action === "sleep" ? "sleep" : "shut down"}`);
+        await reply({ ok: true });
+        setTimeout(() => void this.o.power(action), 1500);
+        return;
+      }
       if (op === "keep-awake") {
         this.setKeepAwake(m.on === true);
         return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake } });
@@ -7466,6 +7474,20 @@ function handle(channel, fn) {
   ipcMain.handle(channel, (_e, ...args) => fn(...args));
 }
 var phoneLink = null;
+function powerAction(action) {
+  if (process.env.CONVERSATIONS_FAKE_POWER === "1") {
+    log("phone", `(test) would ${action === "sleep" ? "sleep" : "shut down"} now`);
+    return Promise.resolve({ ok: true });
+  }
+  const run3 = (cmd, args) => new Promise((resolve) => {
+    execFile3(cmd, args, { windowsHide: true }, (e) => resolve(e ? { ok: false, err: e.message } : { ok: true }));
+  });
+  if (process.platform === "win32") {
+    return action === "shutdown" ? run3("shutdown.exe", ["/s", "/t", "0"]) : run3("rundll32.exe", ["powrprof.dll,SetSuspendState", "0,1,0"]);
+  }
+  if (process.platform === "darwin") return action === "shutdown" ? run3("osascript", ["-e", 'tell application "System Events" to shut down']) : run3("pmset", ["sleepnow"]);
+  return action === "shutdown" ? run3("systemctl", ["poweroff"]) : run3("systemctl", ["suspend"]);
+}
 var awakeBlocker = null;
 function applyKeepAwake() {
   const want = !!phoneLink?.keepAwake() && !powerMonitor.onBatteryPower;
@@ -8160,7 +8182,12 @@ void app4.whenReady().then(async () => {
     askAllow: askAllowPhone,
     relayUrl: () => process.env.CONVERSATIONS_RELAY_URL || DEFAULT_RELAY_URL || null,
     onKeepAwake: () => applyKeepAwake(),
-    onBattery: () => powerMonitor.onBatteryPower
+    onBattery: () => powerMonitor.onBatteryPower,
+    runningChats: () => [...chat.runningIds()].map((id) => {
+      const row = index.ready ? index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(id) : void 0;
+      return row?.title ?? "A chat";
+    }),
+    power: (action) => powerAction(action)
   });
   powerMonitor.on("on-ac", applyKeepAwake);
   powerMonitor.on("on-battery", applyKeepAwake);

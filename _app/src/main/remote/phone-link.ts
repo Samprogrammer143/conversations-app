@@ -106,6 +106,10 @@ interface Options {
   onKeepAwake?(on: boolean): void;
   /** Whether this PC runs on its battery now (keeping awake only counts when plugged in). */
   onBattery?(): boolean;
+  /** The chats Claude is working in on this PC now (their titles), for the phone's warning. */
+  runningChats?(): string[];
+  /** Sleep or shut down this PC (Figma M12a/b); resolves once it has been asked of the system. */
+  power?(action: "sleep" | "shutdown"): Promise<{ ok: boolean; err?: string }>;
 }
 
 /** This PC's own phone-link settings (not the repository's: each PC decides for itself). */
@@ -383,7 +387,16 @@ export class PhoneLink {
       // The phone's settings for this PC (M12): keep awake, and taking the phone off.
       const op = (m as { op?: unknown }).op;
       const reply = (r: { ok: boolean; value?: unknown; err?: string }) => link.send(from, { k: "ret", id: m.id, ...r });
-      if (op === "status") return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake, onBattery: this.o.onBattery?.() ?? false } });
+      if (op === "status") return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake, onBattery: this.o.onBattery?.() ?? false, running: this.o.runningChats?.() ?? [] } });
+      if (op === "power") {
+        const action = (m as { action?: unknown }).action;
+        if ((action !== "sleep" && action !== "shutdown") || !this.o.power) return void reply({ ok: false, err: "This PC can't do that" });
+        log(`the phone asked this PC to ${action === "sleep" ? "sleep" : "shut down"}`);
+        // Answered first: once the PC sleeps or shuts down, nothing more goes out.
+        await reply({ ok: true });
+        setTimeout(() => void this.o.power!(action), 1500);
+        return;
+      }
       if (op === "keep-awake") {
         this.setKeepAwake((m as { on?: unknown }).on === true);
         return void reply({ ok: true, value: { keepAwake: this.settings.keepAwake } });

@@ -414,6 +414,102 @@ export function PhoneSearch({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** What a PC tells the phone about itself (settings, M12a). */
+interface PcStatus {
+  keepAwake: boolean;
+  onBattery: boolean;
+  /** Titles of the chats Claude is working in there now. */
+  running?: string[];
+}
+
+/** M12a: one PC's sheet (keep awake, Sleep, Shut down); M12b: confirming Shut down (and Sleep while Claude works). */
+function PcSheet({ name, status, onClose, onKeepAwake, onPower }: { name: string; status: PcStatus; onClose: () => void; onKeepAwake: (v: boolean) => void; onPower: (a: "sleep" | "shutdown") => Promise<unknown> }) {
+  const [confirm, setConfirm] = useState<"sleep" | "shutdown" | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const running = status.running ?? [];
+  const icon = /laptop|macbook/i.test(name) ? "laptop" : "monitor";
+  const go = async (action: "sleep" | "shutdown") => {
+    setErr(null);
+    try {
+      await onPower(action);
+      setDone(action === "sleep" ? `${name} is going to sleep.` : `${name} is shutting down.`);
+      setTimeout(onClose, 1800);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+  if (done)
+    return (
+      <Sheet title={done} onClose={onClose}>
+        <p className="sheet-done">{"You can't switch it back on from your phone."}</p>
+      </Sheet>
+    );
+  if (confirm) {
+    const sleep = confirm === "sleep";
+    return (
+      <Sheet title={sleep ? `Put ${name} to sleep?` : `Shut down ${name}?`} onClose={() => setConfirm(null)}>
+        {running.length > 0 && (
+          <div className="add-card">
+            <div className="title">
+              <Icon name="triangle-alert" size={18} />
+              <span>
+                Claude is still working in {running.length} {running.length === 1 ? "chat" : "chats"}
+              </span>
+            </div>
+            <p>
+              {running.length === 1 ? `“${running[0]}”` : running.map((t) => `“${t}”`).join(", ")} {sleep ? "pauses where it is, and carries on when the PC wakes." : "stops where it is. You can carry it on once the PC is back on."}
+            </p>
+          </div>
+        )}
+        <p className="sheet-done">{sleep ? "You can't wake it from your phone." : "You can't switch it back on from your phone."}</p>
+        {err && <p className="sheet-error">{err}</p>}
+        <div className="sheet-actions">
+          <button className="big-button danger" onClick={() => void go(confirm)}>
+            {sleep ? "Sleep" : "Shut down"}
+          </button>
+          <button className="text-button" onClick={() => setConfirm(null)}>
+            Cancel
+          </button>
+        </div>
+      </Sheet>
+    );
+  }
+  return (
+    <Sheet title={name} onClose={onClose}>
+      <div className="pc-sheet-status">
+        <span className="dot on" />
+        {running.length ? `On · Claude is working in ${running.length} ${running.length === 1 ? "chat" : "chats"}` : "On"}
+      </div>
+      <div className="sheet-list">
+        <div className="sheet-row">
+          <Icon name={icon} size={22} />
+          <span className="text">
+            <span className="name">Keep awake for my phone</span>
+            <span className="row-sub">Only while plugged in</span>
+          </span>
+          <Toggle label="Keep awake for my phone" on={status.keepAwake} onChange={onKeepAwake} />
+        </div>
+        <button className="sheet-row" onClick={() => (running.length ? setConfirm("sleep") : void go("sleep"))}>
+          <Icon name="moon" size={22} />
+          <span className="text">
+            <span className="name">Sleep</span>
+            <span className="row-sub">Wakes at the PC in seconds, everything as it was</span>
+          </span>
+        </button>
+        <button className="sheet-row danger" onClick={() => setConfirm("shutdown")}>
+          <Icon name="power" size={22} />
+          <span className="text">
+            <span className="name">Shut down</span>
+            <span className="row-sub">Closes everything. Switch it back on at the PC.</span>
+          </span>
+        </button>
+      </div>
+      {err && <p className="sheet-error">{err}</p>}
+    </Sheet>
+  );
+}
+
 const NOTIFY = [
   ["finished", "A chat finishes"],
   ["question", "Claude asks a question"],
@@ -435,7 +531,9 @@ export function PhoneSettings({ onClose }: { onClose: () => void }) {
       return { finished: true, question: true, approval: true };
     }
   });
-  const [awake, setAwake] = useState<Record<string, { keepAwake: boolean; onBattery: boolean } | "error">>({});
+  const [awake, setAwake] = useState<Record<string, PcStatus | "error">>({});
+  /** The PC whose sheet is open (M12a). */
+  const [pcOpen, setPcOpen] = useState<string | null>(null);
   const [login, setLogin] = useState("");
   const [removing, setRemoving] = useState(false);
   const pcs = state?.pcs ?? [];
@@ -449,7 +547,7 @@ export function PhoneSettings({ onClose }: { onClose: () => void }) {
     for (const p of pcs) {
       if (!p.online || !p.allowed || awake[p.device]) continue;
       void session.pcCall(p.device, "status").then(
-        (v) => setAwake((a) => ({ ...a, [p.device]: v as { keepAwake: boolean; onBattery: boolean } })),
+        (v) => setAwake((a) => ({ ...a, [p.device]: v as PcStatus })),
         () => setAwake((a) => ({ ...a, [p.device]: "error" })),
       );
     }
@@ -491,7 +589,7 @@ export function PhoneSettings({ onClose }: { onClose: () => void }) {
               const known = st && st !== "error" ? st : null;
               const detail = !p.online ? "Off · switch it on from that PC" : !p.allowed ? "On · hasn't let this phone in yet" : st === "error" ? "On · didn't answer" : known ? (known.keepAwake ? (known.onBattery ? "On · on battery, so it may sleep" : "On · stays awake while plugged in") : "On · sleeps as usual") : "On";
               return (
-                <div key={p.device} className={`settings-row${p.online ? "" : " off"}`}>
+                <div key={p.device} className={`settings-row${p.online ? "" : " off"}${known ? " tappable" : ""}`} onClick={() => known && setPcOpen(p.device)} role={known ? "button" : undefined}>
                   <Icon name={pcIcon(p.name)} size={20} />
                   <span className="text">
                     <span className="name">{p.name}</span>
@@ -500,6 +598,7 @@ export function PhoneSettings({ onClose }: { onClose: () => void }) {
                       {detail}
                     </span>
                   </span>
+                  <span onClick={(e) => e.stopPropagation()} style={{ display: "contents" }}>
                   <Toggle
                     label={`Keep ${p.name} awake`}
                     on={!!known?.keepAwake}
@@ -512,6 +611,8 @@ export function PhoneSettings({ onClose }: { onClose: () => void }) {
                       );
                     }}
                   />
+                  </span>
+                  {known && <Icon name="chevron-right" size={18} />}
                 </div>
               );
             })}
@@ -546,6 +647,23 @@ export function PhoneSettings({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       </div>
+      {pcOpen && (() => {
+        const pc = pcs.find((x) => x.device === pcOpen);
+        const st = awake[pcOpen];
+        if (!pc || !st || st === "error") return null;
+        return (
+          <PcSheet
+            name={pc.name}
+            status={st}
+            onClose={() => setPcOpen(null)}
+            onKeepAwake={(v) => {
+              setAwake((a) => ({ ...a, [pc.device]: { ...st, keepAwake: v } }));
+              void session?.pcCall(pc.device, "keep-awake", { on: v }).catch(() => setAwake((a) => ({ ...a, [pc.device]: "error" })));
+            }}
+            onPower={(action) => session!.pcCall(pc.device, "power", { action })}
+          />
+        );
+      })()}
     </div>
   );
 }

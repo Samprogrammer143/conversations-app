@@ -385,3 +385,38 @@ body[data-platform="android"] .content.stacked {
   width: 100%;
   box-sizing: border-box;
 }
+
+/* A PC's sheet (Figma M12a/b). */
+.settings-row.tappable {
+  cursor: pointer;
+}
+.settings-row.tappable:active {
+  background: var(--fill-quaternary);
+}
+.pc-sheet-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 24px 6px;
+  font: 13px/18px var(--font-ui);
+  color: var(--label-secondary);
+}
+.pc-sheet-status .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--status-success-dot);
+}
+.sheet-row.danger,
+.sheet-row.danger .name {
+  color: var(--status-danger);
+}
+.big-button.danger {
+  background: var(--status-danger);
+  color: #fff;
+}
+.sheet-done {
+  margin: 12px 24px 0 !important;
+  font: 13px/18px var(--font-ui);
+  color: var(--label-secondary);
+}

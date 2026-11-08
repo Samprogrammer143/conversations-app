@@ -665,6 +665,25 @@ function handle(channel: string, fn: (...args: any[]) => unknown) {
 // The phone link (remote/phone-link.ts): off until there is a relay to use.
 let phoneLink: PhoneLink | null = null;
 
+/** Sleep or shut down, asked from the phone (Windows: rundll32 / shutdown; a Mac: pmset / System Events). */
+function powerAction(action: "sleep" | "shutdown"): Promise<{ ok: boolean; err?: string }> {
+  // Tests: only said, never done (the end-to-end test runs a real app on a real PC).
+  if (process.env.CONVERSATIONS_FAKE_POWER === "1") {
+    log("phone", `(test) would ${action === "sleep" ? "sleep" : "shut down"} now`);
+    return Promise.resolve({ ok: true });
+  }
+  const run = (cmd: string, args: string[]) =>
+    new Promise<{ ok: boolean; err?: string }>((resolve) => {
+      execFile(cmd, args, { windowsHide: true }, (e) => resolve(e ? { ok: false, err: e.message } : { ok: true }));
+    });
+  if (process.platform === "win32") {
+    // Shut down: Windows closes the apps (this one included) as it does from the Start menu.
+    return action === "shutdown" ? run("shutdown.exe", ["/s", "/t", "0"]) : run("rundll32.exe", ["powrprof.dll,SetSuspendState", "0,1,0"]);
+  }
+  if (process.platform === "darwin") return action === "shutdown" ? run("osascript", ["-e", 'tell application "System Events" to shut down']) : run("pmset", ["sleepnow"]);
+  return action === "shutdown" ? run("systemctl", ["poweroff"]) : run("systemctl", ["suspend"]);
+}
+
 // "Keep this PC awake for my phone": Windows doesn't sleep while it's on and the PC is plugged in
 // (a laptop on its battery still sleeps).
 let awakeBlocker: number | null = null;
@@ -1483,6 +1502,12 @@ void app.whenReady().then(async () => {
     relayUrl: () => process.env.CONVERSATIONS_RELAY_URL || DEFAULT_RELAY_URL || null,
     onKeepAwake: () => applyKeepAwake(),
     onBattery: () => powerMonitor.onBatteryPower,
+    runningChats: () =>
+      [...chat.runningIds()].map((id) => {
+        const row = index.ready ? (index.db.prepare("SELECT title FROM conversations WHERE id = ?").get(id) as { title?: string } | undefined) : undefined;
+        return row?.title ?? "A chat";
+      }),
+    power: (action) => powerAction(action),
   });
   powerMonitor.on("on-ac", applyKeepAwake);
   powerMonitor.on("on-battery", applyKeepAwake);
