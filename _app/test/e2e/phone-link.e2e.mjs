@@ -170,14 +170,28 @@ try {
   await phone.screenshot({ path: path.join(out, "phone-workspaces.png") });
   check("the workspace switcher lists the workspace and Sign in with another account", wsRows >= 2, `${wsRows} rows`);
   // Adding another GitHub account (M11a): its own sheet with the code (GitHub's replies stubbed here).
-  await phone.route("https://github.com/login/device/code", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ device_code: "d", user_code: "8DB1-A121", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }) }));
-  await phone.route("https://github.com/login/oauth/access_token", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ error: "authorization_pending" }) }));
+  let codeRequests = 0;
+  let polls = 0;
+  await phone.route("https://api.github.com/user", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ login: "ycs-test" }) }));
+  await phone.route("https://api.github.com/user/repos**", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: "[]" }));
+  await phone.route("https://api.github.com/user/orgs", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify([{ login: "yacht-cloud" }]) }));
+  await phone.route("https://github.com/login/device/code", (r) => (codeRequests++, r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ device_code: "d", user_code: "8DB1-A121", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }) })));
+  // Pending at first, then approved (as GitHub does once the code is entered).
+  await phone.route("https://github.com/login/oauth/access_token", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(++polls < 2 ? { error: "authorization_pending" } : { access_token: "gho_test" }) }));
   await phone.locator(".phone-sheet .sheet-row", { hasText: "Add another GitHub account" }).click();
   const codeShown = await until(() => phone.evaluate(() => /[0-9]/.test(document.querySelector(".add-code .device-code")?.textContent ?? "") ? document.querySelector(".add-code .device-code").textContent : null), 10_000);
   await phone.screenshot({ path: path.join(out, "phone-add-account.png") });
   check("adding an account shows the code in its own sheet", codeShown === "8DB1-A121", String(codeShown));
-  await phone.locator(".sheet-actions .text-button", { hasText: "Cancel" }).click();
-  await phone.mouse.click(200, 60);
+  // Coming back from GitHub: a reconnect redraws what's behind; the sign-in carries on with the same code.
+  await phone.evaluate(() => window.dispatchEvent(new Event("online")));
+  const outcome = await until(() => phone.evaluate(() => document.querySelector(".add-card .title")?.textContent || null), 30_000);
+  await phone.screenshot({ path: path.join(out, "phone-add-account-org.png") });
+  check("after GitHub says yes it carries on (one code), and names the organisation", codeRequests === 1 && /yacht-cloud hasn't allowed/.test(outcome ?? ""), `${codeRequests} code(s); ${outcome}`);
+  // Closed: the add-account sheet back to the switcher, then the switcher.
+  for (let i = 0; i < 3 && (await phone.locator(".phone-sheet-scrim").count()); i++) {
+    await phone.mouse.click(200, 60);
+    await phone.waitForTimeout(400);
+  }
 
   // Ask the PC something it mustn't do for a phone.
   const refused = await phone.evaluate(() => window.conversations.workspace.switch("main").then(() => "done", (e) => e.message));

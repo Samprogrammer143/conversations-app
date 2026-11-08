@@ -151,20 +151,21 @@ function AddAccountSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (
     return () => window.removeEventListener("online", again);
   }, [phase]);
 
-  const look = useCallback(
-    async (t: string, who: string) => {
-      setPhase("looking");
-      const mine = await findWorkspaces(t).catch(() => []);
-      if (mine.length) {
-        await findAllWorkspaces().catch(() => []);
-        onAdded(`Added ${mine.map((w) => w.name).join(", ")} from ${who}.`);
-        return;
-      }
-      setOrgs(await userOrgs(t).catch(() => []));
-      setPhase("none");
-    },
-    [onAdded],
-  );
+  // Held in a ref: the switcher behind redraws (a reconnect, a PC coming on) with a new onAdded,
+  // and the sign-in below must not start over for that (it would throw away the code just approved).
+  const added = useRef(onAdded);
+  added.current = onAdded;
+  const look = useCallback(async (t: string, who: string) => {
+    setPhase("looking");
+    const mine = await findWorkspaces(t).catch(() => []);
+    if (mine.length) {
+      await findAllWorkspaces().catch(() => []);
+      added.current(`Added ${mine.map((w) => w.name).join(", ")} from ${who}.`);
+      return;
+    }
+    setOrgs(await userOrgs(t).catch(() => []));
+    setPhase("none");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
