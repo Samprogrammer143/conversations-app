@@ -1017,7 +1017,7 @@ function SignInBanner() {
 }
 
 /** A new chat: no transcript yet, just where it will run and the composer. */
-function Draft({ narrow }: { narrow: boolean }) {
+function Draft({ narrow, onBack }: { narrow: boolean; onBack?: () => void }) {
   const draft = useStore((s) => s.draft)!;
   const info = useStore((s) => s.info);
   const select = useStore((s) => s.select);
@@ -1038,7 +1038,8 @@ function Draft({ narrow }: { narrow: boolean }) {
 
   return (
     <section className="detail" aria-label="New chat">
-      <div className="detail-toolbar drag">
+      <div className={`detail-toolbar drag${onBack ? " with-back" : ""}`}>
+        {onBack && <IconButton icon="arrow-left" label={`Back (${keyLabel("Alt+Left")})`} onClick={onBack} />}
         <div className="detail-title">
           <span className="t1 ellipsis">New chat</span>
           <span className="t2 ellipsis" title={draft.folder ?? undefined}>
@@ -1047,9 +1048,16 @@ function Draft({ narrow }: { narrow: boolean }) {
             {info?.machine ?? `this ${pcWord()}`}
           </span>
         </div>
-        <ToolbarButton icon="folder-open" title="Choose the folder this chat runs in" onClick={() => void chooseDraftFolder()}>
-          {narrow ? "Folder" : "Change folder"}
-        </ToolbarButton>
+        {/* (On the phone there's no folder picker: the phone offers the PC's projects instead.) */}
+        {document.body.dataset.platform === "android" ? (
+          <ToolbarButton icon="folder-open" title="Choose the project this chat runs in" onClick={() => window.dispatchEvent(new Event("app:pick-project"))}>
+            Project
+          </ToolbarButton>
+        ) : (
+          <ToolbarButton icon="folder-open" title="Choose the folder this chat runs in" onClick={() => void chooseDraftFolder()}>
+            {narrow ? "Folder" : "Change folder"}
+          </ToolbarButton>
+        )}
       </div>
       <div className="empty" style={{ paddingBottom: 140 }}>
         <span className="empty-tile" aria-hidden>
@@ -1128,7 +1136,7 @@ export function Detail({ narrow, onBack }: { narrow: boolean; onBack?: () => voi
     return () => ro.disconnect();
   }, [detail?.row.id]);
 
-  if (draft && !detail) return <Draft narrow={narrow} />;
+  if (draft && !detail) return <Draft narrow={narrow} onBack={onBack} />;
   if (!detail)
     return (
       <section className="detail" aria-label="Conversation">

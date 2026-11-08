@@ -193,6 +193,20 @@ try {
     await phone.waitForTimeout(400);
   }
 
+  // New chat: the message box for it, in place of the list.
+  await phone.click(".phone-fab");
+  const draft = await until(() => phone.evaluate(() => !!document.querySelector(".detail textarea[aria-label=Message]") || null), 10_000);
+  await phone.screenshot({ path: path.join(out, "phone-new-chat.png") });
+  check("New chat opens a message box", !!draft);
+  await phone.click(".detail-toolbar button[title^='Choose the project']");
+  const projects = await until(() => phone.evaluate(() => document.querySelectorAll(".phone-sheet .sheet-row").length || null), 10_000);
+  await phone.screenshot({ path: path.join(out, "phone-new-chat-project.png") });
+  check("a new chat's Project lists the PC's projects", !!projects, `${projects} projects`);
+  await phone.locator(".phone-sheet .sheet-row").first().click();
+  await phone.click(".detail-toolbar.with-back button");
+  const backToList = await until(() => phone.evaluate(() => document.querySelectorAll(".row").length || null), 10_000);
+  check("…and back goes to the list", !!backToList);
+
   // Ask the PC something it mustn't do for a phone.
   const refused = await phone.evaluate(() => window.conversations.workspace.switch("main").then(() => "done", (e) => e.message));
   check("what only makes sense at the PC is refused", /can't be used from a phone/.test(refused), refused);

@@ -182,13 +182,18 @@ function AddAccountSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (
         const who = await whoAmI(t).catch(() => "");
         if (cancelled) return;
         setLogin(who);
-        if (who && known.includes(who)) {
-          // The same account again (the browser was still signed in to it): not kept twice.
-          if (t !== allTokens()[0]) signOut(t);
-          setPhase("same");
-          return;
-        }
         token.current = t;
+        // An account signed in before (an earlier try, or the first one): looked through all the same,
+        // and only "already here" when it has nothing that isn't listed yet.
+        if (who && known.includes(who)) {
+          const listed = new Set(savedWorkspaces().map((w) => w.room));
+          const mine = await findWorkspaces(t).catch(() => []);
+          if (cancelled) return;
+          if (mine.length && mine.every((w) => listed.has(w.room))) {
+            setPhase("same");
+            return;
+          }
+        }
         await look(t, who);
       } catch (e) {
         if (!cancelled && (e as Error).message !== "cancelled") {
@@ -265,9 +270,9 @@ function AddAccountSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (
           <div className="add-card">
             <div className="title">
               <Icon name="triangle-alert" size={18} />
-              <span>That's {login}, the account already here</span>
+              <span>{login}'s workspaces are already here</span>
             </div>
-            <p>To add the other account, sign out of GitHub in your browser first, then try again.</p>
+            <p>To add a different account, sign out of GitHub in your browser first, then try again.</p>
           </div>
           <div className="sheet-actions">
             <button className="big-button" onClick={() => setRound((r) => r + 1)}>
@@ -323,6 +328,38 @@ function AddAccountSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (
           </div>
         </>
       )}
+    </Sheet>
+  );
+}
+
+/** A new chat's project (the PC's projects, from the window's sidebar data): the chat runs in its folder on the PC. */
+export function ProjectSheet({ onClose }: { onClose: () => void }) {
+  const sidebar = useStore((s) => s.sidebar);
+  const draft = useStore((s) => s.draft);
+  const projects = (sidebar?.projects ?? []).filter((p) => p.kind !== "folder" || p.folder);
+  return (
+    <Sheet title="Start in" sub="The project this chat runs in, on your PC." onClose={onClose}>
+      <div className="sheet-list">
+        {projects.map((p) => (
+          <button
+            key={p.id}
+            className={`sheet-row${draft?.projectId === p.id ? " selected" : ""}`}
+            onClick={() => {
+              useStore.getState().startDraft(p.id);
+              onClose();
+            }}
+          >
+            <Icon name={p.kind === "home" ? "house" : p.kind === "repo" ? "folder-git-2" : "folder"} size={22} />
+            <span className="text">
+              <span className="name">{p.label}</span>
+              <span className="row-sub">
+                {p.count} {p.count === 1 ? "chat" : "chats"}
+              </span>
+            </span>
+            {draft?.projectId === p.id && <Icon name="check" size={20} />}
+          </button>
+        ))}
+      </div>
     </Sheet>
   );
 }

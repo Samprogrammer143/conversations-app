@@ -18,7 +18,7 @@ import { Setup } from "./Setup";
 import { closeNewest, control, setSession } from "./state";
 import { App as Android } from "@capacitor/app";
 import { savedToken, writeRequest } from "./github";
-import { PhoneListHeader, SendsTo } from "./ui";
+import { PhoneListHeader, PhoneOverlays, SendsTo } from "./ui";
 import { slots } from "../renderer/lib/slots";
 
 slots.listHeader = PhoneListHeader;
@@ -177,6 +177,7 @@ function Root() {
   return (
     <Suspense fallback={<div className="phone-loading" />}>
       <DesktopApp />
+      <PhoneOverlays />
     </Suspense>
   );
 }

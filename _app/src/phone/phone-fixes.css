@@ -375,3 +375,8 @@ body[data-platform="android"] .content.stacked {
 .sheet-added .icon {
   color: var(--status-success);
 }
+
+.sheet-list {
+  max-height: 55vh;
+  overflow-y: auto;
+}

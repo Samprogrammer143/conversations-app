@@ -9,6 +9,7 @@ import { useCallback, useEffect } from "react";
 const WorkspaceSheet = lazy(() => import("./screens").then((m) => ({ default: m.WorkspaceSheet })));
 const PhoneSearch = lazy(() => import("./screens").then((m) => ({ default: m.PhoneSearch })));
 const PhoneSettings = lazy(() => import("./screens").then((m) => ({ default: m.PhoneSettings })));
+const ProjectSheet = lazy(() => import("./screens").then((m) => ({ default: m.ProjectSheet })));
 
 const pcIcon = (name: string) => (/laptop|macbook/i.test(name) ? "laptop" : "monitor");
 
@@ -67,12 +68,30 @@ export function PhoneListHeader({ onNewChat }: ListHeaderProps) {
           </div>
         </div>
       )}
-      <button className="phone-fab" onClick={onNewChat}>
+      <button
+        className="phone-fab"
+        onClick={() => {
+          onNewChat();
+          // The new chat's message box, in place of the list (on the phone the two don't sit side by side).
+          window.dispatchEvent(new Event("app:show-chat"));
+        }}
+      >
         <Icon name="square-pen" size={20} />
         New chat
       </button>
     </div>
   );
+}
+
+/** The phone's sheets that open from anywhere (the list may not be showing): a new chat's project. */
+export function PhoneOverlays() {
+  const [project, setProject] = useState(false);
+  useEffect(() => {
+    const pick = () => setProject(true);
+    window.addEventListener("app:pick-project", pick);
+    return () => window.removeEventListener("app:pick-project", pick);
+  }, []);
+  return <Suspense fallback={null}>{project && <ProjectSheet onClose={() => setProject(false)} />}</Suspense>;
 }
 
 /** M4/M7: which PC a message goes to; tap to pick another that's on. */
