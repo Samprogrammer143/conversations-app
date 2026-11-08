@@ -121,15 +121,51 @@ export async function waitForToken(code: DeviceCode, cancelled: () => boolean): 
 }
 
 /** fetch, tried again twice when the network isn't there (just back in front, or a moment's drop). */
+/** Told when GitHub can't be reached and the app is waiting for the connection (and when it's back). */
+export const connection = { waiting: false, listeners: new Set<(waiting: boolean) => void>() };
+function setWaiting(w: boolean) {
+  if (connection.waiting === w) return;
+  connection.waiting = w;
+  connection.listeners.forEach((l) => l(w));
+}
+
+/** Resolves after `ms`, or sooner when the network comes back or the app comes to the front. */
+function untilBack(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(t);
+      window.removeEventListener("online", done);
+      document.removeEventListener("visibilitychange", seen);
+      resolve();
+    };
+    const seen = () => document.visibilityState === "visible" && setTimeout(done, 300);
+    const t = setTimeout(done, ms);
+    window.addEventListener("online", done);
+    document.addEventListener("visibilitychange", seen);
+  });
+}
+
+/**
+ * fetch, patient with the network: Android can hold an app's connection back for a few seconds
+ * after it comes to the front (more with battery restrictions). Tried again for up to 30 s, sooner
+ * when the network comes back; each try has its own 15 s limit.
+ */
 async function fetchAgain(url: string, init: RequestInit): Promise<Response> {
+  const until = Date.now() + 30_000;
   for (let i = 0; ; i++) {
     const stop = new AbortController();
     const timer = setTimeout(() => stop.abort(), 15_000);
     try {
-      return await fetch(url, { ...init, signal: stop.signal });
+      const r = await fetch(url, { ...init, signal: stop.signal });
+      setWaiting(false);
+      return r;
     } catch (e) {
-      if (i >= 2) throw new Error(`No connection to GitHub (${(e as Error).message})`);
-      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+      if (Date.now() >= until) {
+        setWaiting(false);
+        throw new Error(`No connection to GitHub (${(e as Error).message})`);
+      }
+      setWaiting(true);
+      await untilBack(Math.min(1000 * (i + 1), 5000));
     } finally {
       clearTimeout(timer);
     }

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../renderer/components/Icon";
 import { useStore } from "../renderer/lib/store";
-import { ORG_ACCESS_URL, allTokens, findAllWorkspaces, findWorkspaces, savedWorkspaces, signOut, startDeviceFlow, userOrgs, waitForToken, whoAmI, type DeviceCode, type FoundWorkspace } from "./github";
+import { ORG_ACCESS_URL, connection, allTokens, findAllWorkspaces, findWorkspaces, savedWorkspaces, signOut, startDeviceFlow, userOrgs, waitForToken, whoAmI, type DeviceCode, type FoundWorkspace } from "./github";
 import { control, copyText, setWorkspaceName, useBack, usePhone, useWorkspaceName } from "./state";
 import { CodeToCopy } from "./code";
 import { useCallback } from "react";
@@ -137,6 +137,19 @@ function AddAccountSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (
   const [err, setErr] = useState("");
   const [round, setRound] = useState(0);
   const token = useRef<string | null>(null);
+  // "Waiting for the connection…" while GitHub can't be reached yet.
+  const [waiting, setWaitingState] = useState(connection.waiting);
+  useEffect(() => {
+    connection.listeners.add(setWaitingState);
+    return () => void connection.listeners.delete(setWaitingState);
+  }, []);
+  // A failed try is tried again by itself when the network comes back.
+  useEffect(() => {
+    if (phase !== "error") return;
+    const again = () => setRound((r) => r + 1);
+    window.addEventListener("online", again);
+    return () => window.removeEventListener("online", again);
+  }, [phase]);
 
   const look = useCallback(
     async (t: string, who: string) => {
@@ -210,6 +223,12 @@ function AddAccountSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (
       {phase === "code" && (
         <>
           <div className="add-code">{code ? <CodeToCopy code={code.user_code} /> : <span className="device-code waiting">····-····</span>}</div>
+          {waiting && !code && (
+            <div className="add-status">
+              <Icon name="loader-circle" size={18} className="spin" />
+              <span>Waiting for the connection…</span>
+            </div>
+          )}
           <div className="sheet-actions">
             <button
               className="big-button"
@@ -231,7 +250,7 @@ function AddAccountSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (
         <>
           <div className="add-status">
             <Icon name="loader-circle" size={18} className="spin" />
-            <span>Looking for its workspaces…</span>
+            <span>{waiting ? "Waiting for the connection…" : "Looking for its workspaces…"}</span>
           </div>
           <div className="sheet-actions">
             <button className="big-button quiet" onClick={onClose}>
