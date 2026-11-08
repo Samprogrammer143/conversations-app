@@ -398,13 +398,19 @@ export function ContextMenu() {
   if (!menu || !row) return null;
   const s = useStore.getState();
   // Figma: Context Menu / Conversation.
+  // On the phone, what only works at the PC (a terminal, a folder) isn't offered.
+  const atPc = document.body.dataset.platform !== "android";
   const items: ({ sep: true } | { label: string; icon: string; key?: string; destructive?: boolean; run: () => void })[] = [
-    { label: "Open in CLI", icon: "square-terminal", key: "Ctrl+Shift+O", run: async () => { const r = await api.cli.open(row.id); toast({ text: r.message, icon: r.ok ? "terminal" : "alert" }); } },
-    { label: "Copy resume command", icon: "copy", key: "Ctrl+Shift+C", run: () => copyResumeCommand(row.id) },
+    ...(atPc
+      ? [
+          { label: "Open in CLI", icon: "square-terminal", key: "Ctrl+Shift+O", run: async () => { const r = await api.cli.open(row.id); toast({ text: r.message, icon: r.ok ? "terminal" : "alert" }); } },
+          { label: "Copy resume command", icon: "copy", key: "Ctrl+Shift+C", run: () => copyResumeCommand(row.id) },
+        ]
+      : []),
     { label: row.pinned ? "Unpin" : "Pin", icon: row.pinned ? "pin-off" : "pin", key: "Ctrl+D", run: () => void s.togglePin(row.id) },
     { label: "Rename…", icon: "pencil", key: "F2", run: () => useStore.setState({ renaming: row.id }) },
     { sep: true },
-    ...(row.cwd
+    ...(row.cwd && atPc
       ? [
           {
             label: "Show in folder",

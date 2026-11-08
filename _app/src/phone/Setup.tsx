@@ -6,6 +6,8 @@ import { markSvg } from "../../scripts/icon-art.mjs";
 
 /** The app's mark: the blue chat with the prompt, without the tile (Sam, 8 Nov). */
 const APP_ICON = markSvg({ size: 88, ids: "setup" });
+import { CodeToCopy } from "./code";
+import { copyText } from "./state";
 import { findAllWorkspaces, savedToken, signOut, startDeviceFlow, waitForToken, whoAmI, type DeviceCode } from "./github";
 import type { PhoneState, WorkspaceLink } from "./session";
 
@@ -109,17 +111,22 @@ export function Setup({ workspace, state, onWorkspace }: { workspace: WorkspaceL
     return (
       <div className="phone-setup sign-in">
         <div className="hero">
-          <div className="app-icon" aria-hidden dangerouslySetInnerHTML={{ __html: APP_ICON }} />
+          <div className="phone-app-icon" aria-hidden dangerouslySetInnerHTML={{ __html: APP_ICON }} />
           <h1>Conversations</h1>
           <p>Your Claude Code chats from every PC, on your phone.</p>
         </div>
         {code ? (
           <div className="actions">
             <p className="step">Enter this code on GitHub</p>
-            <button className="device-code" onClick={() => void navigator.clipboard?.writeText(code.user_code)} aria-label="Copy the code">
-              {code.user_code}
-            </button>
-            <button className="big-button dark" onClick={() => window.open(code.verification_uri, "_blank")}>
+            <CodeToCopy code={code.user_code} />
+            <button
+              className="big-button dark"
+              onClick={async () => {
+                // Copied as it opens, so it can be pasted straight into GitHub's page.
+                await copyText(code.user_code);
+                window.open(code.verification_uri, "_blank");
+              }}
+            >
               {GITHUB_MARK}
               Open GitHub
             </button>
@@ -136,6 +143,28 @@ export function Setup({ workspace, state, onWorkspace }: { workspace: WorkspaceL
             {err ? <p className="foot error">{err}</p> : <p className="foot">Use the account your chats sync through. Nothing else to set up.</p>}
           </div>
         )}
+      </div>
+    );
+  }
+
+  // Allowed already (coming back to the app): only waiting for a PC to answer.
+  if (workspace && state?.pairing === "allowed") {
+    const anyOn = state.pcs.some((p) => p.online);
+    return (
+      <div className="phone-setup sign-in">
+        <div className="hero">
+          <div className="phone-app-icon" aria-hidden dangerouslySetInnerHTML={{ __html: APP_ICON }} />
+          <h1>{state.link !== "open" ? "Connecting…" : anyOn ? "Connecting to your PC…" : "None of your PCs is on"}</h1>
+          <p>{state.link === "open" && !anyOn ? "Turn one on (or wake it up) and it connects by itself." : "This takes a moment."}</p>
+          <div className="pc-strip centred">
+            {state.pcs.map((p) => (
+              <span key={p.device} className={`pc-chip${p.online ? " on" : ""}`}>
+                <span className="dot" />
+                {p.name}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

@@ -181,6 +181,26 @@ try {
   const req = path.join(devices, "requests", `${id}.json`);
   check("allowing it took the request away", !fs.existsSync(req));
 
+  // The message box in a chat: one line of controls, nothing under the bottom edge.
+  await phone.locator(".row").first().click();
+  await phone.waitForTimeout(2500);
+  const box = await phone.evaluate(() => {
+    const c = document.querySelector(".composer-controls");
+    const r = c?.getBoundingClientRect();
+    return r ? { h: Math.round(r.height), bottom: Math.round(r.bottom), vh: window.innerHeight } : null;
+  });
+  await phone.screenshot({ path: path.join(out, "phone-composer.png") });
+  check("the message box's controls fit on one line, on screen", !!box && box.h <= 56 && box.bottom <= box.vh, JSON.stringify(box));
+  await phone.click("button[aria-label=More]").catch(() => {});
+  await phone.waitForTimeout(500);
+  await phone.screenshot({ path: path.join(out, "phone-menu.png") });
+  await phone.keyboard.press("Escape");
+
+  // Closing the app and opening it again: back in, by itself.
+  await phone.reload();
+  const again = await until(() => phone.evaluate(() => document.querySelectorAll(".row").length || null), 45_000);
+  check("reopened, the app reconnects and lists the chats again", !!again, `${again} rows`);
+
   // A phone that writes itself into the allowed list (a removed one, or anyone with the GitHub
   // sign-in) isn't let in silently: this PC asks, saying where it was allowed.
   const before = await app.evaluate(() => globalThis.__asked.length);

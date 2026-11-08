@@ -6384,6 +6384,7 @@ var MAX_PENDING_PER_PEER = 2;
 var MAX_PENDING_BYTES = 24e6;
 var MAX_KEYS2 = 64;
 var PING_MS = 25e3;
+var PONG_WAIT_MS = 1e4;
 var RelayLink = class {
   constructor(o) {
     this.o = o;
@@ -6400,6 +6401,7 @@ var RelayLink = class {
   retry = 0;
   pinger = null;
   retryTimer = null;
+  pingSentAt = 0;
   state = "closed";
   start() {
     this.stopped = false;
@@ -6434,6 +6436,45 @@ var RelayLink = class {
     if (this.pinger) clearInterval(this.pinger);
     this.pinger = null;
   }
+  /** Checks the connection now (the app came back to the front, or the network came back): connects at once when it's down, and pings when it's up. */
+  nudge() {
+    if (this.stopped) return;
+    if (!this.ws || this.ws.readyState > 1) {
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+      this.retry = 0;
+      this.connect();
+    } else if (this.ws.readyState === 1) this.ping(this.ws);
+  }
+  ping(ws) {
+    try {
+      ws.send("ping");
+      if (!this.pingSentAt) this.pingSentAt = Date.now();
+    } catch {
+    }
+    setTimeout(() => {
+      if (this.ws === ws && this.pingSentAt && Date.now() - this.pingSentAt >= PONG_WAIT_MS) {
+        this.o.log?.("relay: no answer to a ping; connecting again");
+        try {
+          ws.close(4001, "no pong");
+        } catch {
+        }
+        this.dropped(ws);
+      }
+    }, PONG_WAIT_MS + 50);
+  }
+  /** The socket is gone (closed, or dead without saying so): presence cleared, connecting again. */
+  dropped(ws) {
+    if (this.ws !== ws) return;
+    this.cleanup();
+    this.ws = null;
+    this.pingSentAt = 0;
+    if (this.peers.size) {
+      this.peers.clear();
+      this.o.onPeers?.([]);
+    }
+    this.again();
+  }
   connect() {
     if (this.stopped) return;
     this.setState("connecting");
@@ -6451,12 +6492,8 @@ var RelayLink = class {
       this.retry = 0;
       this.setState("open");
       this.cleanup();
-      this.pinger = setInterval(() => {
-        try {
-          ws.send("ping");
-        } catch {
-        }
-      }, PING_MS);
+      this.pingSentAt = 0;
+      this.pinger = setInterval(() => this.ping(ws), PING_MS);
     });
     ws.addEventListener("message", (e) => void this.received(String(e.data)));
     ws.addEventListener("close", (e) => {
@@ -6500,6 +6537,7 @@ var RelayLink = class {
     return k;
   }
   async received(raw) {
+    this.pingSentAt = 0;
     if (raw === "pong") return;
     let m;
     try {
@@ -6625,7 +6663,8 @@ var REMOTE_CHANNELS = /* @__PURE__ */ new Set([
   "chat:usage",
   "settings:get",
   "composer:load",
-  "workspace:list"
+  "workspace:list",
+  "workspace:rename"
 ]);
 function remoteRefusal(channel, args) {
   if (channel === "chat:commands" && args[2]) return "Commands in another folder are listed on the PC";

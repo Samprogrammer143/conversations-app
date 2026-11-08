@@ -2,7 +2,8 @@
 import { Suspense, lazy, useState } from "react";
 import { Icon } from "../renderer/components/Icon";
 import type { ListHeaderProps } from "../renderer/lib/slots";
-import { usePhone } from "./state";
+import { setWorkspaceName, useBack, usePhone, useWorkspaceName } from "./state";
+import { useCallback, useEffect } from "react";
 
 // Loaded when first opened: they use the window's store, which reads window.conversations as it loads.
 const WorkspaceSheet = lazy(() => import("./screens").then((m) => ({ default: m.WorkspaceSheet })));
@@ -15,11 +16,25 @@ const pcIcon = (name: string) => (/laptop|macbook/i.test(name) ? "laptop" : "mon
 export function PhoneListHeader({ onNewChat }: ListHeaderProps) {
   const { session, state } = usePhone();
   const [open, setOpen] = useState<"workspaces" | "search" | "settings" | null>(null);
+  const room = session?.ws.room;
+  const name = useWorkspaceName(room);
+  const pcReady = !!state?.current && !!session?.ready();
+  // The name the PC gives this workspace (renamed on the PC or from here).
+  useEffect(() => {
+    if (!pcReady || !session || !room) return;
+    void (session.call("workspace:list", []) as Promise<{ current: string; workspaces: { id: string; name: string }[] }>).then(
+      (r) => {
+        const w = r.workspaces.find((x) => x.id === r.current);
+        if (w?.name) setWorkspaceName(room, w.name);
+      },
+      () => {},
+    );
+  }, [pcReady, session, room]);
   return (
     <div className="phone-list-header">
       <div className="phone-appbar">
         <button className="ws-switch" onClick={() => setOpen("workspaces")} aria-label="Workspaces" aria-haspopup="dialog">
-          <span>{session?.ws.name ?? "Conversations"}</span>
+          <span>{name ?? session?.ws.name ?? "Conversations"}</span>
           <Icon name="chevron-down" size={20} />
         </button>
         <button className="icon-48" onClick={() => setOpen("search")} aria-label="Search">
@@ -66,6 +81,12 @@ export function SendsTo() {
   const [open, setOpen] = useState(false);
   if (!state || !session) return null;
   const cur = state.pcs.find((p) => p.device === state.current);
+  return <SendsToChip cur={cur} open={open} setOpen={setOpen} />;
+}
+
+function SendsToChip({ cur, open, setOpen }: { cur: { device: string; name: string } | undefined; open: boolean; setOpen: (v: boolean) => void }) {
+  const { session, state } = usePhone();
+  if (!state || !session) return null;
   return (
     <>
       <button type="button" className={`chip sends-to${cur ? "" : " off"}`} onClick={() => setOpen(true)} aria-label="Sends to">
@@ -73,7 +94,19 @@ export function SendsTo() {
         <span>{cur ? cur.name : "No PC on"}</span>
         <Icon name="chevron-down" size={14} />
       </button>
-      {open && (
+      {open && <SendsToSheet onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function SendsToSheet({ onClose }: { onClose: () => void }) {
+  const { session, state } = usePhone();
+  const setOpen = (_v: boolean) => onClose();
+  useBack(useCallback(onClose, [onClose]));
+  if (!state || !session) return null;
+  return (
+    <>
+      {(
         <div className="phone-sheet-scrim" onClick={() => setOpen(false)}>
           <div className="phone-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Send to">
             <div className="handle" />

@@ -4,12 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../renderer/components/Icon";
 import { useStore } from "../renderer/lib/store";
 import { allTokens, findAllWorkspaces, savedWorkspaces, startDeviceFlow, waitForToken, whoAmI, type DeviceCode, type FoundWorkspace } from "./github";
-import { control, usePhone } from "./state";
+import { control, copyText, setWorkspaceName, useBack, usePhone, useWorkspaceName } from "./state";
+import { CodeToCopy } from "./code";
+import { useCallback } from "react";
 import { GITHUB_MARK } from "./Setup";
 
 const pcIcon = (name: string) => (/laptop|macbook/i.test(name) ? "laptop" : "monitor");
 
 function Sheet({ title, sub, onClose, children }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode }) {
+  useBack(useCallback(onClose, [onClose]));
   return (
     <div className="phone-sheet-scrim" onClick={onClose}>
       <div className="phone-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}>
@@ -59,6 +62,20 @@ export function WorkspaceSheet({ onClose }: { onClose: () => void }) {
     void findAllWorkspaces().then(setFound, () => {});
   }, []);
   const on = state?.pcs.filter((p) => p.online).length ?? 0;
+  const hereName = useWorkspaceName(session?.ws.room);
+  const rename = async () => {
+    if (!session) return;
+    const was = hereName ?? session.ws.name;
+    const next = window.prompt("Name this workspace", was)?.trim().slice(0, 40);
+    if (!next || next === was) return;
+    setWorkspaceName(session.ws.room, next);
+    try {
+      const r = (await session.call("workspace:list", [])) as { current: string };
+      await session.call("workspace:rename", [r.current, next]);
+    } catch {
+      // Kept on the phone; the PC gets it next time (or keeps its own name).
+    }
+  };
   // The workspace this phone is in always shows (also before GitHub has answered).
   const here = session?.ws as FoundWorkspace | undefined;
   const list = here && !found.some((w) => w.room === here.room) ? [here, ...found] : found;
@@ -77,12 +94,26 @@ export function WorkspaceSheet({ onClose }: { onClose: () => void }) {
           >
             <span className={`ws-tile${current ? " current" : ""}`}>{w.name.slice(0, 1).toUpperCase()}</span>
             <span className="text">
-              <span className="name">{w.name}</span>
+              <span className="name">{current ? (hereName ?? w.name) : w.name}</span>
               <span className="row-sub">
                 {w.login || (w.repo ?? "").split("/")[0] || "GitHub"} · {w.pcs.length} {w.pcs.length === 1 ? "PC" : "PCs"}
                 {current ? ` · ${on} on` : ""}
               </span>
             </span>
+            {current && (
+              <span
+                role="button"
+                tabIndex={0}
+                className="icon-48 rename"
+                aria-label="Rename"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void rename();
+                }}
+              >
+                <Icon name="pencil" size={18} />
+              </span>
+            )}
             {current && <Icon name="check" size={20} />}
           </button>
         );
@@ -91,14 +122,18 @@ export function WorkspaceSheet({ onClose }: { onClose: () => void }) {
       {signIn.code ? (
         <div className="sheet-signin">
           <p>Enter this code on GitHub, signed in as the other account</p>
-          <button className="device-code" onClick={() => void navigator.clipboard?.writeText(signIn.code!.user_code)} aria-label="Copy the code">
-            {signIn.code.user_code}
-          </button>
+          <CodeToCopy code={signIn.code.user_code} />
           <div className="row">
             <button className="text-button" onClick={signIn.cancel}>
               Cancel
             </button>
-            <button className="big-button" onClick={() => window.open(signIn.code!.verification_uri, "_blank")}>
+            <button
+              className="big-button"
+              onClick={async () => {
+                await copyText(signIn.code!.user_code);
+                window.open(signIn.code!.verification_uri, "_blank");
+              }}
+            >
               Open GitHub
             </button>
           </div>
@@ -130,6 +165,7 @@ export function WorkspaceSheet({ onClose }: { onClose: () => void }) {
 
 /** Search: the desktop's search (the PC searches its index), as a screen of its own. */
 export function PhoneSearch({ onClose }: { onClose: () => void }) {
+  useBack(useCallback(onClose, [onClose]));
   const search = useStore((s) => s.search);
   const setText = useStore((s) => s.setSearchText);
   const select = useStore((s) => s.select);
@@ -191,6 +227,7 @@ function Toggle({ on, disabled, onChange, label }: { on: boolean; disabled?: boo
 
 /** M12: what to be told about, each PC's keep-awake switch, and this phone. */
 export function PhoneSettings({ onClose }: { onClose: () => void }) {
+  useBack(useCallback(onClose, [onClose]));
   const { session, state } = usePhone();
   const [notify, setNotify] = useState<Record<string, boolean>>(() => {
     try {

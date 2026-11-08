@@ -1,0 +1,190 @@
+/* The phone, round 2 (Sam, 8 Nov): nothing under Android's bars, the message box on one line, a
+   one-line status, bigger filters, menus as sheets, the sign-in mark without a tile. */
+
+/* Android draws the app under its status and navigation bars (Capacitor gives the insets). */
+body[data-platform="android"] {
+  padding-top: max(env(safe-area-inset-top), var(--safe-area-inset-top, 0px));
+  padding-bottom: max(env(safe-area-inset-bottom), var(--safe-area-inset-bottom, 0px));
+}
+body[data-platform="android"] .app {
+  height: 100%;
+}
+.phone-fab {
+  bottom: calc(20px + max(env(safe-area-inset-bottom), var(--safe-area-inset-bottom, 0px)));
+}
+.phone-screen {
+  padding-top: max(env(safe-area-inset-top), var(--safe-area-inset-top, 0px));
+  padding-bottom: max(env(safe-area-inset-bottom), var(--safe-area-inset-bottom, 0px));
+}
+.phone-sheet {
+  padding-bottom: calc(24px + max(env(safe-area-inset-bottom), var(--safe-area-inset-bottom, 0px)));
+}
+
+/* The sign-in mark: the blue chat alone. */
+.phone-setup .phone-app-icon {
+  width: 88px;
+  height: 88px;
+}
+.phone-setup .phone-app-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.phone-setup .pc-strip.centred {
+  justify-content: center;
+  flex-wrap: wrap;
+  padding-top: 8px;
+}
+
+/* The GitHub code: big, selectable, with Copy beside it. */
+.code-to-copy {
+  display: flex;
+  gap: 10px;
+}
+.code-to-copy .device-code {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  user-select: all;
+  -webkit-user-select: all;
+}
+.copy-button {
+  flex: none;
+  height: 64px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--fill-tertiary);
+  color: var(--label-primary);
+  font: 600 15px/1 var(--font-ui);
+}
+
+/* The message box (M4): one line of controls; what's for the PC's screen stays there. */
+body[data-platform="android"] .composer-controls {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+body[data-platform="android"] .composer-controls .alert-switch,
+body[data-platform="android"] .composer-controls .context-ring,
+body[data-platform="android"] .composer-controls .context {
+  display: none;
+}
+body[data-platform="android"] .composer-controls .chip {
+  height: 36px;
+  min-width: 36px;
+  padding: 0 10px;
+  flex: none;
+}
+body[data-platform="android"] .composer-controls .chip .chip-label:not(.always) {
+  display: none;
+}
+body[data-platform="android"] .composer-controls .chip.sends-to {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+body[data-platform="android"] .composer-controls .chip.sends-to span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body[data-platform="android"] .composer-controls .send {
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+
+/* Claude's status line: one line, the step cut short; no keyboard hint or token count. */
+body[data-platform="android"] .activity {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  min-width: 0;
+  font-size: 13px;
+}
+body[data-platform="android"] .activity .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+body[data-platform="android"] .activity:not(.link) > span:last-child,
+body[data-platform="android"] .activity .tokens {
+  display: none;
+}
+
+/* Filters (M3): chips big enough for a thumb. */
+body[data-platform="android"] .filters .segmented {
+  gap: 8px;
+  padding: 0;
+  background: none;
+}
+body[data-platform="android"] .filters .segment {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 18px;
+  font: 600 13px/1 var(--font-ui);
+  background: var(--fill-quaternary);
+  color: var(--label-primary);
+  box-shadow: none;
+}
+body[data-platform="android"] .filters .segment[aria-selected="true"] {
+  background: var(--label-primary);
+  color: var(--bg-content);
+}
+body[data-platform="android"] .filters .segment[aria-selected="true"] .count {
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* Menus (⋯, the model, mode and effort pickers): a sheet from the bottom with touch-sized rows. */
+body[data-platform="android"] .menu {
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: 0 !important;
+  width: auto !important;
+  min-width: 0;
+  max-height: 75vh;
+  overflow-y: auto;
+  padding: 12px 8px calc(16px + max(env(safe-area-inset-bottom), var(--safe-area-inset-bottom, 0px)));
+  border-radius: 24px 24px 0 0;
+  background: var(--bg-elevated);
+  backdrop-filter: none;
+  box-shadow: 0 -8px 40px var(--shadow-strong);
+}
+body[data-platform="android"] .menu-item {
+  height: auto;
+  min-height: 48px;
+  padding: 10px 16px;
+  gap: 14px;
+  font: 500 15px/20px var(--font-ui);
+}
+body[data-platform="android"] .menu-item .icon {
+  width: 20px;
+  height: 20px;
+}
+body[data-platform="android"] .menu-item .shortcut {
+  display: none;
+}
+body[data-platform="android"] .menu .menu-heading {
+  padding: 8px 16px 4px;
+  font-size: 12px;
+}
+
+/* The rename button on the switcher's current workspace. */
+.sheet-row .rename {
+  width: 40px;
+  height: 40px;
+  color: var(--icon-secondary);
+}
+
+/* The message box: only "Sends to" keeps its chevron; the rest are icons, so the PC's name fits. */
+body[data-platform="android"] .composer-controls .chip:not(.sends-to) > .icon:last-child {
+  display: none;
+}
+body[data-platform="android"] .composer-controls .chip:not(.sends-to) {
+  width: 40px;
+  padding: 0;
+  justify-content: center;
+}

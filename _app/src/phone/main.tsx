@@ -11,10 +11,12 @@ import "../renderer/styles/overlays.css";
 import "./phone.css";
 import "./phone-app.css";
 import "./phone-screens.css";
+import "./phone-fixes.css";
 import { makeApi } from "../shared/make-api";
 import { PhoneSession, type PhoneState, type WorkspaceLink } from "./session";
 import { Setup } from "./Setup";
-import { control, setSession } from "./state";
+import { closeNewest, control, setSession } from "./state";
+import { App as Android } from "@capacitor/app";
 import { savedToken, writeRequest } from "./github";
 import { PhoneListHeader, SendsTo } from "./ui";
 import { slots } from "../renderer/lib/slots";
@@ -68,6 +70,28 @@ window.conversations = makeApi({
 });
 const pendingListeners: (() => void)[] = [];
 
+// Android's back gesture: closes what's open (a sheet, search, settings, a menu), then from a chat
+// goes back to the list; only from the list does it leave the app (which stays running).
+void Android.addListener("backButton", () => {
+  if (closeNewest()) return;
+  const menu = document.querySelector(".menu, .phone-sheet-scrim, .search-results");
+  if (menu) {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    (document.activeElement as HTMLElement | null)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    return;
+  }
+  const back = document.querySelector<HTMLButtonElement>(".detail-toolbar.with-back button");
+  if (back) return back.click();
+  void Android.minimizeApp();
+}).catch(() => {});
+
+// Back in front, or the network came back: reconnect now (Android pauses a hidden app's network).
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") session?.nudge();
+});
+window.addEventListener("online", () => session?.nudge());
+
 document.body.dataset.window = "main";
 document.body.dataset.platform = "android";
 
@@ -109,7 +133,7 @@ function Root() {
 
   // Once in, the app stays: a PC going off later shows in the app, not as setup again.
   const [inside, setInside] = useState(false);
-  const ready = !!state && state.pairing === "allowed" && !!state.current;
+  const ready = !!state && state.pairing === "allowed" && !!session?.ready();
   useEffect(() => {
     if (ready) setInside(true);
   }, [ready]);

@@ -44,6 +44,8 @@ const MAX_PENDING_PER_PEER = 2;
 const MAX_PENDING_BYTES = 24_000_000;
 const MAX_KEYS = 64;
 const PING_MS = 25_000;
+/** A ping with no pong this long after it: the connection is dead (a phone's network changed, or it slept). */
+const PONG_WAIT_MS = 10_000;
 
 export class RelayLink {
   private ws: WebSocket | null = null;
@@ -57,6 +59,7 @@ export class RelayLink {
   private retry = 0;
   private pinger: ReturnType<typeof setInterval> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingSentAt = 0;
   state: LinkState = "closed";
 
   constructor(private o: RelayLinkOptions) {}
@@ -99,6 +102,47 @@ export class RelayLink {
     this.pinger = null;
   }
 
+  /** Checks the connection now (the app came back to the front, or the network came back): connects at once when it's down, and pings when it's up. */
+  nudge() {
+    if (this.stopped) return;
+    if (!this.ws || this.ws.readyState > 1) {
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+      this.retry = 0;
+      this.connect();
+    } else if (this.ws.readyState === 1) this.ping(this.ws);
+  }
+
+  private ping(ws: WebSocket) {
+    try {
+      ws.send("ping");
+      if (!this.pingSentAt) this.pingSentAt = Date.now();
+    } catch {}
+    setTimeout(() => {
+      // Nothing came back: closed, so the close handler connects again.
+      if (this.ws === ws && this.pingSentAt && Date.now() - this.pingSentAt >= PONG_WAIT_MS) {
+        this.o.log?.("relay: no answer to a ping; connecting again");
+        try {
+          ws.close(4001, "no pong");
+        } catch {}
+        this.dropped(ws);
+      }
+    }, PONG_WAIT_MS + 50);
+  }
+
+  /** The socket is gone (closed, or dead without saying so): presence cleared, connecting again. */
+  private dropped(ws: WebSocket) {
+    if (this.ws !== ws) return;
+    this.cleanup();
+    this.ws = null;
+    this.pingSentAt = 0;
+    if (this.peers.size) {
+      this.peers.clear();
+      this.o.onPeers?.([]);
+    }
+    this.again();
+  }
+
   private connect() {
     if (this.stopped) return;
     this.setState("connecting");
@@ -116,11 +160,8 @@ export class RelayLink {
       this.retry = 0;
       this.setState("open");
       this.cleanup();
-      this.pinger = setInterval(() => {
-        try {
-          ws.send("ping");
-        } catch {}
-      }, PING_MS);
+      this.pingSentAt = 0;
+      this.pinger = setInterval(() => this.ping(ws), PING_MS);
     });
     ws.addEventListener("message", (e) => void this.received(String(e.data)));
     ws.addEventListener("close", (e) => {
@@ -171,6 +212,7 @@ export class RelayLink {
   }
 
   private async received(raw: string) {
+    this.pingSentAt = 0;
     if (raw === "pong") return;
     let m: { t: string; from?: string; data?: string; devices?: Peer[]; device?: string } & Partial<Peer>;
     try {

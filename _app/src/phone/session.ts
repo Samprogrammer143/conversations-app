@@ -55,11 +55,14 @@ export class PhoneSession {
   private calls = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private listeners = new Map<string, Set<(p: unknown) => void>>();
   private stateListeners = new Set<(s: PhoneState) => void>();
+  /** Calls waiting for a PC to be ready (on, and said hello back). */
+  private readyWaiters: (() => void)[] = [];
   private welcomed = new Set<string>();
   state: PhoneState = { link: "closed", pairing: "unknown", code: "", pcs: [], current: null, error: null };
 
   /** Each PC's session (from its "welcome"), sent with every call to it. */
   private sessions = new Map<string, string>();
+  private everWelcomed = new Set<string>();
   /** PCs that said this phone is allowed (each PC asks once). */
   private allowedBy = new Set<string>();
   private asked = false;
@@ -105,6 +108,33 @@ export class PhoneSession {
     this.link.start();
   }
 
+  /** The app came back to the front, or the network came back: reconnect now rather than at the next try. */
+  nudge() {
+    this.link?.nudge();
+  }
+
+  /** Whether requests can go now: a PC that's on, has let this phone in and said hello back. */
+  ready(): boolean {
+    const pc = this.state.current;
+    return !!pc && this.sessions.has(pc);
+  }
+
+  /** Resolves when ready (see ready()), or rejects after `ms`. */
+  whenReady(ms: number): Promise<void> {
+    if (this.ready()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const done = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      const t = setTimeout(() => {
+        this.readyWaiters = this.readyWaiters.filter((w) => w !== done);
+        reject(new Error(this.state.pcs.some((p) => p.online) ? "Your PC didn't answer; try again" : "None of your PCs is on"));
+      }, ms);
+      this.readyWaiters.push(done);
+    });
+  }
+
   stop() {
     for (const d of this.welcomed) void this.link?.send(d, { k: "bye" });
     this.link?.stop();
@@ -129,6 +159,12 @@ export class PhoneSession {
     if (!usable(current)) {
       const last = localStorage.getItem(`${STORE}pc.${this.ws.room}`);
       current = usable(last) ? last : (pcs.find((p) => p.online && p.allowed)?.device ?? null);
+    }
+    if (current !== this.state.current && this.state.current && current) {
+      // Requests go to another PC now: the window shows what that one has.
+      queueMicrotask(() => {
+        for (const cb of this.listeners.get("index-changed") ?? []) cb([]);
+      });
     }
     this.set({ pcs, current });
     // Every PC that let it in hears from it (settings for each PC; events only count from the current one).
@@ -195,7 +231,17 @@ export class PhoneSession {
       else if (this.state.pairing !== "allowed") this.set({ pairing: "denied", error: m.err ?? "Not allowed" });
     } else if (m.k === "welcome") {
       const session = (m as { session?: unknown }).session;
-      if (typeof session === "string") this.sessions.set(from, session);
+      if (typeof session === "string") {
+        const again = this.everWelcomed.has(from);
+        this.everWelcomed.add(from);
+        this.sessions.set(from, session);
+        if (from === this.state.current) {
+          for (const w of this.readyWaiters.splice(0)) w();
+          // Back after a drop (or the PC restarted): the window catches up on what it missed.
+          if (again) for (const cb of this.listeners.get("index-changed") ?? []) cb([]);
+        }
+        this.set({});
+      }
     } else if (m.k === "ret" && m.id) {
       const c = this.calls.get(m.id);
       if (!c) return;
@@ -206,6 +252,7 @@ export class PhoneSession {
         // The PC started again since: say hello again (a new session) for the next call.
         if (m.err === "stale-session") {
           this.welcomed.delete(from);
+          this.sessions.delete(from);
           void this.hello(from);
         }
         c.reject(new Error(m.err === "stale-session" ? "The PC restarted; try again" : (m.err ?? "The PC couldn't do that")));
@@ -217,8 +264,19 @@ export class PhoneSession {
     }
   }
 
-  /** A request to the current PC, like ipcRenderer.invoke. */
-  call(channel: string, args: unknown[]): Promise<unknown> {
+  /** A request to the current PC, like ipcRenderer.invoke: waits a while for one to be ready; tried again once after the PC restarted. */
+  async call(channel: string, args: unknown[]): Promise<unknown> {
+    await this.whenReady(45_000);
+    try {
+      return await this.callNow(channel, args);
+    } catch (e) {
+      if ((e as Error).message !== "The PC restarted; try again") throw e;
+      await this.whenReady(20_000);
+      return this.callNow(channel, args);
+    }
+  }
+
+  private callNow(channel: string, args: unknown[]): Promise<unknown> {
     const pc = this.state.current;
     if (!pc) return Promise.reject(new Error("None of your PCs is on"));
     const id = Math.random().toString(36).slice(2) + Date.now().toString(36);

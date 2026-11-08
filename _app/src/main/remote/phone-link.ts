@@ -52,6 +52,7 @@ export const REMOTE_CHANNELS = new Set([
   "settings:get",
   "composer:load",
   "workspace:list",
+  "workspace:rename",
 ]);
 
 /**
