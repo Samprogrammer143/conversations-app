@@ -123,11 +123,15 @@ export async function waitForToken(code: DeviceCode, cancelled: () => boolean): 
 /** fetch, tried again twice when the network isn't there (just back in front, or a moment's drop). */
 async function fetchAgain(url: string, init: RequestInit): Promise<Response> {
   for (let i = 0; ; i++) {
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), 15_000);
     try {
-      return await fetch(url, init);
+      return await fetch(url, { ...init, signal: stop.signal });
     } catch (e) {
       if (i >= 2) throw new Error(`No connection to GitHub (${(e as Error).message})`);
       await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    } finally {
+      clearTimeout(timer);
     }
   }
 }
@@ -153,6 +157,11 @@ export async function writeRequest(token: string, repo: string, req: { id: strin
   if (!r.ok) throw new Error(`GitHub said ${r.status}`);
 }
 
+/** The organisations an account belongs to (to say which one hasn't allowed the app yet). */
+export async function userOrgs(token: string): Promise<string[]> {
+  return ((await gh<{ login: string }[]>(token, "/user/orgs")) ?? []).map((o) => o.login);
+}
+
 export async function whoAmI(token: string): Promise<string> {
   return (await gh<{ login: string }>(token, "/user"))?.login ?? "";
 }
@@ -164,23 +173,31 @@ interface Repo {
 }
 
 /** The chat repositories this account can see that have the phone link set up. */
+/** Where an organisation's owner lets the Conversations app see its repositories (GitHub hides them until then). */
+export const ORG_ACCESS_URL = `https://github.com/settings/connections/applications/${GITHUB_CLIENT_ID}`;
+
+/**
+ * The chat repositories with the phone link on one account. Bounded: those named like chat
+ * repositories, then the 20 most recently changed others; every request has a time limit.
+ */
 export async function findWorkspaces(token: string): Promise<(WorkspaceLink & { repo: string })[]> {
   const repos: Repo[] = [];
-  for (let page = 1; page <= 5; page++) {
+  for (let page = 1; page <= 3; page++) {
     const batch = await gh<Repo[]>(token, `/user/repos?per_page=100&page=${page}&sort=updated&affiliation=owner,collaborator,organization_member`);
     if (!batch?.length) break;
     repos.push(...batch);
     if (batch.length < 100) break;
   }
-  // Chat repositories first (they're usually named so), then the rest, a few at a time.
-  const likely = (r: Repo) => (/conversation/i.test(r.name) ? 0 : 1);
-  repos.sort((a, b) => likely(a) - likely(b));
+  // Chat repositories first (they're usually named so), then the 20 most recently changed others.
+  const likely = repos.filter((r) => /conversation/i.test(r.name));
+  const rest = repos.filter((r) => !/conversation/i.test(r.name)).slice(0, 20);
   const out: (WorkspaceLink & { repo: string })[] = [];
-  for (let i = 0; i < repos.length; i += 8) {
-    const found = await Promise.all(repos.slice(i, i + 8).map((r) => workspaceIn(token, r.full_name).catch(() => null)));
-    for (const w of found) if (w) out.push(w);
-    // Stop looking past the likely ones once something turned up.
-    if (out.length && repos[i + 8] && likely(repos[i + 8]) === 1) break;
+  for (const group of [likely, rest]) {
+    for (let i = 0; i < group.length; i += 8) {
+      const found = await Promise.all(group.slice(i, i + 8).map((r) => workspaceIn(token, r.full_name).catch(() => null)));
+      for (const w of found) if (w) out.push(w);
+    }
+    if (out.length) break;
   }
   return out;
 }

@@ -1,28 +1,41 @@
-// The GitHub sign-in code with a Copy button (setup and the workspace switcher). Kept apart from
-// screens.tsx, which loads the window's store: setup runs before window.conversations exists.
-import { useState } from "react";
-import { Icon } from "../renderer/components/Icon";
+// The GitHub sign-in code, big: hold it to copy (it's also copied when GitHub opens). Kept apart
+// from screens.tsx, which loads the window's store: setup runs before window.conversations exists.
+import { useRef, useState } from "react";
 import { copyText } from "./state";
 
-/** The GitHub sign-in code, big, with a Copy button (and it can be selected by hand). */
 export function CodeToCopy({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copy = async () => {
+    if (await copyText(code)) {
+      setCopied(true);
+      navigator.vibrate?.(20);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+  const cancel = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
   return (
-    <div className="code-to-copy">
-      <span className="device-code" aria-label={`Code ${code}`}>
-        {code}
-      </span>
-      <button
-        className="copy-button"
-        onClick={async () => {
-          setCopied(await copyText(code));
-          setTimeout(() => setCopied(false), 2500);
+    <div className="code-hold">
+      <span
+        className={`device-code${copied ? " copied" : ""}`}
+        aria-label={`Code ${code}. Hold to copy.`}
+        onPointerDown={() => {
+          cancel();
+          timer.current = setTimeout(() => void copy(), 450);
+        }}
+        onPointerUp={cancel}
+        onPointerLeave={cancel}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          void copy();
         }}
       >
-        <Icon name={copied ? "check" : "copy"} size={18} />
-        {copied ? "Copied" : "Copy"}
-      </button>
+        {code}
+      </span>
+      <span className="code-hint">{copied ? "Copied" : "Hold to copy · copied when GitHub opens"}</span>
     </div>
   );
 }
-

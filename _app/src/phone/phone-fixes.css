@@ -233,3 +233,145 @@ body[data-platform="android"] .content.stacked {
     animation: none;
   }
 }
+
+/* The GitHub code: hold to copy (no button). */
+.code-hold {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.code-hold .device-code {
+  display: grid;
+  place-items: center;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.code-hold .device-code.copied {
+  background: var(--status-success-tint);
+}
+.code-hint {
+  text-align: center;
+  font: 12px/16px var(--font-ui);
+  color: var(--label-tertiary);
+}
+
+/* What adding another account came to. */
+.sheet-note {
+  margin: 4px 24px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bg-sunken);
+}
+.sheet-note p {
+  margin: 0 !important;
+  font: 13px/19px var(--font-ui);
+  color: var(--label-secondary);
+}
+.sheet-note .text-button {
+  height: 40px;
+  padding: 0;
+  margin-top: 4px;
+}
+
+/* Adding another GitHub account (Figma M11a–d). */
+.add-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 24px;
+  font: 15px/22px var(--font-ui);
+  color: var(--label-primary);
+}
+.add-step .num {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-accent-tint);
+  color: var(--label-link);
+  font: 600 12px/1 var(--font-ui);
+}
+.add-step .num.done {
+  background: var(--status-success-tint);
+  color: var(--status-success);
+}
+.add-code {
+  padding: 6px 24px 0;
+}
+.add-code .device-code {
+  height: 72px;
+  border-radius: 14px;
+  font-size: 32px;
+}
+.add-code .device-code.waiting {
+  display: grid;
+  place-items: center;
+  color: var(--label-quaternary);
+}
+.add-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px 4px;
+  font: 13px/18px var(--font-ui);
+  color: var(--label-secondary);
+}
+.add-status .icon {
+  color: var(--icon-accent);
+}
+.add-card {
+  margin: 8px 24px 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--status-warning-tint);
+}
+.add-card .title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font: 600 15px/20px var(--font-ui);
+  color: var(--label-primary);
+}
+.add-card .title .icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--status-warning);
+}
+.add-card p {
+  margin: 8px 0 0 !important;
+  font: 13px/19px var(--font-ui);
+  color: var(--label-secondary);
+}
+.sheet-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 14px 24px 0;
+}
+.sheet-actions .text-button {
+  height: 44px;
+}
+.big-button.quiet {
+  background: var(--fill-quaternary);
+  color: var(--label-primary);
+}
+.big-button:disabled {
+  opacity: 0.5;
+}
+.sheet-added {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px 2px;
+  font: 13px/18px var(--font-ui);
+  color: var(--label-secondary);
+}
+.sheet-added .icon {
+  color: var(--status-success);
+}

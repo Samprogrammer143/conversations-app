@@ -169,6 +169,14 @@ try {
   const wsRows = await until(() => phone.evaluate(() => document.querySelectorAll(".phone-sheet .sheet-row").length), 10_000);
   await phone.screenshot({ path: path.join(out, "phone-workspaces.png") });
   check("the workspace switcher lists the workspace and Sign in with another account", wsRows >= 2, `${wsRows} rows`);
+  // Adding another GitHub account (M11a): its own sheet with the code (GitHub's replies stubbed here).
+  await phone.route("https://github.com/login/device/code", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ device_code: "d", user_code: "8DB1-A121", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 }) }));
+  await phone.route("https://github.com/login/oauth/access_token", (r) => r.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ error: "authorization_pending" }) }));
+  await phone.locator(".phone-sheet .sheet-row", { hasText: "Add another GitHub account" }).click();
+  const codeShown = await until(() => phone.evaluate(() => /[0-9]/.test(document.querySelector(".add-code .device-code")?.textContent ?? "") ? document.querySelector(".add-code .device-code").textContent : null), 10_000);
+  await phone.screenshot({ path: path.join(out, "phone-add-account.png") });
+  check("adding an account shows the code in its own sheet", codeShown === "8DB1-A121", String(codeShown));
+  await phone.locator(".sheet-actions .text-button", { hasText: "Cancel" }).click();
   await phone.mouse.click(200, 60);
 
   // Ask the PC something it mustn't do for a phone.

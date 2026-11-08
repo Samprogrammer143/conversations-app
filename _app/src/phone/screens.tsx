@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../renderer/components/Icon";
 import { useStore } from "../renderer/lib/store";
-import { allTokens, findAllWorkspaces, savedWorkspaces, startDeviceFlow, waitForToken, whoAmI, type DeviceCode, type FoundWorkspace } from "./github";
+import { ORG_ACCESS_URL, allTokens, findAllWorkspaces, findWorkspaces, savedWorkspaces, signOut, startDeviceFlow, userOrgs, waitForToken, whoAmI, type DeviceCode, type FoundWorkspace } from "./github";
 import { control, copyText, setWorkspaceName, useBack, usePhone, useWorkspaceName } from "./state";
 import { CodeToCopy } from "./code";
 import { useCallback } from "react";
@@ -25,39 +25,13 @@ function Sheet({ title, sub, onClose, children }: { title: string; sub?: string;
   );
 }
 
-/** A device-flow sign-in inside a sheet: the code, then GitHub. Resolves with the new token. */
-function useDeviceSignIn() {
-  const [code, setCode] = useState<DeviceCode | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const cancelled = useRef(false);
-  const start = async (): Promise<string | null> => {
-    setErr(null);
-    cancelled.current = false;
-    try {
-      const c = await startDeviceFlow();
-      setCode(c);
-      const t = await waitForToken(c, () => cancelled.current);
-      setCode(null);
-      return t;
-    } catch (e) {
-      setCode(null);
-      if ((e as Error).message !== "cancelled") setErr((e as Error).message);
-      return null;
-    }
-  };
-  const cancel = () => {
-    cancelled.current = true;
-    setCode(null);
-  };
-  return { code, err, start, cancel };
-}
-
 /** M11: the workspaces this phone found on GitHub, and signing in with another account. */
 export function WorkspaceSheet({ onClose }: { onClose: () => void }) {
   const { session, state } = usePhone();
   const [found, setFound] = useState<FoundWorkspace[]>(() => savedWorkspaces());
-  const [busy, setBusy] = useState(false);
-  const signIn = useDeviceSignIn();
+  /** M11a–d: adding another GitHub account, in a sheet of its own. */
+  const [adding, setAdding] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   useEffect(() => {
     void findAllWorkspaces().then(setFound, () => {});
   }, []);
@@ -76,6 +50,17 @@ export function WorkspaceSheet({ onClose }: { onClose: () => void }) {
       // Kept on the phone; the PC gets it next time (or keeps its own name).
     }
   };
+  if (adding)
+    return (
+      <AddAccountSheet
+        onClose={() => setAdding(false)}
+        onAdded={(text) => {
+          setFound(savedWorkspaces());
+          setNote(text);
+          setAdding(false);
+        }}
+      />
+    );
   // The workspace this phone is in always shows (also before GitHub has answered).
   const here = session?.ws as FoundWorkspace | undefined;
   const list = here && !found.some((w) => w.room === here.room) ? [here, ...found] : found;
@@ -118,47 +103,206 @@ export function WorkspaceSheet({ onClose }: { onClose: () => void }) {
           </button>
         );
       })}
-      <div className="sheet-divider" />
-      {signIn.code ? (
-        <div className="sheet-signin">
-          <p>Enter this code on GitHub, signed in as the other account</p>
-          <CodeToCopy code={signIn.code.user_code} />
-          <div className="row">
-            <button className="text-button" onClick={signIn.cancel}>
-              Cancel
-            </button>
+      {note && (
+        <div className="sheet-added">
+          <Icon name="check" size={16} />
+          <span>{note}</span>
+        </div>
+      )}
+      <button className="sheet-row" onClick={() => setAdding(true)}>
+        <span className="ws-tile add">
+          <Icon name="plus" size={20} />
+        </span>
+        <span className="text">
+          <span className="name">Add another GitHub account</span>
+        </span>
+      </button>
+    </Sheet>
+  );
+}
+
+type AddPhase = "code" | "looking" | "same" | "none" | "error";
+
+/**
+ * M11a–d: adding another GitHub account (a workspace under another one, like YCS). The code to
+ * paste on GitHub (hold to copy; copied as GitHub opens), then who signed in and what was found:
+ * workspaces (back to the switcher, which lists them), the same account again, or nothing (most
+ * likely an organisation that hasn't allowed the app yet: its page on GitHub, and "look again").
+ */
+function AddAccountSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (note: string) => void }) {
+  const [code, setCode] = useState<DeviceCode | null>(null);
+  const [phase, setPhase] = useState<AddPhase>("code");
+  const [login, setLogin] = useState("");
+  const [orgs, setOrgs] = useState<string[]>([]);
+  const [err, setErr] = useState("");
+  const [round, setRound] = useState(0);
+  const token = useRef<string | null>(null);
+
+  const look = useCallback(
+    async (t: string, who: string) => {
+      setPhase("looking");
+      const mine = await findWorkspaces(t).catch(() => []);
+      if (mine.length) {
+        await findAllWorkspaces().catch(() => []);
+        onAdded(`Added ${mine.map((w) => w.name).join(", ")} from ${who}.`);
+        return;
+      }
+      setOrgs(await userOrgs(t).catch(() => []));
+      setPhase("none");
+    },
+    [onAdded],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setPhase("code");
+    setCode(null);
+    setErr("");
+    (async () => {
+      try {
+        const known = await Promise.all(allTokens().map((t) => whoAmI(t).catch(() => "")));
+        const c = await startDeviceFlow();
+        if (cancelled) return;
+        setCode(c);
+        const t = await waitForToken(c, () => cancelled);
+        const who = await whoAmI(t).catch(() => "");
+        if (cancelled) return;
+        setLogin(who);
+        if (who && known.includes(who)) {
+          // The same account again (the browser was still signed in to it): not kept twice.
+          if (t !== allTokens()[0]) signOut(t);
+          setPhase("same");
+          return;
+        }
+        token.current = t;
+        await look(t, who);
+      } catch (e) {
+        if (!cancelled && (e as Error).message !== "cancelled") {
+          setErr((e as Error).message);
+          setPhase("error");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [round, look]);
+
+  const signedIn = phase !== "code" && phase !== "error";
+  const steps = (
+    <>
+      <div className="add-step">
+        <span className={`num${signedIn ? " done" : ""}`}>{signedIn ? <Icon name="check" size={16} /> : "1"}</span>
+        <span>{signedIn ? `Signed in as ${login || "the other account"}` : "Open GitHub and sign in as the other account"}</span>
+      </div>
+      {phase === "code" && (
+        <div className="add-step">
+          <span className="num">2</span>
+          <span>Paste this code</span>
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <Sheet title="Add a GitHub account" sub={phase === "code" || phase === "looking" ? "For a workspace under another account, like YCS." : undefined} onClose={onClose}>
+      {phase !== "error" && steps}
+      {phase === "code" && (
+        <>
+          <div className="add-code">{code ? <CodeToCopy code={code.user_code} /> : <span className="device-code waiting">····-····</span>}</div>
+          <div className="sheet-actions">
             <button
               className="big-button"
+              disabled={!code}
               onClick={async () => {
-                await copyText(signIn.code!.user_code);
-                window.open(signIn.code!.verification_uri, "_blank");
+                await copyText(code!.user_code);
+                window.open(code!.verification_uri, "_blank");
               }}
             >
               Open GitHub
             </button>
+            <button className="text-button" onClick={onClose}>
+              Cancel
+            </button>
           </div>
-        </div>
-      ) : (
-        <button
-          className="sheet-row"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            const before = allTokens().length;
-            const t = await signIn.start();
-            if (t && allTokens().length > before) setFound(await findAllWorkspaces().catch(() => found));
-            setBusy(false);
-          }}
-        >
-          <span className="ws-tile add">
-            <Icon name="plus" size={20} />
-          </span>
-          <span className="text">
-            <span className="name">{busy ? "Looking…" : "Sign in with another GitHub account"}</span>
-          </span>
-        </button>
+        </>
       )}
-      {signIn.err && <p className="sheet-error">{signIn.err}</p>}
+      {phase === "looking" && (
+        <>
+          <div className="add-status">
+            <Icon name="loader-circle" size={18} className="spin" />
+            <span>Looking for its workspaces…</span>
+          </div>
+          <div className="sheet-actions">
+            <button className="big-button quiet" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+      {phase === "same" && (
+        <>
+          <div className="add-card">
+            <div className="title">
+              <Icon name="triangle-alert" size={18} />
+              <span>That's {login}, the account already here</span>
+            </div>
+            <p>To add the other account, sign out of GitHub in your browser first, then try again.</p>
+          </div>
+          <div className="sheet-actions">
+            <button className="big-button" onClick={() => setRound((r) => r + 1)}>
+              Try again
+            </button>
+            <button className="text-button" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+      {phase === "none" && (
+        <>
+          <div className="add-card">
+            <div className="title">
+              <Icon name="triangle-alert" size={18} />
+              <span>{orgs.length ? `${orgs.join(", ")} ${orgs.length === 1 ? "hasn't" : "haven't"} allowed Conversations yet` : `No workspace on ${login || "that account"} yet`}</span>
+            </div>
+            <p>
+              {orgs.length
+                ? "GitHub hides an organisation's repositories from an app until the organisation allows it. Its owner can do it in a minute on GitHub."
+                : "None of its chat repositories has the phone link. Open the workspace in Conversations on a PC for a minute, then look again."}
+            </p>
+          </div>
+          <div className="sheet-actions">
+            {orgs.length > 0 && (
+              <button className="big-button" onClick={() => window.open(ORG_ACCESS_URL, "_blank")}>
+                Allow it on GitHub
+              </button>
+            )}
+            <button className="text-button" onClick={() => token.current && void look(token.current, login)}>
+              {orgs.length ? "I've allowed it: look again" : "Look again"}
+            </button>
+          </div>
+        </>
+      )}
+      {phase === "error" && (
+        <>
+          <div className="add-card">
+            <div className="title">
+              <Icon name="triangle-alert" size={18} />
+              <span>That didn't work</span>
+            </div>
+            <p>{err}</p>
+          </div>
+          <div className="sheet-actions">
+            <button className="big-button" onClick={() => setRound((r) => r + 1)}>
+              Try again
+            </button>
+            <button className="text-button" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
     </Sheet>
   );
 }
