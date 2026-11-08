@@ -191,6 +191,15 @@ try {
   });
   await phone.screenshot({ path: path.join(out, "phone-composer.png") });
   check("the message box's controls fit on one line, on screen", !!box && box.h <= 56 && box.bottom <= box.vh, JSON.stringify(box));
+  // The + button: the phone's own picker; a photo becomes an attachment.
+  const png = path.join(out, "attach-test.png");
+  fs.writeFileSync(png, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
+  const [chooser] = await Promise.all([phone.waitForEvent("filechooser", { timeout: 10_000 }), phone.click("button[aria-label^='Attach']")]);
+  await chooser.setFiles(png);
+  const attached = await until(() => phone.evaluate(() => document.querySelectorAll(".attach-chip").length || null), 10_000);
+  check("the + button attaches a photo from the phone", !!attached, `${attached} attached`);
+  await phone.locator(".attach-chip .remove").first().click().catch(() => {});
+
   await phone.click("button[aria-label=More]").catch(() => {});
   await phone.waitForTimeout(500);
   await phone.screenshot({ path: path.join(out, "phone-menu.png") });

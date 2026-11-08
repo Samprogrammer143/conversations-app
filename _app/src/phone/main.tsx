@@ -32,13 +32,49 @@ control.switchTo = (w) => {
   location.reload();
 };
 
+/**
+ * The + button: the phone's own picker (photos, camera, files). Images only: another file isn't on
+ * the PC, so it can't be handed to Claude by its path. Big ones are made to fit by the message box.
+ */
+function pickPhotos(): Promise<{ images: { name: string; mediaType: string; data: string }[]; paths: string[] }> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/gif,image/webp";
+    input.multiple = true;
+    input.style.display = "none";
+    document.body.appendChild(input);
+    const done = (images: { name: string; mediaType: string; data: string }[]) => {
+      input.remove();
+      resolve({ images, paths: [] });
+    };
+    input.addEventListener("cancel", () => done([]));
+    input.addEventListener("change", async () => {
+      const files = [...(input.files ?? [])].slice(0, 10);
+      const images = await Promise.all(
+        files.map(
+          (f) =>
+            new Promise<{ name: string; mediaType: string; data: string } | null>((res) => {
+              const r = new FileReader();
+              r.onload = () => res({ name: f.name || "photo", mediaType: f.type || "image/jpeg", data: String(r.result).replace(/^data:[^,]*,/, "") });
+              r.onerror = () => res(null);
+              r.readAsDataURL(f);
+            }),
+        ),
+      );
+      done(images.filter((x): x is NonNullable<typeof x> => !!x));
+    });
+    input.click();
+  });
+}
+
 /** Requests the phone answers itself: there's no PC folder, file picker or window here. */
 const LOCAL: Record<string, (...args: any[]) => unknown> = {
   "app:openExternal": (url: string) => void (/^https?:\/\//.test(url) ? window.open(url, "_blank") : undefined),
   "app:copyText": (text: string) => navigator.clipboard?.writeText(text),
   "app:openPath": () => "Folders open on the PC",
   "app:pickFolder": () => null,
-  "app:pickFiles": () => ({ images: [], paths: [] }),
+  "app:pickFiles": () => pickPhotos(),
   "app:updateReady": () => null,
   "app:showSettings": () => undefined,
   "app:showMain": () => undefined,

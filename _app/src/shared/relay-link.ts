@@ -41,7 +41,7 @@ export interface RelayLinkOptions {
 const PART = 700_000;
 /** Messages being put back together from parts: at most this many per sender, and this much in all. */
 const MAX_PENDING_PER_PEER = 2;
-const MAX_PENDING_BYTES = 24_000_000;
+const MAX_PENDING_BYTES = 60_000_000;
 const MAX_KEYS = 64;
 const PING_MS = 25_000;
 /** A ping with no pong this long after it: the connection is dead (a phone's network changed, or it slept). */

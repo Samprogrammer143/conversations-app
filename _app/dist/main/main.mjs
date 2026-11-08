@@ -6381,7 +6381,7 @@ var ReplayGuard = class {
 // src/shared/relay-link.ts
 var PART = 7e5;
 var MAX_PENDING_PER_PEER = 2;
-var MAX_PENDING_BYTES = 24e6;
+var MAX_PENDING_BYTES = 6e7;
 var MAX_KEYS2 = 64;
 var PING_MS = 25e3;
 var PONG_WAIT_MS = 1e4;

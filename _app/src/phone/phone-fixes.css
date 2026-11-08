@@ -188,3 +188,48 @@ body[data-platform="android"] .composer-controls .chip:not(.sends-to) {
   padding: 0;
   justify-content: center;
 }
+
+/* Two-line choices (the mode menu's Auto, and the others): as tall as they need on the phone. */
+body[data-platform="android"] .menu.choice .menu-item.two-line {
+  height: auto;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+body[data-platform="android"] .menu.choice .menu-item .hint {
+  font: 400 13px/18px var(--font-ui);
+}
+
+/* Opening a chat slides it in from the right; going back slides the list in from the left. */
+@keyframes phone-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes phone-in-left {
+  from {
+    transform: translateX(-28%);
+    opacity: 0.6;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+body[data-platform="android"] .content.stacked > .detail {
+  animation: phone-in-right 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+body[data-platform="android"] .content.stacked > .list-col {
+  animation: phone-in-left 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+body[data-platform="android"] .content.stacked {
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-platform="android"] .content.stacked > .detail,
+  body[data-platform="android"] .content.stacked > .list-col {
+    animation: none;
+  }
+}
