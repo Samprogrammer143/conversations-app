@@ -68,7 +68,7 @@ export async function findAllWorkspaces(): Promise<FoundWorkspace[]> {
 
 export async function startDeviceFlow(): Promise<DeviceCode> {
   if (!GITHUB_CLIENT_ID) throw new Error("This build has no GitHub app set (VITE_GITHUB_CLIENT_ID)");
-  const r = await fetch("https://github.com/login/device/code", {
+  const r = await fetchAgain("https://github.com/login/device/code", {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ client_id: GITHUB_CLIENT_ID, scope: "repo read:org" }).toString(),
@@ -77,19 +77,39 @@ export async function startDeviceFlow(): Promise<DeviceCode> {
   return (await r.json()) as DeviceCode;
 }
 
+/** Waits `ms`, or less: until the app is in front again (Android pauses an app's network behind the browser). */
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(t);
+      document.removeEventListener("visibilitychange", back);
+      resolve();
+    };
+    const back = () => document.visibilityState === "visible" && setTimeout(done, 400);
+    const t = setTimeout(done, ms);
+    document.addEventListener("visibilitychange", back);
+  });
+}
+
 /** Waits until the code is entered on GitHub; resolves with the token. */
 export async function waitForToken(code: DeviceCode, cancelled: () => boolean): Promise<string> {
   let interval = Math.max(5, code.interval) * 1000;
   const until = Date.now() + code.expires_in * 1000;
   while (Date.now() < until) {
-    await new Promise((r) => setTimeout(r, interval));
+    await pause(interval);
     if (cancelled()) throw new Error("cancelled");
-    const r = await fetch("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ client_id: GITHUB_CLIENT_ID, device_code: code.device_code, grant_type: "urn:ietf:params:oauth:grant-type:device_code" }).toString(),
-    });
-    const j = (await r.json()) as { access_token?: string; error?: string; interval?: number };
+    let j: { access_token?: string; error?: string; interval?: number };
+    try {
+      const r = await fetch("https://github.com/login/oauth/access_token", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: GITHUB_CLIENT_ID, device_code: code.device_code, grant_type: "urn:ietf:params:oauth:grant-type:device_code" }).toString(),
+      });
+      j = (await r.json()) as typeof j;
+    } catch {
+      // No network for a moment (the app was behind GitHub's page): asked again shortly, not given up.
+      continue;
+    }
     if (j.access_token) {
       keepToken(j.access_token);
       return j.access_token;
@@ -100,8 +120,20 @@ export async function waitForToken(code: DeviceCode, cancelled: () => boolean): 
   throw new Error("The code ran out; start again");
 }
 
+/** fetch, tried again twice when the network isn't there (just back in front, or a moment's drop). */
+async function fetchAgain(url: string, init: RequestInit): Promise<Response> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fetch(url, init);
+    } catch (e) {
+      if (i >= 2) throw new Error(`No connection to GitHub (${(e as Error).message})`);
+      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    }
+  }
+}
+
 async function gh<T>(token: string, url: string, raw = false): Promise<T | null> {
-  const r = await fetch(url.startsWith("http") ? url : `https://api.github.com${url}`, {
+  const r = await fetchAgain(url.startsWith("http") ? url : `https://api.github.com${url}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: raw ? "application/vnd.github.raw+json" : "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
   });
   if (r.status === 404) return null;
@@ -114,10 +146,10 @@ async function gh<T>(token: string, url: string, raw = false): Promise<T | null>
 export async function writeRequest(token: string, repo: string, req: { id: string; key: string; name: string }): Promise<void> {
   const url = `https://api.github.com/repos/${repo}/contents/_devices/requests/${req.id}.json`;
   const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
-  const have = await fetch(url, { headers });
+  const have = await fetchAgain(url, { headers });
   const sha = have.ok ? ((await have.json()) as { sha?: string }).sha : undefined;
   const content = btoa(unescape(encodeURIComponent(`${JSON.stringify({ id: req.id, key: req.key, name: req.name, at: new Date().toISOString() }, null, 2)}\n`)));
-  const r = await fetch(url, { method: "PUT", headers, body: JSON.stringify({ message: `Devices: ${req.name} asks to be allowed`, content, ...(sha ? { sha } : {}) }) });
+  const r = await fetchAgain(url, { method: "PUT", headers, body: JSON.stringify({ message: `Devices: ${req.name} asks to be allowed`, content, ...(sha ? { sha } : {}) }) });
   if (!r.ok) throw new Error(`GitHub said ${r.status}`);
 }
 

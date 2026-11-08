@@ -2,10 +2,10 @@
 // workspaces, and wait on the code until a PC says Allow.
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../renderer/components/Icon";
-import { iconSvg } from "../../scripts/icon-art.mjs";
+import { markSvg } from "../../scripts/icon-art.mjs";
 
-/** The app's own icon, as on the PC and the phone's home screen. */
-const APP_ICON = iconSvg({ size: 88, grid: "full", inset: 0.04, ids: "setup" });
+/** The app's mark: the blue chat with the prompt, without the tile (Sam, 8 Nov). */
+const APP_ICON = markSvg({ size: 88, ids: "setup" });
 import { findAllWorkspaces, savedToken, signOut, startDeviceFlow, waitForToken, whoAmI, type DeviceCode } from "./github";
 import type { PhoneState, WorkspaceLink } from "./session";
 
