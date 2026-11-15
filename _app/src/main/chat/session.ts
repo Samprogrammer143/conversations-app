@@ -16,6 +16,7 @@ import { isDecision, type Decision, type EffortLevel, type PermissionMode } from
 import { classifyTool, destructiveFallback, serverName } from "./destructive";
 import { remember, rememberCommands, toChoices, toCommands, type ModelChoice } from "./models";
 import { PC } from "../words";
+import { refsDir } from "./refs";
 
 /** Streamed text reaches the window at most this often (20 times a second). */
 const STREAM_EMIT_MS = 50;
@@ -48,13 +49,15 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
   }
 }
 
-type FollowUp = { text: string; attachments: Attachment[] } | { shell: [string, string]; label: string };
+type FollowUp = ReturnedMessage | { shell: [string, string]; label: string };
 const followLabel = (f: FollowUp) => ("shell" in f ? f.label : f.text);
 
 /** A message Claude never read, handed back to the window for its message box. */
 export interface ReturnedMessage {
   text: string;
   attachments: Attachment[];
+  /** The app's note for Claude (the chats the message links to): sent with it, never shown or handed back. */
+  context?: string;
 }
 
 /** What Claude Code says of one message it was given: queued, started (Claude has read it), completed or cancelled. */
@@ -253,8 +256,8 @@ export class ChatSession extends EventEmitter {
     this.emit("status", this.status);
   }
 
-  start(first: string, attachments: Attachment[] = []) {
-    this.send(first, attachments);
+  start(first: string, attachments: Attachment[] = [], context?: string) {
+    this.send(first, attachments, context);
     this.open();
   }
 
@@ -276,6 +279,11 @@ export class ChatSession extends EventEmitter {
     // starting, and don't tell Claude to have you /resume (a terminal's step).
     const env: Record<string, string | undefined> = { ...process.env, CLAUDE_SYNC_INCLUDE_HEADLESS: "1", CLAUDE_SYNC_IN_APP: "1" };
     delete env.ELECTRON_RUN_AS_NODE;
+    try {
+      fs.mkdirSync(refsDir(), { recursive: true });
+    } catch {
+      // Only chat links need it.
+    }
     this.q = query({
       prompt: this.input,
       options: {
@@ -290,6 +298,8 @@ export class ChatSession extends EventEmitter {
         model: this.opts.model ?? undefined,
         effort: this.opts.effort ?? undefined,
         systemPrompt: systemPrompt(!!this.opts.resume),
+        // Where the app saves the chats a message links to: read without asking.
+        additionalDirectories: [refsDir()],
         // The same Claude in Chrome integration a terminal session has (`claude --chrome`).
         // When the extension isn't running, the browser tools are simply absent.
         extraArgs: { chrome: null },
@@ -311,16 +321,16 @@ export class ChatSession extends EventEmitter {
    * A message from the composer: sent now. While Claude works, Claude Code takes it and Claude
    * reads it at its next step; an older Claude Code gets it once the turn has ended.
    */
-  send(text: string, attachments: Attachment[] = []) {
+  send(text: string, attachments: Attachment[] = [], context?: string) {
     if (this.q && this.busy) {
       // (Behind a "!" command's record still waiting its turn, it waits too: they go in the order you typed them.)
-      if (this.live && !this.followUps.length) return this.sendAhead({ text, attachments });
-      this.followUps.push({ text, attachments });
+      if (this.live && !this.followUps.length) return this.sendAhead({ text, attachments, context });
+      this.followUps.push({ text, attachments, context });
       this.set({ queued: this.queuedLabels() });
       return;
     }
     this.flushRecords();
-    this.handOver({ text, attachments });
+    this.handOver({ text, attachments, context });
   }
 
   /** A "!" command's record: written now, or after the turn in progress, without starting one. */
@@ -372,9 +382,14 @@ export class ChatSession extends EventEmitter {
    * One message as Claude Code takes it: its images first, then the text. Marked as yours, so
    * one Claude reads in the middle of its work is taken as from you, not as text a tool returned.
    */
-  private userMessage(item: { text: string; attachments: Attachment[] }, uuid: string): SDKUserMessage {
-    const content = item.attachments.length
-      ? [...item.attachments.map((a) => ({ type: "image" as const, source: { type: "base64" as const, media_type: a.mediaType, data: a.data } })), { type: "text" as const, text: item.text }]
+  private userMessage(item: ReturnedMessage, uuid: string): SDKUserMessage {
+    // The note is a block of its own, so the chat shows only what you typed.
+    const content = item.attachments.length || item.context
+      ? [
+          ...item.attachments.map((a) => ({ type: "image" as const, source: { type: "base64" as const, media_type: a.mediaType, data: a.data } })),
+          { type: "text" as const, text: item.text },
+          ...(item.context ? [{ type: "text" as const, text: item.context }] : []),
+        ]
       : item.text;
     return { type: "user", message: { role: "user", content }, parent_tool_use_id: null, priority: "next", uuid, origin: { kind: "human" }, timestamp: new Date().toISOString() } as unknown as SDKUserMessage;
   }
@@ -423,7 +438,7 @@ export class ChatSession extends EventEmitter {
   }
 
   /** Gives one message to Claude Code to start a turn with. */
-  private handOver(item: { text: string; attachments: Attachment[] }) {
+  private handOver(item: ReturnedMessage) {
     this.used = true;
     const uuid = randomUUID();
     const msg = this.userMessage(item, uuid);

@@ -322,3 +322,16 @@ export function search(db: DatabaseSync, text: string, ctx: QueryContext, { incl
   const pcs = new Set(rows.flatMap((r) => (r.lastPc ? [r.lastPc] : [])));
   return { query: text, hits: out, suggestion, searchedConversations: rows.length, pcCount: pcs.size, tookMs: Math.round(performance.now() - t0) };
 }
+
+/**
+ * A chat link's chat: its title and its latest items, in order; null when it isn't here or
+ * was deleted. At most `limit` items, so a huge chat can't hold up a send.
+ */
+export function chatForRef(db: DatabaseSync, id: string, ctx: QueryContext, limit = 4000): { title: string; items: TranscriptItem[]; cut: boolean } | null {
+  const r = db.prepare(`${BASE} AND c.id = ?`).get(id) as unknown as Row | undefined;
+  if (!r || (ctx.pending.get(id)?.deleted ?? r.e_deleted === 1)) return null;
+  const rows = db.prepare("SELECT json FROM items WHERE conversation_id = ? ORDER BY seq DESC LIMIT ?").all(id, limit + 1) as { json: string }[];
+  const cut = rows.length > limit;
+  const items = rows.slice(0, limit).reverse().map((x) => JSON.parse(x.json) as TranscriptItem);
+  return { title: toRow(r, ctx).title, items, cut };
+}

@@ -357,7 +357,8 @@ describe("messages sent while Claude works", () => {
   it("Stop calls off the ones Claude hasn't read and hands them back, words and images, in order", async () => {
     const { s, x, fake, returned } = working();
     s.send("one");
-    s.send("two", [img]);
+    // (With a chat link's note: it isn't handed back, only what was typed.)
+    s.send("two", [img], "<referenced-chats>\nnote\n</referenced-chats>");
     s.send("read already");
     const [, a, b, c] = pushed(x).map((m) => m.uuid!);
     x.handle(life(c, "started"));
@@ -372,6 +373,17 @@ describe("messages sent while Claude works", () => {
     expect(s.status.queued).toEqual([]);
     x.handle(life(a, "cancelled"));
     expect(returned).toHaveLength(1);
+  });
+  it("a chat link's note goes as a block after the words, and a message handed back is only what was typed", () => {
+    const { s, x, returned } = working();
+    s.send("see chat:x", [], "<referenced-chats>\nnote\n</referenced-chats>");
+    expect(pushed(x)[1].message.content).toEqual([
+      { type: "text", text: "see chat:x" },
+      { type: "text", text: "<referenced-chats>\nnote\n</referenced-chats>" },
+    ]);
+    expect(s.status.queued).toEqual(["see chat:x"]);
+    x.handle(life(pushed(x)[1].uuid!, "cancelled"));
+    expect(returned).toEqual([[{ text: "see chat:x", attachments: [] }]]);
   });
   it("one Claude Code cancels on its own goes back too", () => {
     const { s, x, returned } = working();

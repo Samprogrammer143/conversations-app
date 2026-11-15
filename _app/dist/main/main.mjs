@@ -670,9 +670,9 @@ function writeLauncher(w) {
 }
 
 // src/main/main.ts
-import fs29 from "node:fs";
+import fs30 from "node:fs";
 import { execFile as execFile3, spawn as spawn11 } from "node:child_process";
-import path31 from "node:path";
+import path32 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/main/alert.ts
@@ -1444,6 +1444,14 @@ function search(db, text, ctx2, { includeTools = false, limit = 20 } = {}) {
   const pcs = new Set(rows.flatMap((r) => r.lastPc ? [r.lastPc] : []));
   return { query: text, hits: out, suggestion, searchedConversations: rows.length, pcCount: pcs.size, tookMs: Math.round(performance.now() - t0) };
 }
+function chatForRef(db, id, ctx2, limit = 4e3) {
+  const r = db.prepare(`${BASE2} AND c.id = ?`).get(id);
+  if (!r || (ctx2.pending.get(id)?.deleted ?? r.e_deleted === 1)) return null;
+  const rows = db.prepare("SELECT json FROM items WHERE conversation_id = ? ORDER BY seq DESC LIMIT ?").all(id, limit + 1);
+  const cut = rows.length > limit;
+  const items = rows.slice(0, limit).reverse().map((x) => JSON.parse(x.json));
+  return { title: toRow(r, ctx2).title, items, cut };
+}
 
 // src/main/sync/scheduler.ts
 import fs12 from "node:fs";
@@ -1996,31 +2004,31 @@ var SyncScheduler = class extends EventEmitter3 {
     const noNetwork = !net.isOnline();
     let headline;
     let detail;
-    const time = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
+    const time2 = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
     if (this.phase === "not-set-up") {
       headline = "Sync is not set up";
       detail = `Run the installer on this ${PC}`;
     } else if (paused) {
       headline = "Sync paused";
-      detail = lastSync ? `Last synced ${time(lastSync)}` : "Resume in the sync menu";
+      detail = lastSync ? `Last synced ${time2(lastSync)}` : "Resume in the sync menu";
     } else if (this.phase === "signin") {
       headline = "Sign in to GitHub";
       detail = "Chats aren't syncing";
     } else if (this.phase === "offline") {
       headline = noNetwork ? "Offline" : "Can't reach GitHub";
-      detail = lastSync ? `Last synced ${time(lastSync)}` : `Saved on this ${PC}`;
+      detail = lastSync ? `Last synced ${time2(lastSync)}` : `Saved on this ${PC}`;
     } else if (this.phase === "attention") {
       headline = "Can't reach GitHub";
       detail = `Retrying \xB7 saved on this ${PC}`;
     } else if (this.phase === "downloading" || this.phase === "uploading" || this.phase === "checking") {
       headline = total > 1 && behind.length ? `${current} of ${total} PCs up to date` : this.phase === "checking" ? "Up to date" : "Syncing\u2026";
-      detail = this.phase === "checking" ? lastSync ? `Last synced ${time(lastSync)}` : "Checking GitHub" : this.phase === "downloading" ? "Downloading\u2026" : "Uploading\u2026";
+      detail = this.phase === "checking" ? lastSync ? `Last synced ${time2(lastSync)}` : "Checking GitHub" : this.phase === "downloading" ? "Downloading\u2026" : "Uploading\u2026";
     } else if (behind.length) {
       headline = `${current} of ${total} PCs up to date`;
       detail = behind.length === 1 ? `${behind[0].name} needs the new sync` : `${behind.length} PCs need the new sync`;
     } else {
       headline = total > 1 ? `All ${total} PCs up to date` : "Up to date";
-      detail = lastSync ? `Last synced ${time(lastSync)}` : "Up to date";
+      detail = lastSync ? `Last synced ${time2(lastSync)}` : "Up to date";
     }
     return {
       phase: paused ? "paused" : this.phase,
@@ -2839,9 +2847,9 @@ async function newChatInCli(folder) {
 }
 
 // src/main/chat/manager.ts
-import path24 from "node:path";
+import path25 from "node:path";
 import { EventEmitter as EventEmitter5 } from "node:events";
-import fs23 from "node:fs";
+import fs24 from "node:fs";
 
 // src/main/chat/mcp.ts
 import os11 from "node:os";
@@ -3045,14 +3053,21 @@ function refresh(claudePath) {
 }
 
 // src/main/chat/session.ts
-import fs21 from "node:fs";
-import path22 from "node:path";
+import fs22 from "node:fs";
+import path23 from "node:path";
 import { randomUUID } from "node:crypto";
 import { EventEmitter as EventEmitter4 } from "node:events";
 
 // src/main/chat/agents.ts
 import fs20 from "node:fs";
 import path20 from "node:path";
+
+// src/shared/links.ts
+var ISSUES_URL = "https://github.com/Samprogrammer143/conversations-app/issues";
+function reportProblemUrl(version, system) {
+  return `${ISSUES_URL}/new?${new URLSearchParams({ template: "problem.md", title: `Problem in Conversations ${version} on ${system}` }).toString()}`;
+}
+var NOTE_HEAD = "<referenced-chats>\nThe user's message links to other conversations of theirs.";
 
 // src/main/index/parse.ts
 function splitLines(buf, startOffset = 0) {
@@ -4110,6 +4125,123 @@ function destructiveFallback(description) {
   return d && /\s/.test(d) ? `${d.charAt(0).toUpperCase()}${d.slice(1)}. It can't be undone.` : "It can't be undone.";
 }
 
+// src/main/chat/refs.ts
+import { createHash } from "node:crypto";
+import fs21 from "node:fs";
+import os13 from "node:os";
+import path22 from "node:path";
+function refsDir() {
+  const account = process.env.CLAUDE_CONFIG_DIR;
+  const key = account ? createHash("sha1").update(account).digest("hex").slice(0, 12) : "main";
+  return path22.join(longPath(os13.tmpdir()), "conversations-chats", key);
+}
+function longPath(p) {
+  try {
+    return fs21.realpathSync.native(p);
+  } catch {
+    return p;
+  }
+}
+var MAX_REFS = 5;
+var MAX_CHARS = 2e6;
+var KEEP_MS2 = 7 * 24 * 60 * 60 * 1e3;
+var REF_RE = /\bchat:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi;
+function refsIn(text, self) {
+  const out = [];
+  for (const m of text.matchAll(REF_RE)) {
+    const id = m[1].toLowerCase();
+    if (id !== self && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+var cleanTitle = (t) => t.replace(/[<>]/g, "").replace(/\s+/g, " ").trim() || "Untitled chat";
+var time = (ts) => ts ? ts.slice(0, 16).replace("T", " ") : null;
+function chatAsText(id, title, items, cut = false) {
+  const head = [`# ${cleanTitle(title)}`, "", `Chat ${id}, saved as text by the Conversations app. Tool output is left out; each tool step is one line.`];
+  const out = [];
+  for (const it of items) {
+    switch (it.kind) {
+      case "user": {
+        const who = ["## You", time(it.ts), it.pc ? `on ${it.pc}` : null].filter(Boolean).join(", ");
+        const pics = it.images.length ? `
+[${it.images.length} image${it.images.length === 1 ? "" : "s"} attached]` : "";
+        out.push(who, "", `${it.text}${pics}`.trim(), "");
+        break;
+      }
+      case "text":
+        out.push("## Claude", "", it.markdown.trim(), "");
+        break;
+      case "tools":
+        for (const c of it.calls) {
+          const what = [c.label, c.detail && c.detail !== c.label ? c.detail : null].filter(Boolean).join(": ").replace(/\s+/g, " ").slice(0, 200);
+          out.push(`- ${c.name}${what ? ` ${what}` : ""}${c.denied ? " (refused)" : c.isError ? " (failed)" : ""}`);
+        }
+        out.push("");
+        break;
+      case "command":
+        out.push(`- /${it.name}${it.args ? ` ${it.args}` : ""}`.slice(0, 300), "");
+        break;
+      case "shell":
+        out.push(`- ! ${it.command}`.slice(0, 300), "");
+        break;
+      case "compact":
+        out.push("[The chat was compacted here: earlier context was summarised.]", "");
+        break;
+      case "notice":
+        if (it.tone === "error") out.push(`[${it.title}]`, "");
+        break;
+      default:
+        break;
+    }
+  }
+  let body = out.join("\n").replace(/\n{3,}/g, "\n\n");
+  if (body.length > MAX_CHARS) {
+    body = body.slice(body.length - MAX_CHARS);
+    body = body.slice(body.indexOf("\n") + 1);
+    cut = true;
+  }
+  if (cut) head.push("The chat is long: only its latest part is here.");
+  return `${head.join("\n")}
+
+${body}`;
+}
+function prepareRefs(text, self, lookup, dir = refsDir(), now = Date.now()) {
+  const ids = refsIn(text, self);
+  if (!ids.length) return void 0;
+  fs21.mkdirSync(dir, { recursive: true });
+  prune(dir, now);
+  const lines = [];
+  for (const id of ids.slice(0, MAX_REFS)) {
+    const chat2 = lookup(id);
+    if (!chat2) {
+      lines.push(`chat:${id}: not available here (deleted, in another workspace, or not on this computer yet).`);
+      continue;
+    }
+    const file4 = path22.join(dir, `${id}.md`);
+    fs21.writeFileSync(file4, chatAsText(id, chat2.title, chat2.items, chat2.cut));
+    lines.push(`chat:${id} ("${cleanTitle(chat2.title)}"): ${file4}`);
+  }
+  if (ids.length > MAX_REFS) lines.push(`(Only the first ${MAX_REFS} chats linked were saved.)`);
+  return [
+    NOTE_HEAD,
+    "The Conversations app saved each as text, as of this message, at the path below. Read the file when it helps answer; for a long one, search it or read the end first.",
+    ...lines,
+    "</referenced-chats>"
+  ].join("\n");
+}
+function prune(dir, now) {
+  try {
+    for (const name of fs21.readdirSync(dir)) {
+      const p = path22.join(dir, name);
+      try {
+        if (now - fs21.statSync(p).mtimeMs > KEEP_MS2) fs21.rmSync(p, { force: true });
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
+
 // src/main/chat/session.ts
 var STREAM_EMIT_MS = 50;
 var STOP_RESULT_MS = 15e3;
@@ -4275,8 +4407,8 @@ var ChatSession = class extends EventEmitter4 {
     this.touch();
     this.emit("status", this.status);
   }
-  start(first, attachments = []) {
-    this.send(first, attachments);
+  start(first, attachments = [], context) {
+    this.send(first, attachments, context);
     this.open();
   }
   /** Starts Claude Code with a "!" command's record and no turn: it waits for your next message. */
@@ -4293,6 +4425,10 @@ var ChatSession = class extends EventEmitter4 {
   open() {
     const env = { ...process.env, CLAUDE_SYNC_INCLUDE_HEADLESS: "1", CLAUDE_SYNC_IN_APP: "1" };
     delete env.ELECTRON_RUN_AS_NODE;
+    try {
+      fs22.mkdirSync(refsDir(), { recursive: true });
+    } catch {
+    }
     this.q = query({
       prompt: this.input,
       options: {
@@ -4307,6 +4443,8 @@ var ChatSession = class extends EventEmitter4 {
         model: this.opts.model ?? void 0,
         effort: this.opts.effort ?? void 0,
         systemPrompt: systemPrompt(!!this.opts.resume),
+        // Where the app saves the chats a message links to: read without asking.
+        additionalDirectories: [refsDir()],
         // The same Claude in Chrome integration a terminal session has (`claude --chrome`).
         // When the extension isn't running, the browser tools are simply absent.
         extraArgs: { chrome: null },
@@ -4326,15 +4464,15 @@ var ChatSession = class extends EventEmitter4 {
    * A message from the composer: sent now. While Claude works, Claude Code takes it and Claude
    * reads it at its next step; an older Claude Code gets it once the turn has ended.
    */
-  send(text, attachments = []) {
+  send(text, attachments = [], context) {
     if (this.q && this.busy) {
-      if (this.live && !this.followUps.length) return this.sendAhead({ text, attachments });
-      this.followUps.push({ text, attachments });
+      if (this.live && !this.followUps.length) return this.sendAhead({ text, attachments, context });
+      this.followUps.push({ text, attachments, context });
       this.set({ queued: this.queuedLabels() });
       return;
     }
     this.flushRecords();
-    this.handOver({ text, attachments });
+    this.handOver({ text, attachments, context });
   }
   /** A "!" command's record: written now, or after the turn in progress, without starting one. */
   appendShell(record, label) {
@@ -4382,7 +4520,11 @@ var ChatSession = class extends EventEmitter4 {
    * one Claude reads in the middle of its work is taken as from you, not as text a tool returned.
    */
   userMessage(item, uuid) {
-    const content = item.attachments.length ? [...item.attachments.map((a) => ({ type: "image", source: { type: "base64", media_type: a.mediaType, data: a.data } })), { type: "text", text: item.text }] : item.text;
+    const content = item.attachments.length || item.context ? [
+      ...item.attachments.map((a) => ({ type: "image", source: { type: "base64", media_type: a.mediaType, data: a.data } })),
+      { type: "text", text: item.text },
+      ...item.context ? [{ type: "text", text: item.context }] : []
+    ] : item.text;
     return { type: "user", message: { role: "user", content }, parent_tool_use_id: null, priority: "next", uuid, origin: { kind: "human" }, timestamp: (/* @__PURE__ */ new Date()).toISOString() };
   }
   /** A message for Claude while it works: Claude Code holds it, and Claude reads it at its next step. */
@@ -4595,7 +4737,7 @@ var ChatSession = class extends EventEmitter4 {
         conversationId: this.id ?? "",
         toolName,
         title: questions.length === 1 ? "Claude has a question" : `Claude has ${questions.length} questions`,
-        context: [`in ${path22.basename(this.cwd)}`, this.opts.machine].join("  \xB7  "),
+        context: [`in ${path23.basename(this.cwd)}`, this.opts.machine].join("  \xB7  "),
         body: questions[0].question.trim().slice(0, 1e3),
         consequence: null,
         destructive: false,
@@ -4611,9 +4753,9 @@ var ChatSession = class extends EventEmitter4 {
       });
     }
     const command = typeof input.command === "string" ? input.command : null;
-    const verdict = classifyTool(toolName, input, this.cwd, { exists: (p) => fs21.existsSync(p) });
+    const verdict = classifyTool(toolName, input, this.cwd, { exists: (p) => fs22.existsSync(p) });
     const destructive = verdict.destructive || !!o.defaultToNo;
-    const folder = path22.basename(this.cwd);
+    const folder = path23.basename(this.cwd);
     const shell3 = SHELLS[toolName];
     const file4 = String(input.file_path ?? input.notebook_path ?? input.path ?? "");
     let title = o.title || `Allow ${o.displayName ?? toolName}?`;
@@ -4918,15 +5060,15 @@ function plainError(msg) {
 
 // src/main/chat/shell.ts
 import crypto2 from "node:crypto";
-import fs22 from "node:fs";
-import os13 from "node:os";
-import path23 from "node:path";
+import fs23 from "node:fs";
+import os14 from "node:os";
+import path24 from "node:path";
 import { spawn as spawn8 } from "node:child_process";
 var MAX_OUTPUT = 3e4;
 var TIME_LIMIT_MS = 10 * 6e4;
 var exists = (p) => {
   try {
-    return !!p && fs22.statSync(p).isFile();
+    return !!p && fs23.statSync(p).isFile();
   } catch {
     return false;
   }
@@ -4938,18 +5080,18 @@ function findShell(env = process.env, platform = process.platform) {
   }
   const candidates = [];
   if (env.CLAUDE_CODE_GIT_BASH_PATH) candidates.push(env.CLAUDE_CODE_GIT_BASH_PATH);
-  for (const dir of (env.PATH ?? env.Path ?? "").split(path23.delimiter)) {
+  for (const dir of (env.PATH ?? env.Path ?? "").split(path24.delimiter)) {
     if (!dir) continue;
-    if (exists(path23.join(dir, "git.exe"))) {
-      candidates.push(path23.join(dir, "..", "bin", "bash.exe"), path23.join(dir, "bash.exe"));
+    if (exists(path24.join(dir, "git.exe"))) {
+      candidates.push(path24.join(dir, "..", "bin", "bash.exe"), path24.join(dir, "bash.exe"));
     }
   }
-  for (const root of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && path23.join(env.LOCALAPPDATA, "Programs")]) {
-    if (root) candidates.push(path23.join(root, "Git", "bin", "bash.exe"));
+  for (const root of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && path24.join(env.LOCALAPPDATA, "Programs")]) {
+    if (root) candidates.push(path24.join(root, "Git", "bin", "bash.exe"));
   }
-  const bash = candidates.map((c) => path23.resolve(c)).find(exists);
+  const bash = candidates.map((c) => path24.resolve(c)).find(exists);
   if (bash) return { file: bash, args: (c) => ["-c", c], name: "bash" };
-  const ps = path23.join(env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const ps = path24.join(env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   if (exists(ps)) return { file: ps, args: (c) => ["-NoProfile", "-NonInteractive", "-Command", c], name: "powershell" };
   return null;
 }
@@ -5025,7 +5167,7 @@ async function killTree2(child, bashGroup) {
   }
   let msysPid = "";
   try {
-    msysPid = bashGroup ? fs22.readFileSync(bashGroup.pidFile, "utf8").trim() : "";
+    msysPid = bashGroup ? fs23.readFileSync(bashGroup.pidFile, "utf8").trim() : "";
   } catch {
   }
   if (bashGroup && /^\d+$/.test(msysPid)) {
@@ -5044,7 +5186,7 @@ function runShell(command, cwd, opts = {}) {
   env.CHERE_INVOKING = "1";
   let stopped = null;
   let child;
-  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path23.join(os13.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
+  const bashGroup = shell3.name === "bash" && process.platform === "win32" ? { bash: shell3.file, pidFile: path24.join(os14.tmpdir(), `conversations-shell-${process.pid}-${crypto2.randomUUID()}.pid`) } : null;
   let args = shell3.args(command);
   if (bashGroup) {
     env.CONVERSATIONS_SHELL_COMMAND = command;
@@ -5076,7 +5218,7 @@ function runShell(command, cwd, opts = {}) {
       if (settledFlag) return;
       settledFlag = true;
       clearTimeout(timer);
-      if (bashGroup) setTimeout(() => fs22.rm(bashGroup.pidFile, { force: true }, () => {
+      if (bashGroup) setTimeout(() => fs23.rm(bashGroup.pidFile, { force: true }, () => {
       }), 1e4).unref?.();
       const errText = err.text();
       resolve({ stdout: out.text(), stderr: extraErr ? `${errText}${errText && !errText.endsWith("\n") ? "\n" : ""}${extraErr}` : errText, code, stopped });
@@ -5092,13 +5234,13 @@ function runShell(command, cwd, opts = {}) {
   });
   return { done, stop: () => settledFlag ? void 0 : end("you") };
 }
-function sweepPidFiles(dir = os13.tmpdir(), olderThanMs = 6e4) {
+function sweepPidFiles(dir = os14.tmpdir(), olderThanMs = 6e4) {
   try {
-    for (const name of fs22.readdirSync(dir)) {
+    for (const name of fs23.readdirSync(dir)) {
       if (!/^conversations-shell-\d+-[0-9a-f-]{36}\.pid$/.test(name)) continue;
-      const f = path23.join(dir, name);
+      const f = path24.join(dir, name);
       try {
-        if (Date.now() - fs22.statSync(f).mtimeMs > olderThanMs) fs22.rmSync(f, { force: true });
+        if (Date.now() - fs23.statSync(f).mtimeMs > olderThanMs) fs23.rmSync(f, { force: true });
       } catch {
       }
     }
@@ -5376,7 +5518,7 @@ var ChatManager = class extends EventEmitter5 {
     const p = this.deps.localTranscript(id);
     if (!p) return false;
     try {
-      const mtime = fs23.statSync(p).mtimeMs;
+      const mtime = fs24.statSync(p).mtimeMs;
       const ours = this.sessions.get(id)?.lastWriteAt ?? 0;
       return Date.now() - mtime < LIVE_MS2 && mtime > ours + 3e3;
     } catch {
@@ -5394,7 +5536,7 @@ var ChatManager = class extends EventEmitter5 {
       if (await this.openInTerminal(id)) return { ok: false, err: OPEN_IN_TERMINAL };
       const s = this.sessions.get(id);
       if (s?.alive) {
-        s.send(args.text, args.attachments ?? []);
+        s.send(args.text, args.attachments ?? [], args.context);
         this.emit("owned", id, s.cwd);
         return { ok: true, conversationId: id };
       }
@@ -5448,7 +5590,7 @@ var ChatManager = class extends EventEmitter5 {
       this.starting.delete(id);
       if (args.shell && s.startShell) s.startShell(args.shell);
       else if (args.idle) s.startIdle?.();
-      else s.start(args.text, args.attachments ?? []);
+      else s.start(args.text, args.attachments ?? [], args.context);
       started = true;
       if (!args.idle) this.emit("owned", id, cwd);
       return { ok: true, conversationId: id };
@@ -5468,7 +5610,7 @@ var ChatManager = class extends EventEmitter5 {
     this.drafts.set(draftId, { session: s, cwd: args.cwd });
     this.attach(s);
     if (args.shell && s.startShell) s.startShell(args.shell);
-    else s.start(args.text, args.attachments ?? []);
+    else s.start(args.text, args.attachments ?? [], args.context);
     const id = await new Promise((resolve) => {
       const timer = setTimeout(() => resolve(null), 6e4);
       s.once("created", (newId) => {
@@ -5589,7 +5731,7 @@ var ChatManager = class extends EventEmitter5 {
     const s = this.sessions.get(id) ?? this.closed.get(id);
     const parts = [];
     for (const x of [...s?.pastIds ?? [], id]) {
-      for (const t of [this.deps.localTranscript(x), s ? path24.join(projectsDir(), encodeCwd(s.cwd), `${x}.jsonl`) : null]) {
+      for (const t of [this.deps.localTranscript(x), s ? path25.join(projectsDir(), encodeCwd(s.cwd), `${x}.jsonl`) : null]) {
         const d2 = t ? await readAgentLog(agentLogFile(t, agentId)) : null;
         if (d2) {
           parts.push(d2);
@@ -5657,10 +5799,10 @@ var ChatManager = class extends EventEmitter5 {
 };
 
 // src/main/chat/usage.ts
-import fs24 from "node:fs";
-import os14 from "node:os";
-import path25 from "node:path";
-var file3 = () => path25.join(appDataDir(), "usage.json");
+import fs25 from "node:fs";
+import os15 from "node:os";
+import path26 from "node:path";
+var file3 = () => path26.join(appDataDir(), "usage.json");
 var clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
 function meter(key, label, w) {
   if (!w || typeof w.utilization !== "number" || !Number.isFinite(w.utilization)) return null;
@@ -5690,7 +5832,7 @@ var lastAskAt = 0;
 function lastUsage() {
   if (last === void 0) {
     try {
-      const saved = JSON.parse(fs24.readFileSync(file3(), "utf8"));
+      const saved = JSON.parse(fs25.readFileSync(file3(), "utf8"));
       last = saved && Array.isArray(saved.meters) && typeof saved.at === "number" ? saved : null;
     } catch {
       last = null;
@@ -5709,7 +5851,7 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
   inflight = (async () => {
     const env = { ...process.env, CLAUDE_SYNC_DISABLE: "1" };
     delete env.ELECTRON_RUN_AS_NODE;
-    const q = query({ prompt: nothing3(), options: { cwd: os14.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: [], env } });
+    const q = query({ prompt: nothing3(), options: { cwd: os15.homedir(), pathToClaudeCodeExecutable: claudePath, settingSources: [], env } });
     const timer = setTimeout(() => q.close(), 3e4);
     try {
       const qq = q;
@@ -5729,8 +5871,8 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
       if (words(next) !== words(lastUsage())) log("chat", `usage: ${words(next)}`);
       last = next;
       try {
-        if (next) fs24.writeFileSync(file3(), JSON.stringify(next));
-        else fs24.rmSync(file3(), { force: true });
+        if (next) fs25.writeFileSync(file3(), JSON.stringify(next));
+        else fs25.rmSync(file3(), { force: true });
       } catch {
       }
       return next;
@@ -5748,8 +5890,8 @@ function refreshUsage(claudePath, minGapMs = 6e4) {
 }
 
 // src/main/composer-state.ts
-import fs25 from "node:fs";
-import path26 from "node:path";
+import fs26 from "node:fs";
+import path27 from "node:path";
 var MAX_KEYS = 400;
 var MAX_DRAFT = 1e5;
 var RESERVED = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
@@ -5773,7 +5915,7 @@ function put(map, key, value) {
   return next;
 }
 var ComposerStore = class {
-  constructor(file4 = path26.join(appDataDir(), "composer.json")) {
+  constructor(file4 = path27.join(appDataDir(), "composer.json")) {
     this.file = file4;
   }
   file;
@@ -5784,7 +5926,7 @@ var ComposerStore = class {
     if (!this.loaded) {
       this.loaded = true;
       try {
-        const raw = JSON.parse(fs25.readFileSync(this.file, "utf8"));
+        const raw = JSON.parse(fs26.readFileSync(this.file, "utf8"));
         let drafts = {};
         let prefs = {};
         for (const [k, v] of Object.entries(raw.drafts ?? {})) if (isComposerKey(k) && typeof v === "string" && v) drafts = put(drafts, k, v.slice(0, MAX_DRAFT));
@@ -5832,13 +5974,13 @@ var ComposerStore = class {
     if (!this.loaded) return;
     const tmp = `${this.file}.${process.pid}.tmp`;
     try {
-      fs25.mkdirSync(path26.dirname(this.file), { recursive: true });
-      fs25.writeFileSync(tmp, JSON.stringify(this.state));
-      fs25.renameSync(tmp, this.file);
+      fs26.mkdirSync(path27.dirname(this.file), { recursive: true });
+      fs26.writeFileSync(tmp, JSON.stringify(this.state));
+      fs26.renameSync(tmp, this.file);
     } catch (e) {
       log("app", `could not save the composer's drafts: ${e.message}`);
       try {
-        fs25.rmSync(tmp, { force: true });
+        fs26.rmSync(tmp, { force: true });
       } catch {
       }
     }
@@ -5846,13 +5988,13 @@ var ComposerStore = class {
 };
 
 // src/main/chat/notify.ts
-import path27 from "node:path";
+import path28 from "node:path";
 import { app as app3, Notification } from "electron";
 var PROTOCOL = "conversations";
 var xmlEscape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function registerProtocol() {
   if (app3.isPackaged) app3.setAsDefaultProtocolClient(PROTOCOL);
-  else if (process.env.CONVERSATIONS_REGISTER_PROTOCOL === "1") app3.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path27.resolve(process.argv[1] ?? ".")]);
+  else if (process.env.CONVERSATIONS_REGISTER_PROTOCOL === "1") app3.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path28.resolve(process.argv[1] ?? ".")]);
 }
 function parseProtocolArgs(argv) {
   const url = argv.find((a) => a.startsWith(`${PROTOCOL}://`));
@@ -5956,8 +6098,8 @@ var StartupQueue = class {
 };
 
 // src/shell/stages.ts
-import fs26 from "node:fs";
-import path28 from "node:path";
+import fs27 from "node:fs";
+import path29 from "node:path";
 var RUNNING_MARK = "running.json";
 var processAlive2 = (pid) => {
   try {
@@ -5969,24 +6111,24 @@ var processAlive2 = (pid) => {
 };
 var ownMark = (pid) => `running-${pid}.json`;
 function writeRunningMark(root, stage, pid = process.pid) {
-  fs26.mkdirSync(root, { recursive: true });
+  fs27.mkdirSync(root, { recursive: true });
   const body = JSON.stringify({ pid, stage, at: (/* @__PURE__ */ new Date()).toISOString() });
   for (const name of [ownMark(pid), RUNNING_MARK]) {
-    const tmp = path28.join(root, `${name}.${pid}.tmp`);
-    fs26.writeFileSync(tmp, body);
-    fs26.renameSync(tmp, path28.join(root, name));
+    const tmp = path29.join(root, `${name}.${pid}.tmp`);
+    fs27.writeFileSync(tmp, body);
+    fs27.renameSync(tmp, path29.join(root, name));
   }
 }
 var markerNames = (root) => {
   try {
-    return fs26.readdirSync(root).filter((f) => f === RUNNING_MARK || /^running-\d+\.json$/.test(f));
+    return fs27.readdirSync(root).filter((f) => f === RUNNING_MARK || /^running-\d+\.json$/.test(f));
   } catch {
     return [];
   }
 };
 var readMarker = (root, f) => {
   try {
-    const m = JSON.parse(fs26.readFileSync(path28.join(root, f), "utf8"));
+    const m = JSON.parse(fs27.readFileSync(path29.join(root, f), "utf8"));
     return typeof m?.pid === "number" && typeof m?.stage === "string" ? m : null;
   } catch {
     return null;
@@ -5999,9 +6141,9 @@ function readRunningMarks(root, alive = processAlive2) {
 function stagesToRemove(root, inUse, alive = processAlive2, keepAlso = []) {
   let names;
   try {
-    names = fs26.readdirSync(root).filter((d) => {
+    names = fs27.readdirSync(root).filter((d) => {
       try {
-        return fs26.statSync(path28.join(root, d)).isDirectory();
+        return fs27.statSync(path29.join(root, d)).isDirectory();
       } catch {
         return false;
       }
@@ -6009,21 +6151,21 @@ function stagesToRemove(root, inUse, alive = processAlive2, keepAlso = []) {
   } catch {
     return [];
   }
-  const keep = /* @__PURE__ */ new Set([path28.basename(inUse)]);
-  for (const mark of readRunningMarks(root, alive)) keep.add(path28.basename(mark.stage));
-  for (const k of keepAlso) keep.add(path28.basename(k));
-  const older = names.filter((d) => !keep.has(d) && !d.endsWith(".tmp")).map((d) => ({ d, t: fs26.statSync(path28.join(root, d)).mtimeMs })).sort((a, b) => b.t - a.t);
-  return older.slice(1).map((o) => path28.join(root, o.d));
+  const keep = /* @__PURE__ */ new Set([path29.basename(inUse)]);
+  for (const mark of readRunningMarks(root, alive)) keep.add(path29.basename(mark.stage));
+  for (const k of keepAlso) keep.add(path29.basename(k));
+  const older = names.filter((d) => !keep.has(d) && !d.endsWith(".tmp")).map((d) => ({ d, t: fs27.statSync(path29.join(root, d)).mtimeMs })).sort((a, b) => b.t - a.t);
+  return older.slice(1).map((o) => path29.join(root, o.d));
 }
 function cleanStages(root, inUse, alive = processAlive2, keepAlso = []) {
   const gone = [];
   for (const f of markerNames(root)) {
     const m = readMarker(root, f);
-    if (f !== RUNNING_MARK && (!m || !alive(m.pid))) fs26.rmSync(path28.join(root, f), { force: true });
+    if (f !== RUNNING_MARK && (!m || !alive(m.pid))) fs27.rmSync(path29.join(root, f), { force: true });
   }
   for (const p of stagesToRemove(root, inUse, alive, keepAlso)) {
     try {
-      fs26.rmSync(p, { recursive: true, force: true });
+      fs27.rmSync(p, { recursive: true, force: true });
       gone.push(p);
     } catch {
     }
@@ -6208,12 +6350,12 @@ function lastLine(out) {
 
 // src/shared/login-path.ts
 import { spawn as spawn10 } from "node:child_process";
-import fs27 from "node:fs";
-import os15 from "node:os";
-import path29 from "node:path";
+import fs28 from "node:fs";
+import os16 from "node:os";
+import path30 from "node:path";
 var MARK = "__CONVERSATIONS_PATH__";
-function usualMacFolders(home = os15.homedir()) {
-  return ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", path29.posix.join(home, ".local", "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+function usualMacFolders(home = os16.homedir()) {
+  return ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", path30.posix.join(home, ".local", "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
 }
 function parseShellPath(out) {
   const start = out.indexOf(MARK);
@@ -6226,7 +6368,7 @@ function mergePath(shellPath, current, usual) {
   const parts = [...(shellPath ?? "").split(":"), ...(current ?? "").split(":"), ...usual];
   return [...new Set(parts.map((p) => p.trim()).filter(Boolean))].join(":");
 }
-function readLoginShellPath(shell3 = process.env.SHELL && fs27.existsSync(process.env.SHELL) ? process.env.SHELL : "/bin/zsh", timeoutMs = 1e4) {
+function readLoginShellPath(shell3 = process.env.SHELL && fs28.existsSync(process.env.SHELL) ? process.env.SHELL : "/bin/zsh", timeoutMs = 1e4) {
   return new Promise((resolve) => {
     let out = "";
     let done = false;
@@ -6271,7 +6413,7 @@ function useLoginShellPath(cacheFile) {
   const given = process.env.PATH;
   let remembered = null;
   try {
-    if (cacheFile) remembered = JSON.parse(fs27.readFileSync(cacheFile, "utf8"))?.path ?? null;
+    if (cacheFile) remembered = JSON.parse(fs28.readFileSync(cacheFile, "utf8"))?.path ?? null;
   } catch {
   }
   process.env.PATH = mergePath(remembered, given, usualMacFolders());
@@ -6280,22 +6422,16 @@ function useLoginShellPath(cacheFile) {
     process.env.PATH = mergePath(fresh, given, usualMacFolders());
     if (!cacheFile) return;
     try {
-      fs27.mkdirSync(path29.dirname(cacheFile), { recursive: true });
-      fs27.writeFileSync(cacheFile, JSON.stringify({ path: fresh, at: (/* @__PURE__ */ new Date()).toISOString() }));
+      fs28.mkdirSync(path30.dirname(cacheFile), { recursive: true });
+      fs28.writeFileSync(cacheFile, JSON.stringify({ path: fresh, at: (/* @__PURE__ */ new Date()).toISOString() }));
     } catch {
     }
   });
 }
 
-// src/shared/links.ts
-var ISSUES_URL = "https://github.com/Samprogrammer143/conversations-app/issues";
-function reportProblemUrl(version, system) {
-  return `${ISSUES_URL}/new?${new URLSearchParams({ template: "problem.md", title: `Problem in Conversations ${version} on ${system}` }).toString()}`;
-}
-
 // src/main/remote/phone-link.ts
-import fs28 from "node:fs";
-import path30 from "node:path";
+import fs29 from "node:fs";
+import path31 from "node:path";
 
 // src/shared/relay-crypto.ts
 var subtle = () => globalThis.crypto.subtle;
@@ -6676,29 +6812,29 @@ function remoteRefusal(channel, args) {
   return null;
 }
 var REMOTE_EVENTS = /* @__PURE__ */ new Set(["index-changed", "sync-status", "chat-status", "chat-returned", "chat-pending", "usage", "alert", "settings-changed"]);
-var settingsPath = () => path30.join(appDataDir(), "phone-link-settings.json");
+var settingsPath = () => path31.join(appDataDir(), "phone-link-settings.json");
 function readJson2(p) {
   try {
-    return JSON.parse(fs28.readFileSync(p, "utf8"));
+    return JSON.parse(fs29.readFileSync(p, "utf8"));
   } catch {
     return null;
   }
 }
 function thisPc() {
-  const c = readJson2(path30.join(syncDir(), "config.json")) ?? {};
+  const c = readJson2(path31.join(syncDir(), "config.json")) ?? {};
   return { name: c.machine || (process.env.COMPUTERNAME ?? "This PC"), slug: c.slug ?? null };
 }
-var devicesDir = () => path30.join(repoDir(), "_devices");
+var devicesDir = () => path31.join(repoDir(), "_devices");
 function readRelayConfig() {
-  const c = readJson2(path30.join(devicesDir(), "relay.json"));
+  const c = readJson2(path31.join(devicesDir(), "relay.json"));
   return c && typeof c.url === "string" && typeof c.room === "string" ? c : null;
 }
 function readPhones() {
-  const dir = path30.join(devicesDir(), "phones");
+  const dir = path31.join(devicesDir(), "phones");
   const out = [];
   try {
-    for (const f of fs28.readdirSync(dir)) {
-      const r = f.endsWith(".json") ? readJson2(path30.join(dir, f)) : null;
+    for (const f of fs29.readdirSync(dir)) {
+      const r = f.endsWith(".json") ? readJson2(path31.join(dir, f)) : null;
       if (r && typeof r.id === "string" && typeof r.key === "string" && f === `${r.id}.json`) out.push(r);
     }
   } catch {
@@ -6714,24 +6850,24 @@ async function readRequestFresh(id) {
   const r = await runEngineSerial(["devices-read", "--json", "--fresh", "--path", `requests/${id}.json`]);
   return r.json?.ok ? r.json.value ?? null : null;
 }
-var trustPath = () => path30.join(appDataDir(), "phone-link-trust.json");
+var trustPath = () => path31.join(appDataDir(), "phone-link-trust.json");
 function loadTrust() {
   const t = readJson2(trustPath());
   return { trusted: Array.isArray(t?.trusted) ? t.trusted : [], removed: Array.isArray(t?.removed) ? t.removed : [] };
 }
 function saveTrust(t) {
-  fs28.writeFileSync(trustPath(), JSON.stringify(t, null, 2));
+  fs29.writeFileSync(trustPath(), JSON.stringify(t, null, 2));
 }
 function cleanName(name) {
   const s = String(name ?? "").replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
   return s || "Phone";
 }
 async function identity() {
-  const p = path30.join(appDataDir(), "phone-link-key.json");
+  const p = path31.join(appDataDir(), "phone-link-key.json");
   let s = readJson2(p);
   if (!s || s.v !== 1) {
     s = await newIdentity();
-    fs28.writeFileSync(p, JSON.stringify(s), { mode: 384 });
+    fs29.writeFileSync(p, JSON.stringify(s), { mode: 384 });
   }
   return loadIdentity(s);
 }
@@ -6782,7 +6918,7 @@ var PhoneLink = class {
   async request(id) {
     if ((this.noRequestUntil.get(id) ?? 0) > Date.now()) return null;
     let req;
-    if (Date.now() - this.lastRequestFetch < 15e3) req = readJson2(path30.join(devicesDir(), "requests", `${id}.json`));
+    if (Date.now() - this.lastRequestFetch < 15e3) req = readJson2(path31.join(devicesDir(), "requests", `${id}.json`));
     else {
       this.lastRequestFetch = Date.now();
       req = await readRequestFresh(id);
@@ -6813,7 +6949,7 @@ var PhoneLink = class {
   }
   setKeepAwake(on) {
     this.settings = { ...this.settings, keepAwake: on };
-    fs28.writeFileSync(settingsPath(), JSON.stringify(this.settings, null, 2));
+    fs29.writeFileSync(settingsPath(), JSON.stringify(this.settings, null, 2));
     this.o.onKeepAwake?.(on);
   }
   async start() {
@@ -6830,7 +6966,7 @@ var PhoneLink = class {
         writes.push({ path: "relay.json", value: cfg });
       }
       if (pc.slug) {
-        const mine = readJson2(path30.join(devicesDir(), "keys", `${pc.slug}.json`));
+        const mine = readJson2(path31.join(devicesDir(), "keys", `${pc.slug}.json`));
         if (mine?.key !== this.me.publicKey) writes.push({ path: `keys/${pc.slug}.json`, value: { name: pc.name, key: this.me.publicKey, device: this.me.id } });
       }
       if (writes.length) {
@@ -7004,29 +7140,29 @@ var PhoneLink = class {
 };
 
 // src/main/main.ts
-void useLoginShellPath(path31.join(appDataDir(), "login-path.json"));
+void useLoginShellPath(path32.join(appDataDir(), "login-path.json"));
 process.on("uncaughtException", (e) => log("app", `uncaught exception: ${e?.stack || e}`));
 process.on("unhandledRejection", (e) => log("app", `unhandled rejection: ${e?.stack || e}`));
-var HERE = path31.dirname(fileURLToPath(import.meta.url));
-var DIST = path31.resolve(HERE, "..");
+var HERE = path32.dirname(fileURLToPath(import.meta.url));
+var DIST = path32.resolve(HERE, "..");
 var files = {
-  preload: path31.join(DIST, "preload", "preload.cjs"),
-  page: process.env.CONVERSATIONS_DEV_URL || path31.join(DIST, "renderer", "index.html")
+  preload: path32.join(DIST, "preload", "preload.cjs"),
+  page: process.env.CONVERSATIONS_DEV_URL || path32.join(DIST, "renderer", "index.html")
 };
-var RESOURCES = app4.isPackaged ? process.resourcesPath : path31.resolve(DIST, "..", "resources");
+var RESOURCES = app4.isPackaged ? process.resourcesPath : path32.resolve(DIST, "..", "resources");
 var iconFile = (name) => {
-  const own = path31.join(DIST, "icons", name);
-  return !DIST.includes("app.asar") && fs29.existsSync(own) ? own : path31.join(RESOURCES, name);
+  const own = path32.join(DIST, "icons", name);
+  return !DIST.includes("app.asar") && fs30.existsSync(own) ? own : path32.join(RESOURCES, name);
 };
 files.icon = iconFile("icon.ico");
 var APP_VERSION = (() => {
   try {
-    return JSON.parse(fs29.readFileSync(path31.join(DIST, "app.json"), "utf8")).version || app4.getVersion();
+    return JSON.parse(fs30.readFileSync(path32.join(DIST, "app.json"), "utf8")).version || app4.getVersion();
   } catch {
     return app4.getVersion();
   }
 })();
-if (process.env.CONVERSATIONS_DATA_DIR || isMac2) app4.setPath("userData", path31.join(appDataDir(), "electron"));
+if (process.env.CONVERSATIONS_DATA_DIR || isMac2) app4.setPath("userData", path32.join(appDataDir(), "electron"));
 if (!app4.requestSingleInstanceLock()) {
   app4.quit();
   process.exit(0);
@@ -7059,7 +7195,7 @@ function recordedCwdOnThisPc(id) {
   if (!index.ready) return null;
   const cwd = index.db.prepare("SELECT cwd FROM conversations WHERE id = ?").get(id)?.cwd ?? null;
   try {
-    return cwd && fs29.statSync(cwd).isDirectory() ? cwd : null;
+    return cwd && fs30.statSync(cwd).isDirectory() ? cwd : null;
   } catch {
     return null;
   }
@@ -7094,13 +7230,13 @@ var chat = new ChatManager({
   syncBeforeResume: prepareResume,
   terminalHas: (id) => isOpenInTerminal(id)
 });
-var ownedFile = () => path31.join(appDataDir(), "app-owned.json");
+var ownedFile = () => path32.join(appDataDir(), "app-owned.json");
 var ownedMarked = null;
 var ownedMarking = /* @__PURE__ */ new Set();
 async function markAppOwned(id) {
   if (!ownedMarked) {
     try {
-      const v = JSON.parse(fs29.readFileSync(ownedFile(), "utf8"));
+      const v = JSON.parse(fs30.readFileSync(ownedFile(), "utf8"));
       ownedMarked = new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
     } catch {
       ownedMarked = /* @__PURE__ */ new Set();
@@ -7114,8 +7250,8 @@ async function markAppOwned(id) {
     if (r.ok && !r.json?.nothing) {
       ownedMarked.add(id);
       const tmp = `${ownedFile()}.${process.pid}.tmp`;
-      fs29.writeFileSync(tmp, JSON.stringify([...ownedMarked]));
-      fs29.renameSync(tmp, ownedFile());
+      fs30.writeFileSync(tmp, JSON.stringify([...ownedMarked]));
+      fs30.renameSync(tmp, ownedFile());
     } else log("chat", `couldn't mark ${id.slice(0, 8)} as an app conversation: ${r.json?.nothing ? "the sync engine doesn't know the field yet" : r.stderr.split("\n")[0]}`);
   } catch (e) {
     log("chat", `marking ${id.slice(0, 8)} failed: ${e.message}`);
@@ -7150,7 +7286,7 @@ function inferredFolders() {
     for (const r of rows) {
       if (map[r.p]) continue;
       try {
-        if (fs29.statSync(r.cwd).isDirectory()) map[r.p] = r.cwd;
+        if (fs30.statSync(r.cwd).isDirectory()) map[r.p] = r.cwd;
       } catch {
       }
     }
@@ -7245,7 +7381,7 @@ function makeMain(show) {
 }
 function appIcon(name) {
   const p = iconFile(name);
-  return fs29.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
+  return fs30.existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty();
 }
 function toggleFlyout() {
   if (!tray) return;
@@ -7331,7 +7467,7 @@ async function retrySdk() {
 function checkForUpdate() {
   refreshAppRepo();
   void retrySdk();
-  const source = fs29.existsSync(path31.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
+  const source = fs30.existsSync(path32.join(appRepoDir(), ".git")) ? appRepoDir() : baseRepoDir();
   return new Promise(
     (done) => execFile3("git", ["-C", source, "show", "HEAD:_app/dist/app.json"], { windowsHide: true, timeout: 2e4 }, (err, stdout) => {
       done();
@@ -7390,7 +7526,7 @@ function quit() {
 var loginChoiceFile = () => sharedDataFile("start-at-login.json");
 function sharedStartAtLogin() {
   try {
-    const v = JSON.parse(fs29.readFileSync(loginChoiceFile(), "utf8"))?.on;
+    const v = JSON.parse(fs30.readFileSync(loginChoiceFile(), "utf8"))?.on;
     return typeof v === "boolean" ? v : null;
   } catch {
     return null;
@@ -7400,8 +7536,8 @@ function saveStartAtLogin(on) {
   try {
     const f = loginChoiceFile();
     const tmp = `${f}.${process.pid}.tmp`;
-    fs29.writeFileSync(tmp, JSON.stringify({ on }));
-    fs29.renameSync(tmp, f);
+    fs30.writeFileSync(tmp, JSON.stringify({ on }));
+    fs30.renameSync(tmp, f);
   } catch (e) {
     log("app", `could not keep the start-at-login choice: ${e.message}`);
   }
@@ -7527,7 +7663,7 @@ Only allow your own phone, and only if it shows the same code.`,
 var BAD_ID = "That conversation id isn't valid";
 function isUsableFolder(p) {
   try {
-    return path31.isAbsolute(p) && fs29.statSync(p).isDirectory();
+    return path32.isAbsolute(p) && fs30.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -7554,7 +7690,7 @@ function registerIpc() {
   handle("app:openExternal", (url) => typeof url === "string" && /^https?:\/\//.test(url) ? shell2.openExternal(url) : void 0);
   handle("app:openPath", (p) => {
     try {
-      if (typeof p === "string" && path31.isAbsolute(p) && fs29.statSync(p).isDirectory()) return shell2.openPath(p);
+      if (typeof p === "string" && path32.isAbsolute(p) && fs30.statSync(p).isDirectory()) return shell2.openPath(p);
     } catch {
     }
     return "Only folders can be opened";
@@ -7649,7 +7785,7 @@ function registerIpc() {
     const forWindow = workspacesForWindow().workspaces;
     const next = all.find((w) => w.id !== id && !w.disconnected && forWindow.some((f) => f.id === w.id && f.setUp));
     if (!next) return { ok: false, err: "Add another workspace first: Conversations needs one to show" };
-    if (id === "main" && !fs29.existsSync(path31.join(appRepoDir(), ".git"))) return { ok: false, err: `This ${PC} still gets the app's updates through this workspace: it can be disconnected after its next update` };
+    if (id === "main" && !fs30.existsSync(path32.join(appRepoDir(), ".git"))) return { ok: false, err: `This ${PC} still gets the app's updates through this workspace: it can be disconnected after its next update` };
     if (id !== currentWorkspace().id) {
       if (openElsewhere(id)) return { ok: false, err: `${target.name} is open in another window. Quit it there first: right-click its tray icon, then Quit ${target.name}.` };
       setDisconnected(id, true);
@@ -7678,7 +7814,7 @@ function registerIpc() {
     log("app", `reconnected workspace ${id}`);
     broadcast("workspaces-changed", null);
     const w = listWorkspaces().workspaces.find((x) => x.id === id);
-    return { ok: true, synced: !!w && fs29.existsSync(path31.join(w.syncHome, "config.json")) };
+    return { ok: true, synced: !!w && fs30.existsSync(path32.join(w.syncHome, "config.json")) };
   });
   handle("workspace:rename", (id, name) => {
     if (!isWorkspaceId(id) || typeof name !== "string" || !name.trim()) return;
@@ -7703,14 +7839,14 @@ function registerIpc() {
     const images = [];
     const paths = [];
     for (const p of r.filePaths) {
-      const type = IMAGE_TYPES[path31.extname(p).toLowerCase()];
+      const type = IMAGE_TYPES[path32.extname(p).toLowerCase()];
       let size = 0;
       try {
-        size = fs29.statSync(p).size;
+        size = fs30.statSync(p).size;
       } catch {
         continue;
       }
-      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path31.basename(p), mediaType: type, data: fs29.readFileSync(p).toString("base64") });
+      if (type && size <= MAX_PICKED_IMAGE_BYTES) images.push({ name: path32.basename(p), mediaType: type, data: fs30.readFileSync(p).toString("base64") });
       else paths.push(p);
     }
     return { images, paths };
@@ -7767,7 +7903,7 @@ function registerIpc() {
   handle("sync:now", () => scheduler.syncNow());
   handle("sync:signIn", () => isMac2 ? macGitHubSignIn() : scheduler.signIn());
   handle("sync:setPaused", (paused) => scheduler.setPaused(paused === true));
-  handle("sync:openLog", () => shell2.openPath(path31.join(syncDir(), "sync.log")));
+  handle("sync:openLog", () => shell2.openPath(path32.join(syncDir(), "sync.log")));
   handle("sync:setUploadQuiet", (seconds) => scheduler.setUploadQuiet(typeof seconds === "number" ? seconds : NaN));
   handle("cli:open", async (id) => {
     if (!isUuid(id)) return { ok: false, message: BAD_ID };
@@ -7809,11 +7945,11 @@ function registerIpc() {
       const d = conversationDetail(index.db, id, ctx(), folders2());
       if (!d) return { ok: false, err: `That conversation isn't on this ${PC} yet` };
       cwd = d.folder;
-      if (!cwd || !fs29.existsSync(cwd)) {
+      if (!cwd || !fs30.existsSync(cwd)) {
         const local = localTranscript(id);
         cwd = local ? folderForTranscript(local, []) : null;
       }
-      if (!cwd || !fs29.existsSync(cwd)) {
+      if (!cwd || !fs30.existsSync(cwd)) {
         cwd = await chooseFolder(mainWin, d.row.projectLabel);
         if (!cwd) return { ok: false, err: `Chat needs a folder to work in on this ${PC}` };
         pickedFolder = { id, folder: cwd, at: Date.now() };
@@ -7841,7 +7977,13 @@ function registerIpc() {
       if (attachments.length) return { ok: false, err: "Images can't go with a ! command" };
       return chat.shell({ id, text: "", command: value, cwd, model, permissionMode: mode, effort, draftKey: isComposerKey(opts.draftKey) ? opts.draftKey : void 0 });
     }
-    return chat.send({ id, text: value || "(image)", cwd, model, permissionMode: mode, effort, attachments });
+    let context;
+    try {
+      context = prepareRefs(value, id, (ref) => chatForRef(index.db, ref, ctx()));
+    } catch (e) {
+      log("chat", `chat links: ${e.message}`);
+    }
+    return chat.send({ id, text: value || "(image)", cwd, model, permissionMode: mode, effort, attachments, context });
   });
   handle("chat:stop", (id) => isUuid(id) ? chat.stop(id) : void 0);
   handle("chat:stopShell", (key) => isComposerKey(key) ? chat.stopDraftShell(key) : void 0);
@@ -7870,7 +8012,7 @@ function registerIpc() {
       const d = conversationDetail(index.db, id, ctx(), folders2());
       cwd = d?.folder ?? d?.row.cwd ?? null;
     } else if (isProjectId(projectId)) cwd = folders2()[projectId] ?? null;
-    if (!cwd || !fs29.existsSync(cwd)) cwd = app4.getPath("home");
+    if (!cwd || !fs30.existsSync(cwd)) cwd = app4.getPath("home");
     return { id, cwd };
   };
   handle("chat:commands", (rawId, projectId, folder) => {
@@ -8151,7 +8293,7 @@ void app4.whenReady().then(async () => {
   registerIpc();
   log("app", `starting ${APP_VERSION} on ${thisMachine()}; data in ${appDataDir()}`);
   try {
-    await index.start(path31.join(HERE, "index-worker.mjs"));
+    await index.start(path32.join(HERE, "index-worker.mjs"));
     index.watchLive(liveConversationIds);
   } catch (e) {
     log("index", `the index is not available: ${e.stack || e}`);
@@ -8197,7 +8339,7 @@ void app4.whenReady().then(async () => {
   setTimeout(checkForUpdate, 15e3).unref();
   setInterval(checkForUpdate, 2 * 6e4).unref();
   const mainHere = listWorkspaces().workspaces[0];
-  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs29.existsSync(path31.join(mainHere.syncHome, "config.json"))) {
+  if (currentWorkspace().id !== "main" && !mainHere.disconnected && fs30.existsSync(path32.join(mainHere.syncHome, "config.json"))) {
     const keepMainCurrent = () => {
       const open2 = openNow();
       if (open2.includes("main") || open2.some((id) => id < currentWorkspace().id)) return;
@@ -8297,7 +8439,7 @@ void app4.whenReady().then(async () => {
   }
   secondInstances.finish();
   powerMonitor.on("resume", () => markingOpen && markOpen(currentWorkspace().id));
-  fs29.watchFile(registryPath(), { interval: 2e3 }, () => {
+  fs30.watchFile(registryPath(), { interval: 2e3 }, () => {
     broadcast("workspaces-changed", null);
     refreshLabels();
   });

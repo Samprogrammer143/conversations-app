@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { AppInfo, SearchHit } from "../../shared/types";
+import { chatLink } from "../../shared/links";
 import { AppMark } from "../components/AppMark";
 import { Icon } from "../components/Icon";
 import { Button, IconButton, Kbd, Spinner, Tile } from "../components/controls";
@@ -372,6 +373,12 @@ export function copyResumeCommand(id: string) {
   useStore.getState().toast({ text: "Copied the claude --resume command", icon: "check" });
 }
 
+/** A link to paste into another chat's message: the app gives Claude this chat to read. */
+export function copyChatLink(id: string, title: string) {
+  void api.app.copyText(chatLink(id, title));
+  useStore.getState().toast({ text: "Copied. Paste it into another chat to let Claude read this one.", icon: "check" });
+}
+
 export function ContextMenu() {
   const menu = useStore((s) => s.menu);
   const close = useStore((s) => s.closeMenu);
@@ -407,6 +414,7 @@ export function ContextMenu() {
           { label: "Copy resume command", icon: "copy", key: "Ctrl+Shift+C", run: () => copyResumeCommand(row.id) },
         ]
       : []),
+    { label: "Copy chat link", icon: "copy", run: () => copyChatLink(row.id, row.title) },
     { label: row.pinned ? "Unpin" : "Pin", icon: row.pinned ? "pin-off" : "pin", key: "Ctrl+D", run: () => void s.togglePin(row.id) },
     { label: "Rename…", icon: "pencil", key: "F2", run: () => useStore.setState({ renaming: row.id }) },
     { sep: true },

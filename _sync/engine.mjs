@@ -1227,11 +1227,14 @@ export function resolveSession({ session, transcript, cwd }) {
 
 // ------------------------------------------------------ transcript reading
 
+const LINK_NOTE_HEAD = "<referenced-chats>\nThe user's message links to other conversations of theirs.";
+
 export function textOf(content) {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     if (content.some((c) => c?.type === "tool_result")) return null;
-    return content.filter((c) => c?.type === "text").map((c) => c.text).join("\n");
+    // Not the app's note on the chats a message links to (the app's refs.ts NOTE_HEAD): it isn't what you typed.
+    return content.filter((c) => c?.type === "text" && !String(c.text ?? "").startsWith(LINK_NOTE_HEAD)).map((c) => c.text).join("\n");
   }
   return null;
 }

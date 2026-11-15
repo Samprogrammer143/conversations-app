@@ -163,6 +163,9 @@ function tx(db2, fn) {
 import fs2 from "node:fs";
 import path2 from "node:path";
 
+// src/shared/links.ts
+var NOTE_HEAD = "<referenced-chats>\nThe user's message links to other conversations of theirs.";
+
 // src/shared/summary.ts
 var plural = (n, one, many) => n === 1 ? one : many.replace("#", String(n));
 var cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -347,7 +350,7 @@ function parseEntries(buf) {
   }
   return entries;
 }
-var META_PREFIXES = ["<command-", "<local-command-", "<system-reminder", "<bash-", "<task-notification", "<user-memory-input", "Base directory for this skill", "Caveat: The messages below", "[Request interrupted"];
+var META_PREFIXES = [NOTE_HEAD, "<command-", "<local-command-", "<system-reminder", "<bash-", "<task-notification", "<user-memory-input", "Base directory for this skill", "Caveat: The messages below", "[Request interrupted"];
 var unescapeXml = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 function bashRecord(text) {
   const input = /^\s*<bash-input>([\s\S]*?)<\/bash-input>\s*$/.exec(text);

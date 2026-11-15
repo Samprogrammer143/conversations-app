@@ -42,6 +42,8 @@ export interface StartArgs {
   permissionMode?: PermissionMode;
   effort?: EffortLevel | null;
   attachments?: Attachment[];
+  /** The app's note for Claude about the chats the message links to (see refs.ts). */
+  context?: string;
   /** A "!" command's record (input, output) to write instead of a message: no turn starts. */
   shell?: [string, string];
   /** Start Claude Code with nothing to send (for /mcp): no turn starts. */
@@ -64,10 +66,10 @@ export interface SessionLike extends EventEmitter {
   agentResult?(agentId: string): AgentResult | null;
   readonly pastIds?: string[];
   stopAgent?(agentId: string): Promise<boolean>;
-  start(first: string, attachments?: Attachment[]): void;
+  start(first: string, attachments?: Attachment[], context?: string): void;
   startShell?(record: [string, string]): void;
   startIdle?(): void;
-  send(text: string, attachments?: Attachment[]): void;
+  send(text: string, attachments?: Attachment[], context?: string): void;
   appendShell?(record: [string, string], label: string): void;
   /** Waits until the records handed over are written (before a close). */
   settle?(ms?: number): Promise<void>;
@@ -466,7 +468,7 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
       if (await this.openInTerminal(id)) return { ok: false, err: OPEN_IN_TERMINAL };
       const s = this.sessions.get(id);
       if (s?.alive) {
-        s.send(args.text, args.attachments ?? []);
+        s.send(args.text, args.attachments ?? [], args.context);
         this.emit("owned", id, s.cwd);
         return { ok: true, conversationId: id };
       }
@@ -528,7 +530,7 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
       if (args.shell && s.startShell) s.startShell(args.shell);
       // Nothing to send: never an empty message.
       else if (args.idle) s.startIdle?.();
-      else s.start(args.text, args.attachments ?? []);
+      else s.start(args.text, args.attachments ?? [], args.context);
       started = true;
       // Started only to look at its servers: it becomes the app's chat when something is sent.
       if (!args.idle) this.emit("owned", id, cwd);
@@ -555,7 +557,7 @@ export class ChatManager extends EventEmitter implements ChatManagerLike {
     this.drafts.set(draftId, { session: s, cwd: args.cwd });
     this.attach(s);
     if (args.shell && s.startShell) s.startShell(args.shell);
-    else s.start(args.text, args.attachments ?? []);
+    else s.start(args.text, args.attachments ?? [], args.context);
     // A new chat gets its id from Claude Code's first message.
     const id = await new Promise<string | null>((resolve) => {
       const timer = setTimeout(() => resolve(null), 60_000);

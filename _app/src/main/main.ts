@@ -16,7 +16,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nati
 import type { EditField } from "../shared/api";
 import type { AppInfo, Attachment, ListQuery, Settings } from "../shared/types";
 import { IndexService } from "./index/service";
-import { conversationDetail, deviceSummaries, itemsPage, listConversations, markSeen, search, sidebarData, type PendingEdits, type QueryContext } from "./index/queries";
+import { chatForRef, conversationDetail, deviceSummaries, itemsPage, listConversations, markSeen, search, sidebarData, type PendingEdits, type QueryContext } from "./index/queries";
 import { readDevices } from "./sync/repo-read";
 import { SyncScheduler } from "./sync/scheduler";
 import { detectEngineVersion, runEngineSerial } from "./sync/engine-bridge";
@@ -27,6 +27,7 @@ import { createFlyout, createMainWindow, createSettingsWindow, createWelcomeWind
 import { chooseFolder, isGenericFolder, launchInTerminal, newChatInCli, openInCli, pullConversation } from "./cli";
 import { ChatManager, type McpAction, type ResumePrep } from "./chat/manager";
 import { knownModels } from "./chat/models";
+import { prepareRefs } from "./chat/refs";
 import { lastUsage, refreshUsage } from "./chat/usage";
 import { ComposerStore, isComposerKey } from "./composer-state";
 import { sweepPidFiles } from "./chat/shell";
@@ -1083,7 +1084,14 @@ function registerIpc() {
       if (attachments.length) return { ok: false, err: "Images can't go with a ! command" };
       return chat.shell({ id, text: "", command: value, cwd, model, permissionMode: mode, effort, draftKey: isComposerKey(opts.draftKey) ? opts.draftKey : undefined });
     }
-    return chat.send({ id, text: value || "(image)", cwd, model, permissionMode: mode, effort, attachments });
+    // Chats the message links to (chat:<id>): saved as text for Claude to read.
+    let context: string | undefined;
+    try {
+      context = prepareRefs(value, id, (ref) => chatForRef(index.db, ref, ctx()));
+    } catch (e) {
+      log("chat", `chat links: ${(e as Error).message}`);
+    }
+    return chat.send({ id, text: value || "(image)", cwd, model, permissionMode: mode, effort, attachments, context });
   });
   handle("chat:stop", (id: unknown) => (isUuid(id) ? chat.stop(id) : undefined));
   // A "!" command in a new chat has no conversation id yet: it is stopped by the composer's key.

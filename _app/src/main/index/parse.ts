@@ -8,6 +8,7 @@
 // conversation was continued on two PCs before they synced, both branches have
 // user prompts after the fork; then both are shown, as Part 1 and Part 2.
 
+import { NOTE_HEAD } from "../../shared/links";
 import type { DiffBlock, DiffLine, ImageRef, ToolCall, ToolKind, TranscriptItem } from "../../shared/types";
 import { summariseCalls } from "../../shared/summary";
 
@@ -128,7 +129,7 @@ export function parseEntries(buf: Buffer): Entry[] {
 
 // ------------------------------------------------------------------ text helpers
 
-const META_PREFIXES = ["<command-", "<local-command-", "<system-reminder", "<bash-", "<task-notification", "<user-memory-input", "Base directory for this skill", "Caveat: The messages below", "[Request interrupted"];
+const META_PREFIXES = [NOTE_HEAD, "<command-", "<local-command-", "<system-reminder", "<bash-", "<task-notification", "<user-memory-input", "Base directory for this skill", "Caveat: The messages below", "[Request interrupted"];
 
 const unescapeXml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
 
