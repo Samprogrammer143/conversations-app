@@ -9,6 +9,7 @@ import { api } from "../lib/api";
 import { SEP, groupLabel, plural, rowTime } from "../lib/format";
 import { keyLabel } from "../lib/keys";
 import { computerWord, pcWord } from "../lib/platform";
+import { TagChips } from "./Tags";
 
 type Entry = { type: "header"; label: string; key: string } | { type: "row"; row: ConversationRow; key: string; last: boolean };
 
@@ -17,6 +18,7 @@ function scopeTitle(scope: ReturnType<typeof useStore.getState>["scope"], sideba
   if (scope.kind === "pinned") return "Pinned";
   if (scope.kind === "archived") return "Archived";
   if (scope.kind === "device") return scope.name;
+  if (scope.kind === "tag") return sidebar?.tags.find((t) => t.id === scope.id)?.name ?? "Tag";
   if (scope.id === "folder:*") return "Other folders";
   return sidebar?.projects.find((p) => p.id === scope.id)?.label ?? scope.id.split("/").pop() ?? "Project";
 }
@@ -77,6 +79,7 @@ const Row = memo(function Row({ row, selected, last, renaming }: { row: Conversa
             <span className="dot">·</span>
             <span className="ellipsis">{row.projectLabel}</span>
           </span>
+          <TagChips row={row} />
           {row.live || row.runningHere ? <span className="live">Live</span> : row.pinned ? <Icon name="pin" size={12} className="pin" label="Pinned" /> : null}
         </span>
       </span>
@@ -94,6 +97,7 @@ function emptyTitle(filter: Filter, scope: Scope, title: string): string {
   if (scope.kind === "pinned") return "No pinned conversations";
   if (scope.kind === "archived") return "No archived conversations";
   if (scope.kind === "device") return `No conversations from ${scope.name} yet`;
+  if (scope.kind === "tag") return `No conversations tagged ${title} yet`;
   return `No conversations${scope.kind === "project" ? ` in ${title}` : ""} yet`;
 }
 
@@ -103,6 +107,7 @@ function emptyLine(filter: Filter, scope: Scope): string {
   if (scope.kind === "pinned") return `Press ${keyLabel("Ctrl+D")} on a conversation to pin it.`;
   if (scope.kind === "archived") return `Archived conversations stay synced and come back with ${keyLabel("Ctrl+E")}.`;
   if (scope.kind === "device") return "They appear here after that PC uploads one.";
+  if (scope.kind === "tag") return "Right-click a conversation and choose Tags… to add it.";
   if (scope.kind === "project") return "Start one here, or run claude in that folder on any PC.";
   return `Run claude in any project folder, or start a chat here with ${keyLabel("Ctrl+N")}.`;
 }

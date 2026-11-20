@@ -739,9 +739,15 @@ function openDb(file4, { readOnly = false } = {}) {
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA synchronous = NORMAL");
     migrate(db);
+    addTags(db);
   }
   db.exec("PRAGMA foreign_keys = OFF");
   return db;
+}
+function addTags(db) {
+  const cols = db.prepare("PRAGMA table_info(edits)").all();
+  if (cols.length && !cols.some((c) => c.name === "tags")) db.exec("ALTER TABLE edits ADD COLUMN tags TEXT");
+  db.exec("CREATE TABLE IF NOT EXISTS tag_defs (id TEXT PRIMARY KEY, name TEXT, color TEXT, deleted INTEGER)");
 }
 function migrate(db) {
   db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
@@ -825,7 +831,15 @@ function migrate(db) {
       title TEXT,
       archived INTEGER,
       deleted INTEGER,
-      app INTEGER
+      app INTEGER,
+      tags TEXT
+    );
+
+    CREATE TABLE tag_defs (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      color TEXT,
+      deleted INTEGER
     );
 
     CREATE TABLE local_state (
@@ -1199,10 +1213,13 @@ var IndexService = class _IndexService extends EventEmitter {
   }
 };
 
+// src/shared/types.ts
+var TAG_COLORS = ["blue", "orange", "green", "purple", "red", "teal", "yellow", "grey"];
+
 // src/main/index/queries.ts
 var LIVE_MS = 2 * 60 * 1e3;
 var BASE2 = `
-  SELECT c.*, e.pinned AS e_pinned, e.title AS e_title, e.archived AS e_archived, e.deleted AS e_deleted, s.seen_last_at
+  SELECT c.*, e.pinned AS e_pinned, e.title AS e_title, e.archived AS e_archived, e.deleted AS e_deleted, e.tags AS e_tags, s.seen_last_at
   FROM conversations c
   LEFT JOIN edits e ON e.conversation_id = c.id
   LEFT JOIN local_state s ON s.conversation_id = c.id
@@ -1212,6 +1229,15 @@ function toRow(r, ctx2) {
   const pinned = p.pinned ?? r.e_pinned === 1;
   const archived = p.archived ?? r.e_archived === 1;
   const title = (p.title !== void 0 ? p.title : r.e_title) || r.title;
+  let tags = [];
+  if (p.tags !== void 0) tags = p.tags ?? [];
+  else if (r.e_tags) {
+    try {
+      const v = JSON.parse(r.e_tags);
+      if (Array.isArray(v)) tags = v.filter((x) => typeof x === "string");
+    } catch {
+    }
+  }
   const live2 = !!r.local_mtime_ms && ctx2.now - r.local_mtime_ms < LIVE_MS;
   const updated = !!r.last_pc && r.last_pc !== ctx2.thisMachine && !!r.last_at && (!r.seen_last_at || r.last_at > r.seen_last_at);
   let pcs = [];
@@ -1234,6 +1260,7 @@ function toRow(r, ctx2) {
     bytes: r.bytes,
     pinned,
     archived,
+    tags,
     updated,
     live: live2,
     runningHere: ctx2.running.has(r.id),
@@ -1257,6 +1284,7 @@ function listConversations(db, q, ctx2) {
       if (scope.id === "folder:*") rows = rows.filter((r) => r.projectId.startsWith("folder:") && r.projectId !== "folder:_home");
       else rows = rows.filter((r) => r.projectId === scope.id);
     } else if (scope.kind === "device") rows = rows.filter((r) => r.lastPc === scope.name || !r.lastPc && scope.name === ctx2.thisMachine);
+    else if (scope.kind === "tag") rows = rows.filter((r) => r.tags.includes(scope.id));
   }
   const counts = { all: rows.length, updated: rows.filter((r) => r.updated).length, live: rows.filter((r) => r.live || r.runningHere).length };
   if (q.filter === "updated") rows = rows.filter((r) => r.updated);
@@ -1295,8 +1323,37 @@ function sidebarData(db, ctx2, devices2, folders3) {
     projects,
     otherFolders: { count: otherCount, ids: otherIds },
     devices: deviceSummaries(db, ctx2, devices2, rows),
+    tags: tagList(db, ctx2, visible),
     pcCount: 0
   };
+}
+function fallbackColor(id) {
+  let h = 0;
+  for (const ch of id) h = h * 31 + ch.charCodeAt(0) >>> 0;
+  return TAG_COLORS[h % TAG_COLORS.length];
+}
+function tagList(db, ctx2, rows) {
+  const defs = /* @__PURE__ */ new Map();
+  for (const d of db.prepare("SELECT id, name, color, deleted FROM tag_defs").all()) {
+    defs.set(d.id, { name: d.name, color: d.color, deleted: d.deleted === 1 });
+  }
+  for (const [id, p] of ctx2.pending) {
+    if (p.tagName === void 0 && p.tagColor === void 0 && p.tagDeleted === void 0) continue;
+    const d = defs.get(id) ?? { name: null, color: null, deleted: false };
+    if (p.tagName !== void 0) d.name = p.tagName;
+    if (p.tagColor !== void 0) d.color = p.tagColor;
+    if (p.tagDeleted !== void 0) d.deleted = p.tagDeleted;
+    defs.set(id, d);
+  }
+  const counts = /* @__PURE__ */ new Map();
+  for (const r of rows) for (const t of r.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  const out = [];
+  for (const [id, d] of defs) {
+    if (d.deleted || !d.name) continue;
+    const color = TAG_COLORS.includes(d.color ?? "") ? d.color : fallbackColor(id);
+    out.push({ id, name: d.name, color, count: counts.get(id) ?? 0 });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, void 0, { sensitivity: "base" }));
 }
 function deviceSummaries(db, ctx2, devices2, rows) {
   const names = /* @__PURE__ */ new Set([ctx2.thisMachine]);
@@ -1452,6 +1509,31 @@ function chatForRef(db, id, ctx2, limit = 4e3) {
   const items = rows.slice(0, limit).reverse().map((x) => JSON.parse(x.json));
   return { title: toRow(r, ctx2).title, items, cut };
 }
+var stmts = /* @__PURE__ */ new WeakMap();
+function storedEdits(db, id) {
+  let q = stmts.get(db);
+  if (!q) {
+    q = { edit: db.prepare("SELECT pinned, title, archived, deleted, tags FROM edits WHERE conversation_id = ?"), tag: db.prepare("SELECT name, color, deleted FROM tag_defs WHERE id = ?") };
+    stmts.set(db, q);
+  }
+  const e = q.edit.get(id);
+  const t = q.tag.get(id);
+  let tags = null;
+  try {
+    tags = e?.tags ? JSON.parse(e.tags) : null;
+  } catch {
+  }
+  return {
+    pinned: e?.pinned === 1,
+    title: e?.title ?? null,
+    archived: e?.archived === 1,
+    deleted: e?.deleted === 1,
+    tags,
+    tagName: t?.name ?? null,
+    tagColor: t?.color ?? null,
+    tagDeleted: t?.deleted === 1
+  };
+}
 
 // src/main/sync/scheduler.ts
 import fs12 from "node:fs";
@@ -1478,7 +1560,17 @@ var isPermissionMode = (v) => typeof v === "string" && PERMISSION_MODES.includes
 var DECISIONS = ["allow", "allow-always", "deny"];
 var isDecision = (v) => typeof v === "string" && DECISIONS.includes(v);
 function checkEdit(field, value) {
-  if (field === "pinned" || field === "archived" || field === "deleted") return typeof value === "boolean" ? { field, value } : null;
+  if (field === "pinned" || field === "archived" || field === "deleted" || field === "tagDeleted") return typeof value === "boolean" ? { field, value } : null;
+  if (field === "tags") {
+    if (!Array.isArray(value) || value.length > 30 || !value.every(isUuid)) return null;
+    return { field, value: [...new Set(value.map((v) => v.toLowerCase()))] };
+  }
+  if (field === "tagName") {
+    if (typeof value !== "string") return null;
+    const t = value.replace(/\s+/g, " ").trim();
+    return t && t.length <= 40 ? { field, value: t } : null;
+  }
+  if (field === "tagColor") return typeof value === "string" && TAG_COLORS.includes(value) ? { field, value } : null;
   if (field === "title") {
     if (value === null) return { field, value: null };
     if (typeof value !== "string") return null;
@@ -6049,8 +6141,19 @@ function pruneApprovals(waiting) {
 }
 
 // src/main/edits-overlay.ts
+var norm = (v) => JSON.stringify(v === void 0 || v === false || Array.isArray(v) && !v.length ? null : v);
 var EditsOverlay = class {
   pending = /* @__PURE__ */ new Map();
+  /** Saves still running per id: its overlay can't settle yet (the index may hold the value from before them). */
+  saving = /* @__PURE__ */ new Map();
+  begin(id) {
+    this.saving.set(id, (this.saving.get(id) ?? 0) + 1);
+  }
+  end(id) {
+    const n = (this.saving.get(id) ?? 1) - 1;
+    if (n > 0) this.saving.set(id, n);
+    else this.saving.delete(id);
+  }
   /** Shows an edit at once. Returns what to put back if it fails. */
   apply(id, field, value) {
     const p = this.pending.get(id) ?? {};
@@ -6068,9 +6171,22 @@ var EditsOverlay = class {
     else delete p[field];
     if (Object.keys(p).length === 0) this.pending.delete(id);
   }
+  /**
+   * Drops each overlaid field the index now holds the same value for (read back from
+   * GitHub). Covers what settle() can't: a tag, which has no transcript, and a chat whose
+   * transcript didn't change. A later change from another PC then shows.
+   */
+  settleMatching(stored) {
+    for (const [id, p] of this.pending) {
+      if (this.saving.has(id)) continue;
+      const s = stored(id);
+      for (const f of Object.keys(p)) if (norm(p[f]) === norm(s[f])) delete p[f];
+      if (Object.keys(p).length === 0) this.pending.delete(id);
+    }
+  }
   /** The index caught up with GitHub for these conversations: nothing left to overlay. */
   settle(ids) {
-    for (const id of ids) this.pending.delete(id);
+    for (const id of ids) if (!this.saving.has(id)) this.pending.delete(id);
   }
 };
 
@@ -7274,7 +7390,10 @@ function quickWrite(what, fn, retries = 2) {
   }
 }
 var scheduler;
-var ctx = () => ({ thisMachine: thisMachine(), now: Date.now(), running: chat.runningIds(), pending });
+var ctx = () => {
+  if (index.ready && overlay.pending.size) overlay.settleMatching((id) => storedEdits(index.db, id));
+  return { thisMachine: thisMachine(), now: Date.now(), running: chat.runningIds(), pending };
+};
 var devices = () => index.ready ? deviceSummaries(index.db, ctx(), readDevices(repoDir())) : [];
 var folders2 = () => Object.fromEntries(Object.entries({ ...inferredFolders(), ...readSyncConfig()?.folders ?? {}, ...settings.get().folders }).filter(([id, f]) => id.startsWith("folder:") || !isGenericFolder(f)));
 var inferred = null;
@@ -7573,9 +7692,22 @@ var EDIT_TEXT = {
   pinned: (v) => v ? "Pinned" : "Unpinned",
   title: () => "Renamed",
   archived: (v) => v ? "Archived" : "Unarchived",
-  deleted: (v) => v ? "Deleted" : "Restored"
+  deleted: (v) => v ? "Deleted" : "Restored",
+  tags: () => "Tagged",
+  tagName: () => "Named a tag",
+  tagColor: () => "Recoloured a tag",
+  tagDeleted: (v) => v ? "Deleted a tag" : "Restored a tag"
 };
-async function applyEdit(id, field, value) {
+async function applyEdit(id, field, value, more = []) {
+  overlay.begin(id);
+  try {
+    return await saveEdits(id, [{ field, value }, ...more]);
+  } finally {
+    overlay.end(id);
+  }
+}
+async function saveEdits(id, edits) {
+  const [{ field, value }] = edits;
   let releasedAt = 0;
   if (field === "deleted" && value === true) {
     if (chat.isRunning(id)) return { ok: false, err: "Claude is still working in this conversation. Stop it first, then delete it." };
@@ -7584,18 +7716,28 @@ async function applyEdit(id, field, value) {
     if (chat.isOpenInApp(id)) await chat.release(id);
     releasedAt = Date.now();
   }
-  const before = overlay.apply(id, field, value);
+  const befores = edits.map((e) => ({ field: e.field, before: overlay.apply(id, e.field, e.value) }));
+  const rollback = () => {
+    for (const b of befores.reverse()) overlay.rollback(id, b.field, b.before);
+  };
   broadcast("index-changed", [id]);
-  if (await detectEngineVersion() < 3) return { ok: true, queued: true, err: `Saved on this ${PC}; the sync engine on this ${PC} needs its update to share it` };
+  let engine = await detectEngineVersion();
+  if (engine < 4 && edits.some((e) => e.field.startsWith("tag"))) engine = await detectEngineVersion(true);
+  if (engine < 4 && edits.some((e) => e.field.startsWith("tag"))) {
+    rollback();
+    broadcast("index-changed", [id]);
+    return { ok: false, err: `Tags need the sync engine's update on this ${PC}. It updates by itself within ten minutes; try again then.` };
+  }
+  if (engine < 3) return { ok: true, queued: true, err: `Saved on this ${PC}; the sync engine on this ${PC} needs its update to share it` };
   const deleting = field === "deleted" && value === true;
-  const args = ["edit", "--json", "--ops", JSON.stringify([{ session: id, field, value }]), ...deleting ? ["--written-by", String(releasedAt)] : []];
+  const args = ["edit", "--json", "--ops", JSON.stringify(edits.map((e) => ({ session: id, field: e.field, value: e.value }))), ...deleting ? ["--written-by", String(releasedAt)] : []];
   let r = await runEngineSerial(args);
   for (let i = 0; deleting && !r.ok && r.json?.code === "live" && i < 8; i++) {
     await new Promise((res) => setTimeout(res, 750));
     r = await runEngineSerial(args);
   }
   if (!r.ok) {
-    overlay.rollback(id, field, before);
+    rollback();
     broadcast("index-changed", [id]);
     return { ok: false, err: r.json?.err ?? r.stderr.split("\n")[0] ?? "The change couldn't be saved" };
   }
@@ -7893,11 +8035,22 @@ function registerIpc() {
     return search(index.db, q, ctx(), { includeTools: !!opts?.includeTools });
   });
   handle("list:image", (key) => typeof key === "string" && key.length <= 4e3 ? index.image(key) : null);
-  handle("edit:apply", (id, field, value) => {
+  handle("edit:apply", (id, field, value, more) => {
     if (!isUuid(id)) return { ok: false, err: BAD_ID };
     const edit = checkEdit(field, value);
     if (!edit) return { ok: false, err: "That change isn't valid" };
-    return applyEdit(id, edit.field, edit.value);
+    const tagRecord = edit.field.startsWith("tag") && edit.field !== "tags";
+    if (tagRecord && index.ready && index.db.prepare("SELECT 1 FROM conversations WHERE id = ?").get(id)) return { ok: false, err: "That change isn't valid" };
+    const rest = [];
+    if (more !== void 0 && more !== null) {
+      if (!Array.isArray(more) || more.length > 3) return { ok: false, err: "That change isn't valid" };
+      for (const m of more) {
+        const e = checkEdit(m?.field, m?.value);
+        if (!e || !e.field.startsWith("tag") || !edit.field.startsWith("tag") || e.field === "tags" || edit.field === "tags") return { ok: false, err: "That change isn't valid" };
+        rest.push(e);
+      }
+    }
+    return applyEdit(id, edit.field, edit.value, rest);
   });
   handle("sync:status", () => scheduler.status());
   handle("sync:now", () => scheduler.syncNow());

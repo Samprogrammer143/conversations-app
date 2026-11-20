@@ -8,6 +8,7 @@ import { keyLabel, mod } from "../lib/keys";
 import { pcWord } from "../lib/platform";
 import { chooseDraftFolder } from "./Detail";
 import { WorkspaceSwitcher } from "./Workspaces";
+import { TagDot, TagRenameInput } from "./Tags";
 import { ago, resetText, time24 } from "../lib/format";
 
 type Scope = ListQuery["scope"];
@@ -46,11 +47,37 @@ export function UsageMeters({ usage }: { usage: PlanUsage | null }) {
 }
 const sameScope = (a: Scope, b: Scope) => JSON.stringify(a) === JSON.stringify(b);
 
-function Item({ scope, label, lead, trail, status }: { scope: Scope; label: string; lead: React.ReactNode; trail?: React.ReactNode; status?: "warning" | "success" | null }) {
+function Item({
+  scope,
+  label,
+  lead,
+  trail,
+  status,
+  onContextMenu,
+  editor,
+}: {
+  scope: Scope;
+  label: string;
+  lead: React.ReactNode;
+  trail?: React.ReactNode;
+  status?: "warning" | "success" | null;
+  onContextMenu?: (e: React.MouseEvent) => void;
+  /** Shown instead of the label (renaming a tag). */
+  editor?: React.ReactNode;
+}) {
   const current = useStore((s) => sameScope(s.scope, scope));
   const setScope = useStore((s) => s.setScope);
+  // Renaming: a text box, so not inside a button.
+  if (editor)
+    return (
+      <div className="sb-item" aria-current={current}>
+        {lead}
+        {editor}
+        {trail != null && <span className="sb-trail">{trail}</span>}
+      </div>
+    );
   return (
-    <button type="button" className="sb-item" aria-current={current} onClick={() => setScope(scope)}>
+    <button type="button" className="sb-item" aria-current={current} onClick={() => setScope(scope)} onContextMenu={onContextMenu}>
       {lead}
       <span className="sb-label ellipsis">{label}</span>
       {status && <span className={`status-dot ${status}`} aria-label={status === "warning" ? "Needs attention" : undefined} />}
@@ -135,6 +162,7 @@ export function Sidebar({ overlay = false }: { overlay?: boolean }) {
   const popover = useStore((s) => s.popover);
   const setPopover = useStore((s) => s.setPopover);
   const machine = useStore((s) => s.info?.machine);
+  const renamingTag = useStore((s) => s.renamingTag);
   const glyph = syncGlyph(sync);
 
   return (
@@ -169,6 +197,22 @@ export function Sidebar({ overlay = false }: { overlay?: boolean }) {
             lead={<Tile size={16} glyphSize={13} glyph={d.glyph} />}
             status={d.status === "old-sync" ? "warning" : null}
             trail={d.name === machine ? `This ${pcWord()}` : d.lastSeenAt ? ago(d.lastSeenAt) : ""}
+          />
+        ))}
+
+        {!!sidebar?.tags.length && <div className="sb-header">Tags</div>}
+        {sidebar?.tags.map((t) => (
+          <Item
+            key={t.id}
+            scope={{ kind: "tag", id: t.id }}
+            label={t.name}
+            lead={<span className="lead-tag"><TagDot color={t.color} /></span>}
+            trail={t.count || ""}
+            editor={renamingTag === t.id ? <TagRenameInput tag={t} /> : undefined}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              useStore.setState({ tagMenu: { id: t.id, x: e.clientX, y: e.clientY } });
+            }}
           />
         ))}
       </div>

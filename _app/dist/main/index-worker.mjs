@@ -13,9 +13,15 @@ function openDb(file, { readOnly = false } = {}) {
     db2.exec("PRAGMA journal_mode = WAL");
     db2.exec("PRAGMA synchronous = NORMAL");
     migrate(db2);
+    addTags(db2);
   }
   db2.exec("PRAGMA foreign_keys = OFF");
   return db2;
+}
+function addTags(db2) {
+  const cols = db2.prepare("PRAGMA table_info(edits)").all();
+  if (cols.length && !cols.some((c) => c.name === "tags")) db2.exec("ALTER TABLE edits ADD COLUMN tags TEXT");
+  db2.exec("CREATE TABLE IF NOT EXISTS tag_defs (id TEXT PRIMARY KEY, name TEXT, color TEXT, deleted INTEGER)");
 }
 function migrate(db2) {
   db2.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
@@ -99,7 +105,15 @@ function migrate(db2) {
       title TEXT,
       archived INTEGER,
       deleted INTEGER,
-      app INTEGER
+      app INTEGER,
+      tags TEXT
+    );
+
+    CREATE TABLE tag_defs (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      color TEXT,
+      deleted INTEGER
     );
 
     CREATE TABLE local_state (
@@ -1113,8 +1127,16 @@ function listRemoteSessions(repoDir) {
   }
   return out;
 }
-var FIELDS = /* @__PURE__ */ new Set(["pinned", "title", "archived", "deleted", "app"]);
-var validValue = (field, v) => v === null || (field === "title" ? typeof v === "string" && v.length <= 500 : typeof v === "boolean");
+var FIELDS = /* @__PURE__ */ new Set(["pinned", "title", "archived", "deleted", "app", "tags", "tagName", "tagColor", "tagDeleted"]);
+var COLORS = /* @__PURE__ */ new Set(["red", "orange", "yellow", "green", "teal", "blue", "purple", "grey"]);
+var validValue = (field, v) => {
+  if (v === null) return true;
+  if (field === "title") return typeof v === "string" && v.length <= 500;
+  if (field === "tags") return Array.isArray(v) && v.length <= 30 && v.every(isUuid);
+  if (field === "tagName") return typeof v === "string" && v.trim().length > 0 && v.length <= 40;
+  if (field === "tagColor") return typeof v === "string" && COLORS.has(v);
+  return typeof v === "boolean";
+};
 function readEdits(repoDir) {
   const best = /* @__PURE__ */ new Map();
   const dir = path.join(repoDir, "_state");
@@ -1504,8 +1526,14 @@ var Indexer = class {
     const edits = readEdits(this.opts.repoDir);
     tx(this.db, () => {
       this.db.exec("DELETE FROM edits");
-      const ins = this.db.prepare("INSERT INTO edits (conversation_id, pinned, title, archived, deleted, app) VALUES (?, ?, ?, ?, ?, ?)");
-      for (const [id, e] of edits) ins.run(id, e.pinned === void 0 ? null : e.pinned ? 1 : 0, e.title ?? null, e.archived === void 0 ? null : e.archived ? 1 : 0, e.deleted ? 1 : 0, e.app ? 1 : 0);
+      this.db.exec("DELETE FROM tag_defs");
+      const ins = this.db.prepare("INSERT INTO edits (conversation_id, pinned, title, archived, deleted, app, tags) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      const insTag = this.db.prepare("INSERT INTO tag_defs (id, name, color, deleted) VALUES (?, ?, ?, ?)");
+      for (const [id, e] of edits) {
+        if (e.tagName !== void 0 || e.tagColor !== void 0 || e.tagDeleted !== void 0) insTag.run(id, e.tagName ?? null, e.tagColor ?? null, e.tagDeleted ? 1 : 0);
+        if (e.pinned === void 0 && e.title === void 0 && e.archived === void 0 && e.deleted === void 0 && e.app === void 0 && e.tags === void 0) continue;
+        ins.run(id, e.pinned === void 0 ? null : e.pinned ? 1 : 0, e.title ?? null, e.archived === void 0 ? null : e.archived ? 1 : 0, e.deleted ? 1 : 0, e.app ? 1 : 0, e.tags?.length ? JSON.stringify(e.tags) : null);
+      }
       this.db.exec("DELETE FROM conversations WHERE item_count = -1 AND id IN (SELECT conversation_id FROM edits WHERE app = 1)");
     });
   }

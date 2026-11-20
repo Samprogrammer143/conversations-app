@@ -28,7 +28,8 @@ import zlib from "node:zlib";
 import https from "node:https";
 import { spawnSync } from "node:child_process";
 
-export const ENGINE_VERSION = 3;
+// 4: tags (STATE_FIELDS). The app saves tags only through an engine of 4 or later.
+export const ENGINE_VERSION = 4;
 
 // A workspace's hooks name its sync folder with `--sync-home <folder>`: an argument
 // works in every shell Claude Code may run a hook in, an environment prefix does not.
@@ -2055,8 +2056,18 @@ export function readDevicesFile(rel) {
 
 // app: the conversation was started or carried on in the Conversations app, so the
 // app shows it on every PC although Claude Code ran it through the Agent SDK.
-export const STATE_FIELDS = new Set(["pinned", "title", "archived", "deleted", "app"]);
-const validValue = (field, v) => v === null || (field === "title" ? typeof v === "string" && v.length <= 500 : typeof v === "boolean");
+// Tags: a conversation's "tags" is a list of tag ids. A tag is a record of its own, under
+// its id: "tagName", "tagColor" and "tagDeleted".
+export const STATE_FIELDS = new Set(["pinned", "title", "archived", "deleted", "app", "tags", "tagName", "tagColor", "tagDeleted"]);
+const TAG_COLORS = new Set(["red", "orange", "yellow", "green", "teal", "blue", "purple", "grey"]);
+const validValue = (field, v) => {
+  if (v === null) return true;
+  if (field === "title") return typeof v === "string" && v.length <= 500;
+  if (field === "tags") return Array.isArray(v) && v.length <= 30 && v.every(isUuid);
+  if (field === "tagName") return typeof v === "string" && v.trim().length > 0 && v.length <= 40;
+  if (field === "tagColor") return TAG_COLORS.has(v);
+  return typeof v === "boolean";
+};
 const stateDir = () => path.join(REPO_DIR, "_state");
 export const statePath = (config) => path.join(stateDir(), `${pcSlug(config)}.jsonl`);
 
@@ -2129,6 +2140,8 @@ export const isDeleted = (state, id) => state?.[id]?.deleted === true;
 export function appendStateOps(ops, { push = true, writtenBy = null } = {}) {
   const config = ensureRepo();
   const clean = (ops || []).filter((o) => o && isUuid(o.session) && STATE_FIELDS.has(o.field) && validValue(o.field, o.value ?? null));
+  // An edit this engine can't save is refused, not dropped quietly: the app would show it until a restart.
+  if (clean.length !== (ops || []).length) return { ok: false, code: "invalid", err: "This PC's sync engine can't save that change. It needs its update." };
   if (!clean.length) return { ok: true, nothing: true };
   // A conversation that is open on this PC is never deleted from under it.
   const open = openSessions();

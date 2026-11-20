@@ -48,6 +48,8 @@ export interface ConversationRow {
   bytes: number;
   pinned: boolean;
   archived: boolean;
+  /** The ids of its tags (see TagInfo); a tag that was deleted may still be listed, so check it against the sidebar's tags. */
+  tags: string[];
   /** Changed on another PC since you last opened it. */
   updated: boolean;
   /** Written to in the last two minutes (a session is running). */
@@ -62,12 +64,25 @@ export interface ConversationRow {
 
 export type ListFilter = "all" | "updated" | "live";
 
+/** A tag's colour: one of the app's eight. */
+export const TAG_COLORS = ["blue", "orange", "green", "purple", "red", "teal", "yellow", "grey"] as const;
+export type TagColor = (typeof TAG_COLORS)[number];
+
+/** A tag you made: its name and colour, and how many chats (not archived) have it. */
+export interface TagInfo {
+  id: string;
+  name: string;
+  color: TagColor;
+  count: number;
+}
+
 export interface ListQuery {
   scope:
     | { kind: "all" }
     | { kind: "pinned" }
     | { kind: "project"; id: string }
     | { kind: "device"; name: string }
+    | { kind: "tag"; id: string }
     | { kind: "archived" };
   filter: ListFilter;
 }
@@ -84,6 +99,8 @@ export interface SidebarData {
   projects: ProjectSummary[];
   otherFolders: { count: number; ids: string[] };
   devices: DeviceSummary[];
+  /** Every tag, by name. */
+  tags: TagInfo[];
   pcCount: number;
 }
 

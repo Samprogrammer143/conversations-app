@@ -171,10 +171,25 @@ export interface Edits {
   deleted?: boolean;
   /** Started or carried on in the Conversations app (shown although Claude Code ran it through the SDK). */
   app?: boolean;
+  /** Its tags' ids. */
+  tags?: string[] | null;
+  /** On a tag's own record (keyed by the tag's id): its name, colour, and whether it was deleted. */
+  tagName?: string | null;
+  tagColor?: string | null;
+  tagDeleted?: boolean;
 }
 
-const FIELDS = new Set(["pinned", "title", "archived", "deleted", "app"]);
-const validValue = (field: string, v: unknown) => v === null || (field === "title" ? typeof v === "string" && v.length <= 500 : typeof v === "boolean");
+// The same rules as the sync engine's (engine.mjs STATE_FIELDS).
+const FIELDS = new Set(["pinned", "title", "archived", "deleted", "app", "tags", "tagName", "tagColor", "tagDeleted"]);
+const COLORS = new Set(["red", "orange", "yellow", "green", "teal", "blue", "purple", "grey"]);
+const validValue = (field: string, v: unknown) => {
+  if (v === null) return true;
+  if (field === "title") return typeof v === "string" && v.length <= 500;
+  if (field === "tags") return Array.isArray(v) && v.length <= 30 && v.every(isUuid);
+  if (field === "tagName") return typeof v === "string" && v.trim().length > 0 && v.length <= 40;
+  if (field === "tagColor") return typeof v === "string" && COLORS.has(v);
+  return typeof v === "boolean";
+};
 
 /** Merges every PC's _state log: per conversation and field, the highest hybrid clock wins. */
 export function readEdits(repoDir: string): Map<string, Edits> {

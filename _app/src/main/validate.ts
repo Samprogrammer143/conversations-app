@@ -3,7 +3,8 @@
 // a UUID, a permission mode one of the three the app offers, an edit a known
 // field with a value of the right kind.
 
-import type { EditField } from "../shared/api";
+import type { EditField, EditValue } from "../shared/api";
+import { TAG_COLORS } from "../shared/types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -33,8 +34,19 @@ export const isDecision = (v: unknown): v is Decision => typeof v === "string" &
  * A valid edit, or null. Pinned, archived and deleted take true or false; the
  * title takes a short text, or null (or an empty text) for the automatic title.
  */
-export function checkEdit(field: unknown, value: unknown): { field: EditField; value: boolean | string | null } | null {
-  if (field === "pinned" || field === "archived" || field === "deleted") return typeof value === "boolean" ? { field, value } : null;
+export function checkEdit(field: unknown, value: unknown): { field: EditField; value: EditValue } | null {
+  if (field === "pinned" || field === "archived" || field === "deleted" || field === "tagDeleted") return typeof value === "boolean" ? { field, value } : null;
+  // A conversation's tags: tag ids, each once, at most 30.
+  if (field === "tags") {
+    if (!Array.isArray(value) || value.length > 30 || !value.every(isUuid)) return null;
+    return { field, value: [...new Set(value.map((v) => v.toLowerCase()))] };
+  }
+  if (field === "tagName") {
+    if (typeof value !== "string") return null;
+    const t = value.replace(/\s+/g, " ").trim();
+    return t && t.length <= 40 ? { field, value: t } : null;
+  }
+  if (field === "tagColor") return typeof value === "string" && (TAG_COLORS as readonly string[]).includes(value) ? { field, value } : null;
   if (field === "title") {
     if (value === null) return { field, value: null };
     if (typeof value !== "string") return null;

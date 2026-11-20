@@ -68,6 +68,12 @@ interface State {
   showShortcuts: boolean;
   renaming: string | null;
   menu: { x: number; y: number; id: string } | null;
+  /** The Tags picker for a chat (from its menu's Tags…), where it opens. */
+  tagPicker: { chatId: string; x: number; y: number; tags: string[] } | null;
+  /** A tag's own menu in the sidebar. */
+  tagMenu: { id: string; x: number; y: number } | null;
+  /** The tag being renamed in the sidebar. */
+  renamingTag: string | null;
   welcome: boolean;
   /** A new chat being written, before Claude Code has given it an id. */
   draft: { projectId: string | null; label: string; folder?: string | null } | null;
@@ -182,6 +188,9 @@ export const useStore = create<State>((set, get) => ({
   showShortcuts: false,
   renaming: null,
   menu: null,
+  tagPicker: null,
+  tagMenu: null,
+  renamingTag: null,
   welcome: false,
   draft: null,
   sent: {},

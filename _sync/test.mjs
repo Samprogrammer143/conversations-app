@@ -302,7 +302,7 @@ check("v3: the main folder gets the worktree's chat at startup", has(path.join(A
 // ---- 20. device registry rides along with uploads
 const devA = remoteFile("_devices", "pc-a.json", "");
 const devAJ = devA ? JSON.parse(devA.toString("utf8")) : null;
-check("v3: each PC's device file is on GitHub with its engine version", devAJ?.name === "PC-A" && devAJ?.engine === 3 && !!devAJ?.lastPushAt, devA?.toString());
+check("v3: each PC's device file is on GitHub with its engine version", devAJ?.name === "PC-A" && devAJ?.engine === 4 && !!devAJ?.lastPushAt, devA?.toString());
 const beforeNoop = commitsFor(ID);
 r = run(A, ["push", "--session", ID, "--cwd", PA]);
 check("v3: the device file never makes a commit on its own", commitsFor(ID) === beforeNoop && /Already up to date/.test(r.stdout), r.stdout + r.stderr);
@@ -327,6 +327,14 @@ run(B, ["pull-all", "--json", "--no-local"]);
 const lb = jsonOf(run(B, ["list", "--json"]));
 const stA = JSON.parse(fs.readFileSync(path.join(A.sync, "state.json"), "utf8"));
 check("v3: a later edit from the first PC wins again (hybrid clock)", lb?.state?.[ID]?.title === "Renamed on A again" && String(stA.hlc).endsWith("pc-a"), JSON.stringify(lb?.state?.[ID]));
+// Tags: a tag's record under its own id, and a chat's list of tag ids; invalid values are refused.
+const TAG22 = "12121212-3434-4565-8787-909090909090";
+r = run(A, ["edit", "--json", "--ops", JSON.stringify([{ session: TAG22, field: "tagName", value: "Bugs" }, { session: TAG22, field: "tagColor", value: "red" }, { session: ID, field: "tags", value: [TAG22] }])]);
+const bad22 = jsonOf(run(A, ["edit", "--json", "--ops", JSON.stringify([{ session: ID, field: "tags", value: ["not-an-id"] }, { session: TAG22, field: "tagColor", value: "red" }])]));
+run(B, ["pull-all", "--json", "--no-local"]);
+const lt = jsonOf(run(B, ["list", "--json"]));
+check("v4: tags sync to the other PC", r.status === 0 && lt?.state?.[TAG22]?.tagName === "Bugs" && lt?.state?.[TAG22]?.tagColor === "red" && JSON.stringify(lt?.state?.[ID]?.tags) === JSON.stringify([TAG22]), JSON.stringify([lt?.state?.[TAG22], lt?.state?.[ID]]));
+check("v4: an edit with a value the engine can't save is refused whole, not dropped", bad22?.ok === false && bad22?.code === "invalid", JSON.stringify(bad22));
 
 // ---- 23. check: a cheap test for news on GitHub
 let ck = jsonOf(run(B, ["check", "--json"]));
@@ -370,7 +378,7 @@ check("v3: an app chat uploads when the app marks it", !!waitFor(() => remoteFil
 
 // ---- 27. status and folders for the app
 const st27 = jsonOf(run(A, ["status", "--json"]));
-check("v3: status reports engine, devices and nothing waiting to upload", st27?.engine === 3 && st27.devices.some((d) => d.name === "PC-B") && st27.unpushedCommits === 0 && !!st27.lastFetchAt, JSON.stringify(st27).slice(0, 400));
+check("v3: status reports engine, devices and nothing waiting to upload", st27?.engine === 4 && st27.devices.some((d) => d.name === "PC-B") && st27.unpushedCommits === 0 && !!st27.lastFetchAt, JSON.stringify(st27).slice(0, 400));
 const fo27 = jsonOf(run(B, ["folders", "--json", "--refresh"]));
 const pbFolder = fo27?.folders?.["github.com/acme/website"];
 check("v3: folders finds where each project lives on this PC", !!pbFolder && (samePathT(pbFolder, PB) || samePathT(pbFolder, PB2)), JSON.stringify(fo27));

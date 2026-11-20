@@ -2,7 +2,7 @@
 // under the 100 ms budget because it touches nothing but SQLite.
 
 import type { DatabaseSync } from "node:sqlite";
-import type { ConversationDetail, ConversationRow, DeviceSummary, ItemsPage, ListQuery, ListResult, ProjectSummary, SearchHit, SearchResult, SidebarData, TranscriptItem } from "../../shared/types";
+import { TAG_COLORS, type ConversationDetail, type ConversationRow, type DeviceSummary, type ItemsPage, type ListQuery, type ListResult, type ProjectSummary, type SearchHit, type SearchResult, type SidebarData, type TagColor, type TagInfo, type TranscriptItem } from "../../shared/types";
 import type { DeviceRecord } from "../sync/repo-read";
 import { PC } from "../words";
 
@@ -35,11 +35,12 @@ interface Row {
   e_title: string | null;
   e_archived: number | null;
   e_deleted: number | null;
+  e_tags: string | null;
   seen_last_at: string | null;
 }
 
 /** Edits made in this window that GitHub has not confirmed yet. They win until it does. */
-export type PendingEdits = Map<string, { pinned?: boolean; title?: string | null; archived?: boolean; deleted?: boolean }>;
+export type PendingEdits = Map<string, { pinned?: boolean; title?: string | null; archived?: boolean; deleted?: boolean; tags?: string[] | null; tagName?: string | null; tagColor?: string | null; tagDeleted?: boolean }>;
 
 export interface QueryContext {
   thisMachine: string;
@@ -49,7 +50,7 @@ export interface QueryContext {
 }
 
 const BASE = `
-  SELECT c.*, e.pinned AS e_pinned, e.title AS e_title, e.archived AS e_archived, e.deleted AS e_deleted, s.seen_last_at
+  SELECT c.*, e.pinned AS e_pinned, e.title AS e_title, e.archived AS e_archived, e.deleted AS e_deleted, e.tags AS e_tags, s.seen_last_at
   FROM conversations c
   LEFT JOIN edits e ON e.conversation_id = c.id
   LEFT JOIN local_state s ON s.conversation_id = c.id
@@ -60,6 +61,14 @@ function toRow(r: Row, ctx: QueryContext): ConversationRow {
   const pinned = p.pinned ?? r.e_pinned === 1;
   const archived = p.archived ?? r.e_archived === 1;
   const title = (p.title !== undefined ? p.title : r.e_title) || r.title;
+  let tags: string[] = [];
+  if (p.tags !== undefined) tags = p.tags ?? [];
+  else if (r.e_tags) {
+    try {
+      const v = JSON.parse(r.e_tags);
+      if (Array.isArray(v)) tags = v.filter((x): x is string => typeof x === "string");
+    } catch {}
+  }
   const live = !!r.local_mtime_ms && ctx.now - r.local_mtime_ms < LIVE_MS;
   const updated = !!r.last_pc && r.last_pc !== ctx.thisMachine && !!r.last_at && (!r.seen_last_at || r.last_at > r.seen_last_at);
   let pcs: string[] = [];
@@ -81,6 +90,7 @@ function toRow(r: Row, ctx: QueryContext): ConversationRow {
     bytes: r.bytes,
     pinned,
     archived,
+    tags,
     updated,
     live,
     runningHere: ctx.running.has(r.id),
@@ -106,6 +116,7 @@ export function listConversations(db: DatabaseSync, q: ListQuery, ctx: QueryCont
       if (scope.id === "folder:*") rows = rows.filter((r) => r.projectId.startsWith("folder:") && r.projectId !== "folder:_home");
       else rows = rows.filter((r) => r.projectId === scope.id);
     } else if (scope.kind === "device") rows = rows.filter((r) => r.lastPc === scope.name || (!r.lastPc && scope.name === ctx.thisMachine));
+    else if (scope.kind === "tag") rows = rows.filter((r) => r.tags.includes(scope.id));
   }
   const counts = { all: rows.length, updated: rows.filter((r) => r.updated).length, live: rows.filter((r) => r.live || r.runningHere).length };
   if (q.filter === "updated") rows = rows.filter((r) => r.updated);
@@ -145,8 +156,41 @@ export function sidebarData(db: DatabaseSync, ctx: QueryContext, devices: Device
     projects,
     otherFolders: { count: otherCount, ids: otherIds },
     devices: deviceSummaries(db, ctx, devices, rows),
+    tags: tagList(db, ctx, visible),
     pcCount: 0,
   };
+}
+
+/** A tag with no colour of its own gets one from its id, so every PC shows the same. */
+export function fallbackColor(id: string): TagColor {
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return TAG_COLORS[h % TAG_COLORS.length];
+}
+
+/** Every tag that isn't deleted, by name, with how many of `rows` have it. Edits not yet read back from GitHub count. */
+export function tagList(db: DatabaseSync, ctx: QueryContext, rows: ConversationRow[]): TagInfo[] {
+  const defs = new Map<string, { name: string | null; color: string | null; deleted: boolean }>();
+  for (const d of db.prepare("SELECT id, name, color, deleted FROM tag_defs").all() as { id: string; name: string | null; color: string | null; deleted: number }[]) {
+    defs.set(d.id, { name: d.name, color: d.color, deleted: d.deleted === 1 });
+  }
+  for (const [id, p] of ctx.pending) {
+    if (p.tagName === undefined && p.tagColor === undefined && p.tagDeleted === undefined) continue;
+    const d = defs.get(id) ?? { name: null, color: null, deleted: false };
+    if (p.tagName !== undefined) d.name = p.tagName;
+    if (p.tagColor !== undefined) d.color = p.tagColor;
+    if (p.tagDeleted !== undefined) d.deleted = p.tagDeleted;
+    defs.set(id, d);
+  }
+  const counts = new Map<string, number>();
+  for (const r of rows) for (const t of r.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  const out: TagInfo[] = [];
+  for (const [id, d] of defs) {
+    if (d.deleted || !d.name) continue;
+    const color = (TAG_COLORS as readonly string[]).includes(d.color ?? "") ? (d.color as TagColor) : fallbackColor(id);
+    out.push({ id, name: d.name, color, count: counts.get(id) ?? 0 });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 }
 
 export function deviceSummaries(db: DatabaseSync, ctx: QueryContext, devices: DeviceRecord[], rows?: ConversationRow[]): DeviceSummary[] {
@@ -334,4 +378,31 @@ export function chatForRef(db: DatabaseSync, id: string, ctx: QueryContext, limi
   const cut = rows.length > limit;
   const items = rows.slice(0, limit).reverse().map((x) => JSON.parse(x.json) as TranscriptItem);
   return { title: toRow(r, ctx).title, items, cut };
+}
+
+/** What the index holds for an id's edits (a conversation's, or a tag's), as the overlay keeps them. */
+const stmts = new WeakMap<DatabaseSync, { edit: ReturnType<DatabaseSync["prepare"]>; tag: ReturnType<DatabaseSync["prepare"]> }>();
+
+export function storedEdits(db: DatabaseSync, id: string): Record<string, string | boolean | string[] | null | undefined> {
+  let q = stmts.get(db);
+  if (!q) {
+    q = { edit: db.prepare("SELECT pinned, title, archived, deleted, tags FROM edits WHERE conversation_id = ?"), tag: db.prepare("SELECT name, color, deleted FROM tag_defs WHERE id = ?") };
+    stmts.set(db, q);
+  }
+  const e = q.edit.get(id) as { pinned: number | null; title: string | null; archived: number | null; deleted: number | null; tags: string | null } | undefined;
+  const t = q.tag.get(id) as { name: string | null; color: string | null; deleted: number } | undefined;
+  let tags: string[] | null = null;
+  try {
+    tags = e?.tags ? JSON.parse(e.tags) : null;
+  } catch {}
+  return {
+    pinned: e?.pinned === 1,
+    title: e?.title ?? null,
+    archived: e?.archived === 1,
+    deleted: e?.deleted === 1,
+    tags,
+    tagName: t?.name ?? null,
+    tagColor: t?.color ?? null,
+    tagDeleted: t?.deleted === 1,
+  };
 }

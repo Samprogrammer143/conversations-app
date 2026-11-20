@@ -40,7 +40,7 @@ function makeApi({ invoke, send, on, windowKind, platform }) {
       image: (key) => invoke("list:image", key)
     },
     edit: {
-      apply: (id, field, value) => invoke("edit:apply", id, field, value)
+      apply: (id, field, value, more) => invoke("edit:apply", id, field, value, more)
     },
     sync: {
       status: () => invoke("sync:status"),

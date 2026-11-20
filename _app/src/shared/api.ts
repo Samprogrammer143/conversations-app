@@ -27,7 +27,9 @@ import type {
   SyncStatus,
 } from "./types";
 
-export type EditField = "pinned" | "title" | "archived" | "deleted";
+/** A conversation's fields, and (tagName, tagColor, tagDeleted) a tag's, under the tag's id. */
+export type EditField = "pinned" | "title" | "archived" | "deleted" | "tags" | "tagName" | "tagColor" | "tagDeleted";
+export type EditValue = boolean | string | string[] | null;
 
 export interface ConversationsApi {
   app: {
@@ -72,7 +74,8 @@ export interface ConversationsApi {
     image(key: string): Promise<string | null>;
   };
   edit: {
-    apply(id: string, field: EditField, value: boolean | string | null): Promise<{ ok: boolean; queued?: boolean; err?: string }>;
+    /** One edit; `more` are further edits of the same id, saved with it in one go (a new tag's name and colour). */
+    apply(id: string, field: EditField, value: EditValue, more?: { field: EditField; value: EditValue }[]): Promise<{ ok: boolean; queued?: boolean; err?: string }>;
   };
   sync: {
     status(): Promise<SyncStatus>;

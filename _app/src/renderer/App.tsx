@@ -5,6 +5,7 @@ import { Detail } from "./features/Detail";
 import { ContextMenu, SearchResults, ShortcutOverlay, SyncPopover, Toasts, Welcome, copyResumeCommand } from "./features/Overlays";
 import { AddWorkspaceSheet, DisconnectWorkspaceSheet, RenameWorkspaceSheet, SignInSheet, SwitchingOverlay, switchWorkspace } from "./features/Workspaces";
 import { useStore } from "./lib/store";
+import { TagMenu, TagPicker } from "./features/Tags";
 import { api } from "./lib/api";
 import { isBack, isDelete, mod, modKey } from "./lib/keys";
 
@@ -200,6 +201,8 @@ export function App() {
       <SearchResults />
       <SyncPopover />
       <ContextMenu />
+      <TagPicker />
+      <TagMenu />
       <Toasts />
       <AddWorkspaceSheet />
       <RenameWorkspaceSheet />

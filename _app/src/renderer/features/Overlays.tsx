@@ -417,6 +417,8 @@ export function ContextMenu() {
     { label: "Copy chat link", icon: "copy", run: () => copyChatLink(row.id, row.title) },
     { label: row.pinned ? "Unpin" : "Pin", icon: row.pinned ? "pin-off" : "pin", key: "Ctrl+D", run: () => void s.togglePin(row.id) },
     { label: "Rename…", icon: "pencil", key: "F2", run: () => useStore.setState({ renaming: row.id }) },
+    // The picker opens beside the menu, level with this item.
+    { label: "Tags…", icon: "tag", key: "T", run: () => useStore.setState({ tagPicker: { chatId: row.id, x: x + 304, y: y + tagsTop, tags: row.tags } }) },
     { sep: true },
     ...(row.cwd && atPc
       ? [
@@ -436,6 +438,9 @@ export function ContextMenu() {
   const actionable = items.filter((x): x is Exclude<(typeof items)[number], { sep: true }> => !("sep" in x));
   const x = Math.min(menu.x, window.innerWidth - 316);
   const y = Math.min(menu.y, window.innerHeight - (actionable.length * 28 + (items.length - actionable.length) * 9 + 16));
+  // Where "Tags…" sits in the menu (5 px padding, 28 px items, 9 px separators), less the picker's search field.
+  const tagsAt = items.findIndex((it) => "label" in it && it.label === "Tags…");
+  const tagsTop = 5 + items.slice(0, tagsAt).reduce((h, it) => h + ("sep" in it ? 9 : 28), 0) - 42;
   return (
     <div
       className="menu context"
@@ -444,7 +449,15 @@ export function ContextMenu() {
       tabIndex={-1}
       style={{ left: x, top: y }}
       onKeyDown={(e) => {
+        // The menu's keys are its own, not the app's shortcuts for the selected chat.
+        e.stopPropagation();
         if (e.key === "Escape") close();
+        if (e.key.toLowerCase() === "t" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          // Not typed into the picker's search, which takes the focus at once.
+          e.preventDefault();
+          actionable.find((it) => it.label === "Tags…")?.run();
+          close();
+        }
         if (e.key === "ArrowDown") setActive((a) => (a + 1) % actionable.length);
         if (e.key === "ArrowUp") setActive((a) => (a - 1 + actionable.length) % actionable.length);
         if (e.key === "Enter") {

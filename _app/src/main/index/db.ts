@@ -13,9 +13,17 @@ export function openDb(file: string, { readOnly = false } = {}): DatabaseSync {
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA synchronous = NORMAL");
     migrate(db);
+    addTags(db);
   }
   db.exec("PRAGMA foreign_keys = OFF");
   return db;
+}
+
+/** Tags came after schema 5: added in place, as the rest of the index needn't be rebuilt for them. */
+function addTags(db: DatabaseSync) {
+  const cols = db.prepare("PRAGMA table_info(edits)").all() as { name: string }[];
+  if (cols.length && !cols.some((c) => c.name === "tags")) db.exec("ALTER TABLE edits ADD COLUMN tags TEXT");
+  db.exec("CREATE TABLE IF NOT EXISTS tag_defs (id TEXT PRIMARY KEY, name TEXT, color TEXT, deleted INTEGER)");
 }
 
 function migrate(db: DatabaseSync) {
@@ -102,7 +110,15 @@ function migrate(db: DatabaseSync) {
       title TEXT,
       archived INTEGER,
       deleted INTEGER,
-      app INTEGER
+      app INTEGER,
+      tags TEXT
+    );
+
+    CREATE TABLE tag_defs (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      color TEXT,
+      deleted INTEGER
     );
 
     CREATE TABLE local_state (

@@ -329,8 +329,16 @@ export class Indexer {
     const edits = readEdits(this.opts.repoDir);
     tx(this.db, () => {
       this.db.exec("DELETE FROM edits");
-      const ins = this.db.prepare("INSERT INTO edits (conversation_id, pinned, title, archived, deleted, app) VALUES (?, ?, ?, ?, ?, ?)");
-      for (const [id, e] of edits) ins.run(id, e.pinned === undefined ? null : e.pinned ? 1 : 0, e.title ?? null, e.archived === undefined ? null : e.archived ? 1 : 0, e.deleted ? 1 : 0, (e as { app?: boolean }).app ? 1 : 0);
+      this.db.exec("DELETE FROM tag_defs");
+      const ins = this.db.prepare("INSERT INTO edits (conversation_id, pinned, title, archived, deleted, app, tags) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      const insTag = this.db.prepare("INSERT INTO tag_defs (id, name, color, deleted) VALUES (?, ?, ?, ?)");
+      for (const [id, e] of edits) {
+        // A tag's own record (its name, colour, deletion), not a conversation's.
+        if (e.tagName !== undefined || e.tagColor !== undefined || e.tagDeleted !== undefined) insTag.run(id, e.tagName ?? null, e.tagColor ?? null, e.tagDeleted ? 1 : 0);
+        // (Both, should an id ever carry both: a conversation's own edits are never hidden.)
+        if (e.pinned === undefined && e.title === undefined && e.archived === undefined && e.deleted === undefined && e.app === undefined && e.tags === undefined) continue;
+        ins.run(id, e.pinned === undefined ? null : e.pinned ? 1 : 0, e.title ?? null, e.archived === undefined ? null : e.archived ? 1 : 0, e.deleted ? 1 : 0, e.app ? 1 : 0, e.tags?.length ? JSON.stringify(e.tags) : null);
+      }
       // A chat another PC's app marked as its own after this PC left it out:
       // forget the "left out" record so the next scan reads it again.
       this.db.exec("DELETE FROM conversations WHERE item_count = -1 AND id IN (SELECT conversation_id FROM edits WHERE app = 1)");

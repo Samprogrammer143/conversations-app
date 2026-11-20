@@ -13,10 +13,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AlertWatcher, type AlertWhy } from "./alert";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, powerSaveBlocker, session as electronSession, shell, Tray, type IpcMainInvokeEvent } from "electron";
-import type { EditField } from "../shared/api";
+import type { EditField, EditValue } from "../shared/api";
 import type { AppInfo, Attachment, ListQuery, Settings } from "../shared/types";
 import { IndexService } from "./index/service";
-import { chatForRef, conversationDetail, deviceSummaries, itemsPage, listConversations, markSeen, search, sidebarData, type PendingEdits, type QueryContext } from "./index/queries";
+import { chatForRef, storedEdits, conversationDetail, deviceSummaries, itemsPage, listConversations, markSeen, search, sidebarData, type PendingEdits, type QueryContext } from "./index/queries";
 import { readDevices } from "./sync/repo-read";
 import { SyncScheduler } from "./sync/scheduler";
 import { detectEngineVersion, runEngineSerial } from "./sync/engine-bridge";
@@ -38,7 +38,7 @@ import { folderForTranscript } from "./resume-folder";
 import { displayRemote } from "./remote-display";
 import { isAgentId } from "./chat/agents";
 import { checkEdit, isDecision, isEffort, isModelName, isPermissionMode, isRequestId, isUuid } from "./validate";
-import { EditsOverlay } from "./edits-overlay";
+import { EditsOverlay, type Overlay } from "./edits-overlay";
 import { StartupQueue } from "./startup-queue";
 import { cleanStages, writeRunningMark } from "../shell/stages";
 import { log, logPath } from "./log";
@@ -229,7 +229,11 @@ function quickWrite(what: string, fn: () => void, retries = 2) {
 }
 let scheduler: SyncScheduler;
 
-const ctx = (): QueryContext => ({ thisMachine: thisMachine(), now: Date.now(), running: chat.runningIds(), pending });
+const ctx = (): QueryContext => {
+  // Overlaid edits the index has caught up with stop masking it (and a later change from another PC).
+  if (index.ready && overlay.pending.size) overlay.settleMatching((id) => storedEdits(index.db, id) as Overlay);
+  return { thisMachine: thisMachine(), now: Date.now(), running: chat.runningIds(), pending };
+};
 const devices = () => (index.ready ? deviceSummaries(index.db, ctx(), readDevices(repoDir())) : []);
 // (Downloads, the Desktop or home is never a repository's folder, however it got here. Chats
 // grouped by the folder itself, "folder:…", are in that folder.)
@@ -618,9 +622,23 @@ const EDIT_TEXT: Record<EditField, (v: unknown) => string> = {
   title: () => "Renamed",
   archived: (v) => (v ? "Archived" : "Unarchived"),
   deleted: (v) => (v ? "Deleted" : "Restored"),
+  tags: () => "Tagged",
+  tagName: () => "Named a tag",
+  tagColor: () => "Recoloured a tag",
+  tagDeleted: (v) => (v ? "Deleted a tag" : "Restored a tag"),
 };
 
-async function applyEdit(id: string, field: EditField, value: boolean | string | null) {
+async function applyEdit(id: string, field: EditField, value: EditValue, more: { field: EditField; value: EditValue }[] = []) {
+  overlay.begin(id);
+  try {
+    return await saveEdits(id, [{ field, value }, ...more]);
+  } finally {
+    overlay.end(id);
+  }
+}
+
+async function saveEdits(id: string, edits: { field: EditField; value: EditValue }[]) {
+  const [{ field, value }] = edits;
   let releasedAt = 0;
   if (field === "deleted" && value === true) {
     // Never delete under a writer: Claude would recreate the file a moment later.
@@ -632,12 +650,23 @@ async function applyEdit(id: string, field: EditField, value: boolean | string |
     releasedAt = Date.now();
   }
   // Shown at once; GitHub catches up in the background. Taken back if the engine refuses it.
-  const before = overlay.apply(id, field, value);
+  const befores = edits.map((e) => ({ field: e.field, before: overlay.apply(id, e.field, e.value) }));
+  const rollback = () => {
+    for (const b of befores.reverse()) overlay.rollback(id, b.field, b.before);
+  };
   broadcast("index-changed", [id]);
-  if ((await detectEngineVersion()) < 3) return { ok: true, queued: true, err: `Saved on this ${PC}; the sync engine on this ${PC} needs its update to share it` };
+  let engine = await detectEngineVersion();
+  // The engine updates by itself while the app runs: look again before refusing.
+  if (engine < 4 && edits.some((e) => e.field.startsWith("tag"))) engine = await detectEngineVersion(true);
+  if (engine < 4 && edits.some((e) => e.field.startsWith("tag"))) {
+    rollback();
+    broadcast("index-changed", [id]);
+    return { ok: false, err: `Tags need the sync engine's update on this ${PC}. It updates by itself within ten minutes; try again then.` };
+  }
+  if (engine < 3) return { ok: true, queued: true, err: `Saved on this ${PC}; the sync engine on this ${PC} needs its update to share it` };
   const deleting = field === "deleted" && value === true;
   // Writes up to now were the app's own (it has just closed its session): they don't stop the delete.
-  const args = ["edit", "--json", "--ops", JSON.stringify([{ session: id, field, value }]), ...(deleting ? ["--written-by", String(releasedAt)] : [])];
+  const args = ["edit", "--json", "--ops", JSON.stringify(edits.map((e) => ({ session: id, field: e.field, value: e.value }))), ...(deleting ? ["--written-by", String(releasedAt)] : [])];
   let r = await runEngineSerial<{ ok: boolean; queued?: boolean; pushed?: boolean; err?: string; code?: string }>(args);
   // The app's own session for it was just closed: its Claude Code can take a moment to exit.
   for (let i = 0; deleting && !r.ok && r.json?.code === "live" && i < 8; i++) {
@@ -645,7 +674,7 @@ async function applyEdit(id: string, field: EditField, value: boolean | string |
     r = await runEngineSerial(args);
   }
   if (!r.ok) {
-    overlay.rollback(id, field, before);
+    rollback();
     broadcast("index-changed", [id]);
     return { ok: false, err: r.json?.err ?? r.stderr.split("\n")[0] ?? "The change couldn't be saved" };
   }
@@ -991,11 +1020,24 @@ function registerIpc() {
   });
   handle("list:image", (key: unknown) => (typeof key === "string" && key.length <= 4000 ? index.image(key) : null));
 
-  handle("edit:apply", (id: unknown, field: unknown, value: unknown) => {
+  handle("edit:apply", (id: unknown, field: unknown, value: unknown, more?: unknown) => {
     if (!isUuid(id)) return { ok: false, err: BAD_ID };
     const edit = checkEdit(field, value);
     if (!edit) return { ok: false, err: "That change isn't valid" };
-    return applyEdit(id, edit.field, edit.value);
+    // A tag's own fields go under a tag's id, never a conversation's (its edits would be read as a tag's).
+    const tagRecord = edit.field.startsWith("tag") && edit.field !== "tags";
+    if (tagRecord && index.ready && index.db.prepare("SELECT 1 FROM conversations WHERE id = ?").get(id)) return { ok: false, err: "That change isn't valid" };
+    // Further edits of the same id, saved in the same go: only a tag's own fields (a new tag's name and colour).
+    const rest: { field: EditField; value: EditValue }[] = [];
+    if (more !== undefined && more !== null) {
+      if (!Array.isArray(more) || more.length > 3) return { ok: false, err: "That change isn't valid" };
+      for (const m of more as { field?: unknown; value?: unknown }[]) {
+        const e = checkEdit(m?.field, m?.value);
+        if (!e || !e.field.startsWith("tag") || !edit.field.startsWith("tag") || e.field === "tags" || edit.field === "tags") return { ok: false, err: "That change isn't valid" };
+        rest.push(e);
+      }
+    }
+    return applyEdit(id, edit.field, edit.value, rest);
   });
 
   handle("sync:status", () => scheduler.status());
