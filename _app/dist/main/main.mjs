@@ -1550,6 +1550,16 @@ import { EventEmitter as EventEmitter2 } from "node:events";
 
 // src/main/validate.ts
 var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function openableSignIn(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (u.protocol === "https:") return u.href;
+  return u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname) ? u.href : null;
+}
 var isUuid = (v) => typeof v === "string" && UUID.test(v);
 var isRequestId = (v) => typeof v === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(v);
 var isModelName = (v) => typeof v === "string" && /^[A-Za-z0-9._:[\]-]{1,80}$/.test(v);
@@ -8196,10 +8206,10 @@ function registerIpc() {
     };
     const r = await chat.mcpAction(rawId, name, action, chatFolder(rawId, null, null).cwd, startWith, url);
     if (action === "signin" && r.ok && r.url) {
-      const secure = /^https:\/\//.test(r.url);
-      if (secure) void shell2.openExternal(r.url).catch(() => {
+      const page = openableSignIn(r.url);
+      if (page) void shell2.openExternal(page).catch(() => {
       });
-      return { ...r, opened: secure };
+      return { ...r, opened: !!page };
     }
     return r;
   });

@@ -8,6 +8,22 @@ import { TAG_COLORS } from "../shared/types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * A sign-in page the app may open in the browser: https, or plain http only on this PC
+ * itself (an MCP server running locally, such as http://localhost:8080). Returns the
+ * address as parsed (what was checked is what opens), or null.
+ */
+export function openableSignIn(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (u.protocol === "https:") return u.href;
+  return u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname) ? u.href : null;
+}
+
 /** A conversation (session) id. */
 export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
 

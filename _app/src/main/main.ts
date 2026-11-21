@@ -37,7 +37,7 @@ import { NEEDS_FOLDER, NO_FOLDER, NOT_HERE, OPEN_ON_THIS_PC } from "./handover";
 import { folderForTranscript } from "./resume-folder";
 import { displayRemote } from "./remote-display";
 import { isAgentId } from "./chat/agents";
-import { checkEdit, isDecision, isEffort, isModelName, isPermissionMode, isRequestId, isUuid } from "./validate";
+import { checkEdit, isDecision, isEffort, isModelName, openableSignIn, isPermissionMode, isRequestId, isUuid } from "./validate";
 import { EditsOverlay, type Overlay } from "./edits-overlay";
 import { StartupQueue } from "./startup-queue";
 import { cleanStages, writeRunningMark } from "../shell/stages";
@@ -1201,11 +1201,11 @@ function registerIpc() {
       permissionMode: isPermissionMode(opts?.permissionMode) ? opts.permissionMode : settings.get().defaultPermissionMode,
     };
     const r = await chat.mcpAction(rawId, name, action as McpAction, chatFolder(rawId, null, null).cwd, startWith, url);
-    // The provider's sign-in page opens in the browser (a secure page only).
+    // The provider's sign-in page opens in the browser: a secure page, or one on this PC (a local server's own).
     if (action === "signin" && r.ok && r.url) {
-      const secure = /^https:\/\//.test(r.url);
-      if (secure) void shell.openExternal(r.url).catch(() => {});
-      return { ...r, opened: secure };
+      const page = openableSignIn(r.url);
+      if (page) void shell.openExternal(page).catch(() => {});
+      return { ...r, opened: !!page };
     }
     return r;
   });

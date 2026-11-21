@@ -279,9 +279,10 @@ export function McpPanel({
     else await load();
   };
 
+  // Through the app (the browser's clipboard refuses when the page isn't focused).
   const copyLink = async (url: string) => {
     try {
-      await navigator.clipboard.writeText(url);
+      await api.app.copyText(url);
       toast({ text: "Sign-in link copied", icon: "check" });
     } catch {
       toast({ text: "Couldn't copy the link", icon: "alert" });

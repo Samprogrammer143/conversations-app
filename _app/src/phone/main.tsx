@@ -15,7 +15,7 @@ import "./phone-fixes.css";
 import { makeApi } from "../shared/make-api";
 import { PhoneSession, type PhoneState, type WorkspaceLink } from "./session";
 import { Setup } from "./Setup";
-import { closeNewest, control, setSession } from "./state";
+import { closeNewest, control, copyText, setSession } from "./state";
 import { App as Android } from "@capacitor/app";
 import { savedToken, writeRequest } from "./github";
 import { PhoneListHeader, PhoneOverlays, SendsTo } from "./ui";
@@ -71,7 +71,10 @@ function pickPhotos(): Promise<{ images: { name: string; mediaType: string; data
 /** Requests the phone answers itself: there's no PC folder, file picker or window here. */
 const LOCAL: Record<string, (...args: any[]) => unknown> = {
   "app:openExternal": (url: string) => void (/^https?:\/\//.test(url) ? window.open(url, "_blank") : undefined),
-  "app:copyText": (text: string) => navigator.clipboard?.writeText(text),
+  // With the old way as a fallback; a copy that failed is an error, so nobody is told it worked.
+  "app:copyText": async (text: string) => {
+    if (!(await copyText(text))) throw new Error("Couldn't copy");
+  },
   "app:openPath": () => "Folders open on the PC",
   "app:pickFolder": () => null,
   "app:pickFiles": () => pickPhotos(),

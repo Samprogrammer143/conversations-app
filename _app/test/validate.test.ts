@@ -1,6 +1,6 @@
 // What the main process accepts from the window.
 import { describe, expect, it } from "vitest";
-import { checkEdit, isDecision, isModelName, isPermissionMode, isRequestId, isUuid } from "../src/main/validate";
+import { checkEdit, openableSignIn, isDecision, isModelName, isPermissionMode, isRequestId, isUuid } from "../src/main/validate";
 import { DEFAULT_SETTINGS, sanitizeSettingsPatch } from "../src/main/settings";
 
 describe("ids and names", () => {
@@ -73,5 +73,21 @@ describe("settings from the window", () => {
 
   it("accepts every default", () => {
     expect(sanitizeSettingsPatch(DEFAULT_SETTINGS)).toEqual({ patch: DEFAULT_SETTINGS, rejected: [] });
+  });
+});
+
+describe("sign-in pages the app opens", () => {
+  it("opens https pages, and plain http only on this PC", () => {
+    expect(openableSignIn("https://accounts.google.com/o/oauth2/auth?x=1")).toBe("https://accounts.google.com/o/oauth2/auth?x=1");
+    expect(openableSignIn("http://localhost:8080/authorize?client_id=a")).toBe("http://localhost:8080/authorize?client_id=a");
+    expect(openableSignIn(" HTTP://LOCALHOST:8080/a")).toBe("http://localhost:8080/a");
+    expect(openableSignIn("http://localhost@evil.com/a")).toBeNull();
+    expect(openableSignIn("http://0.0.0.0:8080/a")).toBeNull();
+    expect(openableSignIn("http://127.0.0.1:8080/authorize")).not.toBeNull();
+    expect(openableSignIn("http://[::1]:8080/authorize")).not.toBeNull();
+    expect(openableSignIn("http://example.com/authorize")).toBeNull();
+    expect(openableSignIn("http://localhost.evil.com/authorize")).toBeNull();
+    expect(openableSignIn("file:///C:/x")).toBeNull();
+    expect(openableSignIn("javascript:alert(1)")).toBeNull();
   });
 });
